@@ -1,16 +1,20 @@
 ---
-title: PROJECT_NAME Docs
+title: imgsrv Docs
 slug: /
-description: Starting point for PROJECT_NAME documentation.
+description: Documentation for the imgsrv image artifact service.
 ---
 
-# PROJECT_NAME Docs
+# imgsrv Docs
 
-This site is the starting point for `PROJECT_NAME` documentation.
+`imgsrv` is an early-stage image artifact service for operational teams working
+with disk and VM images outside cloud-native container registries.
 
-Replace this page with:
+## Current Documents
 
-- `PROJECT_SUMMARY`
-- `QUICKSTART_STEPS`
-- `GUIDES_AND_REFERENCE_LINKS`
-- `SUPPORT_AND_CONTACT_PATHS`
+- [v0 design](./design.md): temporary working design for the first prototype
+
+## Repository Links
+
+- [README](https://github.com/meigma/imgsrv#readme)
+- [Contributing](https://github.com/meigma/imgsrv/blob/master/CONTRIBUTING.md)
+- [Security](https://github.com/meigma/imgsrv/blob/master/SECURITY.md)

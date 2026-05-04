@@ -1,75 +1,81 @@
-# PROJECT_NAME
+# imgsrv
 
-> Template note: replace every `ALL_CAPS` placeholder in this file before publishing or sharing the repository.
+`imgsrv` is an early-stage Go service for storing, cataloging, and serving disk
+and VM image artifacts through a native HTTP API.
 
-`PROJECT_NAME` is `PROJECT_SUMMARY`.
-It is intended for `PRIMARY_USE_CASE` and is maintained by `AUTHOR_NAME` or `ORGANIZATION_NAME`.
+The v0 prototype is intended to prove verified content-addressed uploads,
+immutable published image versions, aliases, and proxied downloads backed by
+PostgreSQL and Garage. The service implementation has not landed yet; the repo
+currently contains the project scaffold and working design document.
 
 ## Quick Start
 
-Replace this section with the shortest working path for a new user.
+Current repository commands exercise the documentation and scaffold only.
 
 ### Prerequisites
 
-- `REPLACE_ME_RUNTIME_OR_LANGUAGE`
-- `REPLACE_ME_REQUIRED_TOOLING`
-- `REPLACE_ME_EXTERNAL_DEPENDENCIES`
+- Node.js 22, matching [.nvmrc](.nvmrc)
+- npm
+- Moon
+- uv, for repository setup automation
+- gh, authenticated with access to `meigma/imgsrv`
 
-### Install
-
-```sh
-REPLACE_ME_INSTALL_COMMAND
-```
-
-### Run
+### Setup
 
 ```sh
-REPLACE_ME_START_COMMAND
+npm --prefix docs ci
 ```
 
-## Usage
-
-Replace this section with the most common workflow for the repository.
+### Verify
 
 ```sh
-REPLACE_ME_PRIMARY_COMMAND_OR_ENTRYPOINT
+moon ci --summary minimal
 ```
 
-Expected result:
+### Run Docs Locally
 
-- `REPLACE_ME_EXPECTED_OUTPUT_OR_BEHAVIOR`
+```sh
+npm --prefix docs run start
+```
 
-## Configuration
+## Planned Service Shape
 
-Document the minimum configuration needed to use the project.
+The service is planned as a single Go binary using standard-library HTTP,
+PostgreSQL for the control plane, Garage through its S3-compatible API for
+object storage, `log/slog` for logging, OpenTelemetry metrics with a Prometheus
+endpoint, and a hand-written OpenAPI v3 specification.
 
-- `REPLACE_ME_ENV_VAR_NAME`: `REPLACE_ME_ENV_VAR_DESCRIPTION`
-- `REPLACE_ME_CONFIG_FILE`: `REPLACE_ME_CONFIG_FILE_PURPOSE`
+See [docs/docs/design.md](docs/docs/design.md) for the current working design.
 
 ## Documentation
 
-- Main docs: `REPLACE_ME_DOCS_URL_OR_PATH`
-- Examples: `REPLACE_ME_EXAMPLES_URL_OR_PATH`
-- Architecture notes: `REPLACE_ME_ARCHITECTURE_DOC_URL_OR_PATH`
+- Docs home: [docs/docs/index.md](docs/docs/index.md)
+- Working v0 design: [docs/docs/design.md](docs/docs/design.md)
+- Repository settings manifest: [.github/repository-settings.toml](.github/repository-settings.toml)
 
 ## Support
 
-Use `REPLACE_ME_SUPPORT_CHANNEL` for questions and general support.
-Use `REPLACE_ME_BUG_REPORT_CHANNEL` for non-security bug reports.
+Use [GitHub Discussions](https://github.com/meigma/imgsrv/discussions) for
+questions and design discussion.
+Use [GitHub Issues](https://github.com/meigma/imgsrv/issues) for non-security
+bug reports and scoped feature requests.
 Do not report vulnerabilities in public channels. See [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines, local setup expectations, and pull request workflow.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines, local setup
+expectations, and pull request workflow.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for supported versions and the private vulnerability reporting path.
+See [SECURITY.md](SECURITY.md) for supported versions and private vulnerability
+reporting.
 
 ## License
 
-Replace this section with the actual license name and add the corresponding `LICENSE` file to the repository.
+`imgsrv` is dual-licensed under either:
 
-Example:
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
 
-`PROJECT_NAME` is licensed under the `REPLACE_ME_LICENSE_NAME`.
+at your option.

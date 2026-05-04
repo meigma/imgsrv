@@ -1,17 +1,17 @@
 layer: 'scaffolding'
 
 project:
-  title: 'Repository template'
-  description: 'Workspace-level configuration, shared automation, and template defaults.'
-  owner: 'REPLACE_ME_OWNER'
+  title: 'imgsrv'
+  description: 'Workspace-level configuration and shared automation for imgsrv.'
+  owner: 'meigma'
   maintainers:
-    - 'REPLACE_ME_MAINTAINER'
+    - 'meigma maintainers'
 
 workspace:
   inheritedTasks:
     include: []
 
-# Add repository-wide maintenance tasks here as the template grows.
+# Add repository-wide maintenance tasks here as imgsrv grows.
 # Examples:
 #
 # tasks:

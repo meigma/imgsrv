@@ -1,6 +1,6 @@
-# Shared Moon workspace configuration for the repository template.
+# Shared Moon workspace configuration for imgsrv.
 # Keep the current projects explicit, then uncomment the discovery patterns
-# below as the template grows into apps, packages, services, or tools.
+# below as imgsrv grows into apps, packages, services, or tools.
 
 projects:
   globs: []
@@ -24,7 +24,7 @@ projects:
 defaultProject: 'docs'
 
 vcs:
-  defaultBranch: 'main'
+  defaultBranch: 'master'
   provider: 'github'
 
 # Uncomment when you want Moon to aggregate project owners into CODEOWNERS.
