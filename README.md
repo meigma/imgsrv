@@ -54,6 +54,9 @@ verbosity is controlled with `--verbosity`. Prometheus metrics are served from
 `127.0.0.1:9464/metrics` by default and can be disabled with
 `--metrics-listen ""`.
 
+Set `--postgres-url` or `IMGSRV_POSTGRES_URL` to open PostgreSQL at startup and
+apply embedded Goose migrations before the HTTP listener starts.
+
 ## Planned Service Shape
 
 The service is planned as a single Go binary using standard-library HTTP,

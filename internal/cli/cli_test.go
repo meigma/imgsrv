@@ -39,6 +39,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"IMGSRV_VERBOSITY":        "debug",
 				"IMGSRV_METRICS_LISTEN":   "127.0.0.1:9091",
 				"IMGSRV_METRICS_PATH":     "/internal/metrics",
+				"IMGSRV_POSTGRES_URL":     "postgres://env",
 				"IMGSRV_SHUTDOWN_TIMEOUT": "3s",
 			},
 			want: app.Config{
@@ -47,6 +48,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				Verbosity:       "debug",
 				MetricsListen:   "127.0.0.1:9091",
 				MetricsPath:     "/internal/metrics",
+				PostgresURL:     "postgres://env",
 				ShutdownTimeout: 3 * time.Second,
 			},
 		},
@@ -58,6 +60,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"IMGSRV_VERBOSITY":        "debug",
 				"IMGSRV_METRICS_LISTEN":   "127.0.0.1:9091",
 				"IMGSRV_METRICS_PATH":     "/internal/metrics",
+				"IMGSRV_POSTGRES_URL":     "postgres://env",
 				"IMGSRV_SHUTDOWN_TIMEOUT": "3s",
 			},
 			args: []string{
@@ -66,6 +69,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"--verbosity=warn",
 				"--metrics-listen=",
 				"--metrics-path=/scrape",
+				"--postgres-url=postgres://flag",
 				"--shutdown-timeout=5s",
 			},
 			want: app.Config{
@@ -74,6 +78,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				Verbosity:       "warn",
 				MetricsListen:   "",
 				MetricsPath:     "/scrape",
+				PostgresURL:     "postgres://flag",
 				ShutdownTimeout: 5 * time.Second,
 			},
 		},
@@ -152,6 +157,7 @@ func TestExecuteContextPrintsHelpWithoutStartingServer(t *testing.T) {
 	assert.Contains(t, stdout.String(), "--verbosity")
 	assert.Contains(t, stdout.String(), "--metrics-listen")
 	assert.Contains(t, stdout.String(), "--metrics-path")
+	assert.Contains(t, stdout.String(), "--postgres-url")
 	assert.NotContains(t, stdout.String(), "--log-level")
 	assert.Empty(t, stderr.String())
 }
@@ -183,6 +189,7 @@ func unsetConfigEnv(t *testing.T) {
 		"IMGSRV_VERBOSITY",
 		"IMGSRV_METRICS_LISTEN",
 		"IMGSRV_METRICS_PATH",
+		"IMGSRV_POSTGRES_URL",
 		"IMGSRV_SHUTDOWN_TIMEOUT",
 	} {
 		oldValue, hadValue := os.LookupEnv(key)
