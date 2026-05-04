@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/meigma/imgsrv/internal/httpapi"
+	"github.com/meigma/imgsrv/internal/store/postgres"
 	"github.com/meigma/imgsrv/internal/telemetry"
 )
 
@@ -32,6 +33,7 @@ type Server struct {
 	metricsServer   *http.Server
 	telemetry       *telemetry.Telemetry
 	logger          *slog.Logger
+	store           *postgres.Store
 	shutdownTimeout time.Duration
 }
 
@@ -44,12 +46,29 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
-	server, err := NewServer(cfg, Dependencies{Logger: logger})
-	if err != nil {
-		return err
+	var store *postgres.Store
+	if cfg.PostgresURL != "" {
+		store, err = postgres.Open(ctx, postgres.Config{URL: cfg.PostgresURL})
+		if err != nil {
+			return err
+		}
 	}
 
-	return server.Run(ctx)
+	server, err := NewServer(cfg, Dependencies{Logger: logger})
+	if err != nil {
+		if store != nil {
+			return joinError(err, store.Close())
+		}
+		return err
+	}
+	server.store = store
+
+	runErr := server.Run(ctx)
+	if store != nil {
+		runErr = joinError(runErr, store.Close())
+	}
+
+	return runErr
 }
 
 // NewServer constructs an HTTP server from runtime configuration and adapters.
@@ -190,6 +209,9 @@ func (s *Server) shutdownServers(
 	}
 	if err := s.telemetry.Shutdown(shutdownCtx); err != nil {
 		joined = joinError(joined, err)
+	}
+	if err := s.store.Close(); err != nil {
+		joined = joinError(joined, fmt.Errorf("close postgres store: %w", err))
 	}
 	if joined != nil {
 		return joined

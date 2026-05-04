@@ -28,6 +28,10 @@ type Config struct {
 	// MetricsPath is the HTTP path that serves Prometheus metrics.
 	MetricsPath string
 
+	// PostgresURL is the PostgreSQL connection URL used for the control plane.
+	// Empty skips database startup for operational-only runs.
+	PostgresURL string
+
 	// ShutdownTimeout bounds graceful HTTP server shutdown.
 	ShutdownTimeout time.Duration
 }

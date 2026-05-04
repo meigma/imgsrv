@@ -18,6 +18,7 @@ fileGroups:
   go:
     - 'cmd/**/*.go'
     - 'internal/**/*.go'
+    - 'internal/**/*.sql'
     - 'go.mod'
     - 'go.sum'
   lintConfig:
