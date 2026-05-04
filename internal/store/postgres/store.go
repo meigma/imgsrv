@@ -8,8 +8,16 @@ import (
 	"fmt"
 	"io/fs"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // register the database/sql pgx driver
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+
+	"github.com/meigma/imgsrv/internal/auth"
+	"github.com/meigma/imgsrv/internal/catalog"
+	postgresauth "github.com/meigma/imgsrv/internal/store/postgres/auth"
+	postgrescatalog "github.com/meigma/imgsrv/internal/store/postgres/catalog"
+	postgresuploads "github.com/meigma/imgsrv/internal/store/postgres/uploads"
+	"github.com/meigma/imgsrv/internal/uploads"
 )
 
 const (
@@ -30,7 +38,10 @@ type Config struct {
 
 // Store owns the Postgres database connection.
 type Store struct {
-	db *sql.DB
+	auth    auth.Store
+	pool    *pgxpool.Pool
+	catalog catalog.Store
+	uploads uploads.Store
 }
 
 // Open opens Postgres and applies embedded schema migrations.
@@ -39,20 +50,34 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 		return nil, errors.New("postgres url is required")
 	}
 
-	db, err := sql.Open(databaseDriverName, config.URL)
+	pool, err := pgxpool.New(ctx, config.URL)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres database: %w", err)
 	}
 
-	if err := db.PingContext(ctx); err != nil {
-		return nil, closeAfterError(db, fmt.Errorf("ping postgres database: %w", err))
+	if err := pool.Ping(ctx); err != nil {
+		return nil, closePoolAfterError(pool, fmt.Errorf("ping postgres database: %w", err))
 	}
 
-	if err := ApplyMigrations(ctx, db); err != nil {
-		return nil, closeAfterError(db, fmt.Errorf("apply database migrations: %w", err))
+	migrationDB := stdlib.OpenDBFromPool(pool)
+	if err := ApplyMigrations(ctx, migrationDB); err != nil {
+		return nil, closeMigrationAfterError(
+			pool,
+			migrationDB,
+			fmt.Errorf("apply database migrations: %w", err),
+		)
 	}
 
-	return &Store{db: db}, nil
+	if err := migrationDB.Close(); err != nil {
+		return nil, closePoolAfterError(pool, fmt.Errorf("close migration database: %w", err))
+	}
+
+	return &Store{
+		auth:    postgresauth.New(pool),
+		pool:    pool,
+		catalog: postgrescatalog.New(pool),
+		uploads: postgresuploads.New(pool),
+	}, nil
 }
 
 // ApplyMigrations applies all embedded Goose migrations to db.
@@ -77,23 +102,58 @@ func ApplyMigrations(ctx context.Context, db *sql.DB) error {
 
 // Close releases the Postgres database connection.
 func (store *Store) Close() error {
-	if store == nil || store.db == nil {
+	if store == nil || store.pool == nil {
 		return nil
 	}
 
-	err := store.db.Close()
-	store.db = nil
+	store.pool.Close()
+	store.pool = nil
+	store.auth = nil
+	store.catalog = nil
+	store.uploads = nil
 
-	return err
+	return nil
+}
+
+// Auth returns the API-token auth adapter.
+func (store *Store) Auth() auth.Store {
+	if store == nil {
+		return nil
+	}
+
+	return store.auth
+}
+
+// Catalog returns the image catalog adapter.
+func (store *Store) Catalog() catalog.Store {
+	if store == nil {
+		return nil
+	}
+
+	return store.catalog
+}
+
+// Uploads returns the upload and CAS ingest adapter.
+func (store *Store) Uploads() uploads.Store {
+	if store == nil {
+		return nil
+	}
+
+	return store.uploads
 }
 
 // SchemaVersion returns the current applied Goose schema version.
 func (store *Store) SchemaVersion(ctx context.Context) (int64, error) {
-	if store == nil || store.db == nil {
+	if store == nil || store.pool == nil {
 		return 0, errors.New("postgres store is not open")
 	}
 
-	provider, err := newMigrationProvider(store.db)
+	migrationDB := stdlib.OpenDBFromPool(store.pool)
+	defer func() {
+		_ = migrationDB.Close()
+	}()
+
+	provider, err := newMigrationProvider(migrationDB)
 	if err != nil {
 		return 0, err
 	}
@@ -154,10 +214,17 @@ func withMigrationLock(ctx context.Context, db *sql.DB, apply func() error) (err
 	return apply()
 }
 
-func closeAfterError(db *sql.DB, err error) error {
+func closePoolAfterError(pool *pgxpool.Pool, err error) error {
+	pool.Close()
+
+	return err
+}
+
+func closeMigrationAfterError(pool *pgxpool.Pool, db *sql.DB, err error) error {
 	if closeErr := db.Close(); closeErr != nil {
-		return errors.Join(err, fmt.Errorf("close postgres database: %w", closeErr))
+		err = errors.Join(err, fmt.Errorf("close migration database: %w", closeErr))
 	}
+	pool.Close()
 
 	return err
 }
