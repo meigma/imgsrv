@@ -5,17 +5,20 @@ and VM image artifacts through a native HTTP API.
 
 The v0 prototype is intended to prove verified content-addressed uploads,
 immutable published image versions, aliases, and proxied downloads backed by
-PostgreSQL and Garage. The service implementation has not landed yet; the repo
-currently contains the project scaffold and working design document.
+PostgreSQL and Garage. The initial service foundation is in place; the current
+implementation exposes operational health endpoints while the v0 API is built
+out in focused slices.
 
 ## Quick Start
 
-Current repository commands exercise the documentation and scaffold only.
+Current repository commands exercise the documentation site and initial Go
+service foundation.
 
 ### Prerequisites
 
 - Node.js 22, matching [.nvmrc](.nvmrc)
 - npm
+- Go 1.26
 - Moon
 - uv, for repository setup automation
 - gh, authenticated with access to `meigma/imgsrv`
@@ -30,6 +33,7 @@ npm --prefix docs ci
 
 ```sh
 moon ci --summary minimal
+go test ./...
 ```
 
 ### Run Docs Locally
@@ -37,6 +41,14 @@ moon ci --summary minimal
 ```sh
 npm --prefix docs run start
 ```
+
+### Run Service Locally
+
+```sh
+go run ./cmd/imgsrv --listen :8080
+```
+
+The initial service foundation exposes `GET /healthz` and `GET /readyz`.
 
 ## Planned Service Shape
 
