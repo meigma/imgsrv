@@ -1,0 +1,41 @@
+package uploads
+
+const sessionColumns = `id,
+	expected_digest,
+	expected_size_bytes,
+	state,
+	storage_upload_id,
+	staging_key,
+	media_type_hint,
+	filename_hint,
+	completed_at,
+	ingest_started_at,
+	ready_at,
+	failed_at,
+	aborted_at,
+	expires_at,
+	failure_message,
+	ready_blob_digest,
+	created_at,
+	updated_at`
+
+const partColumns = `upload_id,
+	part_number,
+	etag,
+	size_bytes,
+	uploaded_at,
+	updated_at`
+
+const ingestJobColumns = `id,
+	upload_id,
+	state,
+	attempt_count,
+	run_after,
+	locked_by,
+	locked_at,
+	started_at,
+	finished_at,
+	failure_message,
+	blob_digest,
+	created_at,
+	updated_at`
