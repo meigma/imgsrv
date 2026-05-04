@@ -57,12 +57,13 @@ Useful project commands:
 
 ```sh
 moon ci --summary minimal
+go test ./...
 npm --prefix docs run build
 npm --prefix docs run typecheck
 ```
 
-The Go service module has not been added yet. Add service build and test
-commands here when the first implementation slice lands.
+The Go service is built and tested through Moon's root `build` and `test`
+tasks.
 
 ## License
 

@@ -1,5 +1,4 @@
 # Active toolchains for imgsrv.
-# The current scaffold uses npm for the documentation site.
 
 javascript:
   packageManager: 'npm'
@@ -7,8 +6,12 @@ javascript:
 
 npm: {}
 
+proto:
+  version: '0.56.4'
+
 node:
   version: '22.22.2'
   syncVersionManagerConfig: 'nvm'
 
-# Add the Go toolchain here when the service module lands.
+go:
+  version: '1.26.2'
