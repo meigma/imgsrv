@@ -5,12 +5,17 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+
+	"github.com/meigma/imgsrv/internal/telemetry"
 )
 
 // Dependencies contains adapters used by the HTTP API.
 type Dependencies struct {
 	// Logger receives HTTP adapter logs. Nil selects a discarded logger.
 	Logger *slog.Logger
+
+	// Telemetry instruments HTTP requests. Nil disables OpenTelemetry wrapping.
+	Telemetry *telemetry.Telemetry
 
 	// Readiness reports whether the service can accept operational traffic.
 	Readiness ReadinessChecker
@@ -55,7 +60,7 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /healthz", api.healthz)
 	mux.HandleFunc("GET /readyz", api.readyz)
 
-	return Chain(mux)
+	return deps.Telemetry.WrapHTTPHandler(Chain(mux, logRequests(logger)))
 }
 
 func (a *api) healthz(w http.ResponseWriter, _ *http.Request) {

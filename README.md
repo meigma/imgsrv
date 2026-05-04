@@ -49,6 +49,10 @@ go run ./cmd/imgsrv --listen :8080
 ```
 
 The initial service foundation exposes `GET /healthz` and `GET /readyz`.
+Logs default to text output and can be switched to JSON with `--log-format json`;
+verbosity is controlled with `--verbosity`. Prometheus metrics are served from
+`127.0.0.1:9464/metrics` by default and can be disabled with
+`--metrics-listen ""`.
 
 ## Planned Service Shape
 
