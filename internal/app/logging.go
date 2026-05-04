@@ -8,12 +8,12 @@ import (
 )
 
 // NewLogger constructs a slog logger from runtime logging configuration.
-func NewLogger(w io.Writer, format string, level string) (*slog.Logger, error) {
+func NewLogger(w io.Writer, format string, verbosity string) (*slog.Logger, error) {
 	if w == nil {
 		w = io.Discard
 	}
 
-	slogLevel, err := parseLogLevel(level)
+	slogLevel, err := parseVerbosity(verbosity)
 	if err != nil {
 		return nil, err
 	}
@@ -29,8 +29,8 @@ func NewLogger(w io.Writer, format string, level string) (*slog.Logger, error) {
 	}
 }
 
-func parseLogLevel(level string) (slog.Level, error) {
-	switch strings.ToLower(level) {
+func parseVerbosity(verbosity string) (slog.Level, error) {
+	switch strings.ToLower(verbosity) {
 	case "debug":
 		return slog.LevelDebug, nil
 	case "info":
@@ -40,6 +40,6 @@ func parseLogLevel(level string) (slog.Level, error) {
 	case "error":
 		return slog.LevelError, nil
 	default:
-		return slog.LevelInfo, fmt.Errorf("unsupported log level %q", level)
+		return slog.LevelInfo, fmt.Errorf("unsupported verbosity %q", verbosity)
 	}
 }

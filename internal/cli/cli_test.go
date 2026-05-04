@@ -25,7 +25,9 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 			want: app.Config{
 				Listen:          ":8080",
 				LogFormat:       "text",
-				LogLevel:        "info",
+				Verbosity:       "info",
+				MetricsListen:   "127.0.0.1:9464",
+				MetricsPath:     "/metrics",
 				ShutdownTimeout: 10 * time.Second,
 			},
 		},
@@ -34,13 +36,17 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 			env: map[string]string{
 				"IMGSRV_LISTEN":           "127.0.0.1:9090",
 				"IMGSRV_LOG_FORMAT":       "json",
-				"IMGSRV_LOG_LEVEL":        "debug",
+				"IMGSRV_VERBOSITY":        "debug",
+				"IMGSRV_METRICS_LISTEN":   "127.0.0.1:9091",
+				"IMGSRV_METRICS_PATH":     "/internal/metrics",
 				"IMGSRV_SHUTDOWN_TIMEOUT": "3s",
 			},
 			want: app.Config{
 				Listen:          "127.0.0.1:9090",
 				LogFormat:       "json",
-				LogLevel:        "debug",
+				Verbosity:       "debug",
+				MetricsListen:   "127.0.0.1:9091",
+				MetricsPath:     "/internal/metrics",
 				ShutdownTimeout: 3 * time.Second,
 			},
 		},
@@ -49,19 +55,25 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 			env: map[string]string{
 				"IMGSRV_LISTEN":           "127.0.0.1:9090",
 				"IMGSRV_LOG_FORMAT":       "json",
-				"IMGSRV_LOG_LEVEL":        "debug",
+				"IMGSRV_VERBOSITY":        "debug",
+				"IMGSRV_METRICS_LISTEN":   "127.0.0.1:9091",
+				"IMGSRV_METRICS_PATH":     "/internal/metrics",
 				"IMGSRV_SHUTDOWN_TIMEOUT": "3s",
 			},
 			args: []string{
 				"--listen=127.0.0.1:7070",
 				"--log-format=text",
-				"--log-level=warn",
+				"--verbosity=warn",
+				"--metrics-listen=",
+				"--metrics-path=/scrape",
 				"--shutdown-timeout=5s",
 			},
 			want: app.Config{
 				Listen:          "127.0.0.1:7070",
 				LogFormat:       "text",
-				LogLevel:        "warn",
+				Verbosity:       "warn",
+				MetricsListen:   "",
+				MetricsPath:     "/scrape",
 				ShutdownTimeout: 5 * time.Second,
 			},
 		},
@@ -86,12 +98,38 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 func TestExecuteContextRejectsInvalidEnums(t *testing.T) {
 	unsetConfigEnv(t)
 
-	got, called, err := executeForConfig(t, []string{"--log-format=console"})
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "rejects invalid log format",
+			args: []string{"--log-format=console"},
+			want: "log-format",
+		},
+		{
+			name: "rejects invalid verbosity",
+			args: []string{"--verbosity=trace"},
+			want: "verbosity",
+		},
+		{
+			name: "does not support removed log-level flag",
+			args: []string{"--log-level=debug"},
+			want: "log-level",
+		},
+	}
 
-	require.Error(t, err)
-	assert.False(t, called, "runner should not start when CLI validation fails")
-	assert.Zero(t, got)
-	assert.Contains(t, err.Error(), "log-format")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, called, err := executeForConfig(t, tt.args)
+
+			require.Error(t, err)
+			assert.False(t, called, "runner should not start when CLI validation fails")
+			assert.Zero(t, got)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
 }
 
 func TestExecuteContextPrintsHelpWithoutStartingServer(t *testing.T) {
@@ -111,6 +149,10 @@ func TestExecuteContextPrintsHelpWithoutStartingServer(t *testing.T) {
 	assert.Contains(t, stdout.String(), "Usage: imgsrv")
 	assert.Contains(t, stdout.String(), "--listen")
 	assert.Contains(t, stdout.String(), "--log-format")
+	assert.Contains(t, stdout.String(), "--verbosity")
+	assert.Contains(t, stdout.String(), "--metrics-listen")
+	assert.Contains(t, stdout.String(), "--metrics-path")
+	assert.NotContains(t, stdout.String(), "--log-level")
 	assert.Empty(t, stderr.String())
 }
 
@@ -138,6 +180,9 @@ func unsetConfigEnv(t *testing.T) {
 		"IMGSRV_LISTEN",
 		"IMGSRV_LOG_FORMAT",
 		"IMGSRV_LOG_LEVEL",
+		"IMGSRV_VERBOSITY",
+		"IMGSRV_METRICS_LISTEN",
+		"IMGSRV_METRICS_PATH",
 		"IMGSRV_SHUTDOWN_TIMEOUT",
 	} {
 		oldValue, hadValue := os.LookupEnv(key)
