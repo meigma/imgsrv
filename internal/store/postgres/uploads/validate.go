@@ -9,6 +9,9 @@ import (
 )
 
 func validateCreateSessionParams(params domain.CreateSessionParams) error {
+	if err := validateUploadID(params.ID); err != nil {
+		return err
+	}
 	if err := domain.ValidateDigest(params.ExpectedDigest); err != nil {
 		return err
 	}
