@@ -71,3 +71,9 @@ docs/.docusaurus/
 .idea/
 .vscode/
 *.swp
+
+# Agent protocol
+.agent/
+.claude/
+.journal/
+.wt/
