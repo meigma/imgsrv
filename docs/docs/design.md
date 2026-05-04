@@ -1,4 +1,13 @@
+---
+title: imgsrv v0 Design
+description: Temporary working design for the v0 prototype.
+---
+
 # imgsrv v0 Design
+
+This is a temporary working document. It should be expanded into focused
+architecture documents after the prototype has taught us more about the real
+shape of the service.
 
 `imgsrv` is a distributed disk image store for operational teams working in
 non-cloud and on-prem infrastructure. Operators publish VM and disk image
