@@ -73,7 +73,7 @@ docs/.docusaurus/
 *.swp
 
 # Agent protocol
-.agent/
+.agents/
 .claude/
 .journal/
 .wt/
