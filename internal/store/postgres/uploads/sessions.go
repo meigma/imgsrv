@@ -22,7 +22,6 @@ func (store *Store) CreateSession(ctx context.Context, params domain.CreateSessi
 		return domain.Session{}, err
 	}
 
-	id := uuid.New()
 	session, err := scanSession(db.QueryRow(
 		ctx,
 		`INSERT INTO upload_sessions (
@@ -38,11 +37,11 @@ func (store *Store) CreateSession(ctx context.Context, params domain.CreateSessi
 		)
 		VALUES ($1, $2, $3, 'created', $4, $5, $6, $7, $8)
 		RETURNING `+sessionColumns,
-		id,
+		params.ID,
 		params.ExpectedDigest,
 		params.ExpectedSizeBytes,
 		params.StorageUploadID,
-		stagingKey(id),
+		domain.StagingKey(params.ID),
 		params.MediaTypeHint,
 		params.FilenameHint,
 		params.ExpiresAt,
@@ -290,8 +289,4 @@ func queueIngestJob(ctx context.Context, tx pgx.Tx, session domain.Session) (dom
 	}
 
 	return session, nil
-}
-
-func stagingKey(id uuid.UUID) string {
-	return "staging/uploads/" + id.String()
 }

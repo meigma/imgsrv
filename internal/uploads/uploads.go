@@ -11,7 +11,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const maxPartNumber = 10000
+const (
+	maxPartNumber       = 10000
+	stagingUploadPrefix = "staging/uploads/"
+)
 
 // Error identifies a category of upload failure.
 type Error string
@@ -45,6 +48,11 @@ type Store interface {
 	ClaimIngestJob(context.Context, ClaimIngestJobParams) (IngestJob, error)
 	SucceedIngestJob(context.Context, SucceedIngestJobParams) (IngestJob, error)
 	FailIngestJob(context.Context, FailIngestJobParams) (IngestJob, error)
+}
+
+// StagingKey returns the object-storage key for a staged upload session.
+func StagingKey(id uuid.UUID) string {
+	return stagingUploadPrefix + id.String()
 }
 
 // Digest identifies an expected or verified content blob.
@@ -229,6 +237,9 @@ type IngestJob struct {
 
 // CreateSessionParams creates durable upload state after object-storage upload initiation.
 type CreateSessionParams struct {
+	// ID is the caller-owned upload session identity used to derive the staging key.
+	ID uuid.UUID
+
 	// ExpectedDigest is the digest the uploaded bytes must verify against.
 	ExpectedDigest Digest
 

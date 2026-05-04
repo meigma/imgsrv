@@ -3,6 +3,7 @@ package uploads
 import (
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,6 +61,14 @@ func TestPartAndSizeValidation(t *testing.T) {
 	require.NoError(t, ValidateNonNegativeSize("size", 0))
 	require.NoError(t, ValidateNonNegativeSize("size", 1))
 	require.ErrorIs(t, ValidateNonNegativeSize("size", -1), ErrInvalid)
+}
+
+func TestStagingKey(t *testing.T) {
+	id := uuid.MustParse("11111111-2222-3333-4444-555555555555")
+
+	got := StagingKey(id)
+
+	assert.Equal(t, "staging/uploads/11111111-2222-3333-4444-555555555555", got)
 }
 
 func TestTextValidation(t *testing.T) {
