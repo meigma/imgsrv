@@ -65,6 +65,7 @@ tasks:
     command: 'go'
     args:
       - 'test'
+      - '-count=1'
       - '-tags=integration'
       - './internal/integration/...'
     toolchains: ['go']
