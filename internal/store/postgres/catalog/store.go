@@ -12,6 +12,7 @@ import (
 
 // Store persists image catalog operations in Postgres.
 type Store struct {
+	// pool is the pgx connection pool used for all catalog queries.
 	pool *pgxpool.Pool
 }
 
@@ -20,6 +21,8 @@ func New(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
+// catalogDB returns the underlying pgx pool, or an error when the store has
+// not been constructed with one.
 func (store *Store) catalogDB() (*pgxpool.Pool, error) {
 	if store == nil || store.pool == nil {
 		return nil, errors.New("postgres catalog store is not open")
@@ -28,6 +31,8 @@ func (store *Store) catalogDB() (*pgxpool.Pool, error) {
 	return store.pool, nil
 }
 
+// withTx runs apply inside a Postgres transaction, committing on success and
+// rolling back on any error returned by apply or by the commit itself.
 func (store *Store) withTx(ctx context.Context, apply func(pgx.Tx) error) error {
 	db, err := store.catalogDB()
 	if err != nil {

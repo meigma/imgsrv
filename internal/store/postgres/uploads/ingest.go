@@ -93,6 +93,8 @@ func (store *Store) FailIngestJob(ctx context.Context, params domain.FailIngestJ
 	return job, nil
 }
 
+// claimIngestJob atomically picks the oldest queued ingest job whose RunAfter
+// has elapsed, marks it running for workerID, and returns the updated row.
 func claimIngestJob(ctx context.Context, tx pgx.Tx, workerID string) (domain.IngestJob, error) {
 	return scanIngestJob(tx.QueryRow(
 		ctx,
@@ -119,6 +121,8 @@ func claimIngestJob(ctx context.Context, tx pgx.Tx, workerID string) (domain.Ing
 	))
 }
 
+// lockRunningJob row-locks the ingest job identified by jobID and returns it
+// only when the durable state is running.
 func lockRunningJob(ctx context.Context, tx pgx.Tx, jobID uuid.UUID) (domain.IngestJob, error) {
 	job, err := scanIngestJob(tx.QueryRow(
 		ctx,
@@ -138,6 +142,8 @@ func lockRunningJob(ctx context.Context, tx pgx.Tx, jobID uuid.UUID) (domain.Ing
 	return job, nil
 }
 
+// markSessionIngesting transitions an upload session from completed to
+// ingesting and returns ErrFailedPrecondition when no row matches.
 func markSessionIngesting(ctx context.Context, tx pgx.Tx, uploadID uuid.UUID) error {
 	tag, err := tx.Exec(
 		ctx,
@@ -159,6 +165,8 @@ func markSessionIngesting(ctx context.Context, tx pgx.Tx, uploadID uuid.UUID) er
 	return nil
 }
 
+// ensureCASBlob inserts the verified CAS blob row for params, treating an
+// existing record with the same digest as a no-op.
 func ensureCASBlob(ctx context.Context, tx pgx.Tx, params domain.SucceedIngestJobParams) error {
 	_, err := tx.Exec(
 		ctx,
@@ -174,6 +182,9 @@ func ensureCASBlob(ctx context.Context, tx pgx.Tx, params domain.SucceedIngestJo
 	return err
 }
 
+// markSessionReady transitions an ingesting upload session to ready when its
+// expected digest and size match the freshly verified CAS blob, and returns
+// ErrFailedPrecondition otherwise.
 func markSessionReady(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -211,6 +222,8 @@ func markSessionReady(
 	return nil
 }
 
+// markSessionFailed transitions an ingesting upload session to failed and
+// records failureMessage, returning ErrFailedPrecondition when no row matches.
 func markSessionFailed(ctx context.Context, tx pgx.Tx, uploadID uuid.UUID, failureMessage string) error {
 	tag, err := tx.Exec(
 		ctx,
@@ -234,6 +247,8 @@ func markSessionFailed(ctx context.Context, tx pgx.Tx, uploadID uuid.UUID, failu
 	return nil
 }
 
+// markJobSucceeded transitions a running ingest job to succeeded, records
+// the verified digest, clears worker locks, and returns the updated row.
 func markJobSucceeded(ctx context.Context, tx pgx.Tx, jobID uuid.UUID, digest domain.Digest) (domain.IngestJob, error) {
 	return scanIngestJob(tx.QueryRow(
 		ctx,
@@ -252,6 +267,8 @@ func markJobSucceeded(ctx context.Context, tx pgx.Tx, jobID uuid.UUID, digest do
 	))
 }
 
+// markJobFailed transitions a running ingest job to failed, records
+// failureMessage, clears worker locks, and returns the updated row.
 func markJobFailed(ctx context.Context, tx pgx.Tx, jobID uuid.UUID, failureMessage string) (domain.IngestJob, error) {
 	return scanIngestJob(tx.QueryRow(
 		ctx,

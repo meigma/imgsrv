@@ -29,6 +29,7 @@ func NewLogger(w io.Writer, format string, verbosity string) (*slog.Logger, erro
 	}
 }
 
+// parseVerbosity translates a verbosity name into the matching [slog.Level].
 func parseVerbosity(verbosity string) (slog.Level, error) {
 	switch strings.ToLower(verbosity) {
 	case "debug":

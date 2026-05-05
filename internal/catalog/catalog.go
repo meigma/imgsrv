@@ -401,6 +401,8 @@ func ValidateToken(field string, value string) error {
 	return nil
 }
 
+// matches reports whether value matches pattern under [regexp.MatchString],
+// treating any compilation error as a non-match.
 func matches(pattern string, value string) bool {
 	matched, err := regexp.MatchString(pattern, value)
 	return err == nil && matched

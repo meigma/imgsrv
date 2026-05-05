@@ -28,6 +28,7 @@ type UploadsClient interface {
 
 // HTTPUploadsClient is the concrete HTTP implementation of UploadsClient.
 type HTTPUploadsClient struct {
+	// transport carries the HTTP configuration shared with the parent Client.
 	transport *transport
 }
 
@@ -105,6 +106,7 @@ type UploadPart struct {
 	SizeBytes int64 `json:"size_bytes"`
 }
 
+// newHTTPUploadsClient binds an upload operation group to the shared transport.
 func newHTTPUploadsClient(transport *transport) *HTTPUploadsClient {
 	return &HTTPUploadsClient{transport: transport}
 }

@@ -16,16 +16,24 @@ import (
 )
 
 const (
+	// noSuchBucketCode is the S3 error code returned when the bucket does not exist.
 	noSuchBucketCode = "NoSuchBucket"
-	noSuchKeyCode    = "NoSuchKey"
+	// noSuchKeyCode is the S3 error code returned when the object key does not exist.
+	noSuchKeyCode = "NoSuchKey"
+	// noSuchUploadCode is the S3 error code returned when the multipart upload does not exist.
 	noSuchUploadCode = "NoSuchUpload"
 
-	preconditionFailedCode         = "PreconditionFailed"
+	// preconditionFailedCode is the S3 error code returned when a conditional precondition fails.
+	preconditionFailedCode = "PreconditionFailed"
+	// conditionalRequestConflictCode is the S3 error code returned when a conditional request hits a concurrent conflict.
 	conditionalRequestConflictCode = "ConditionalRequestConflict"
 
+	// maxSingleCopySizeBytes is the largest object size that S3 supports through a single CopyObject call.
 	maxSingleCopySizeBytes = 5 * 1000 * 1000 * 1000
-	maxCopyPartSizeBytes   = 5 * 1024 * 1024 * 1024
-	maxCopyPartCount       = 10000
+	// maxCopyPartSizeBytes is the largest byte range that S3 supports per UploadPartCopy request.
+	maxCopyPartSizeBytes = 5 * 1024 * 1024 * 1024
+	// maxCopyPartCount is the highest part number S3 supports during a multipart copy.
+	maxCopyPartCount = 10000
 )
 
 // Config configures an S3-compatible object store.
@@ -74,7 +82,9 @@ func (config Config) Validate() error {
 
 // Store adapts an S3-compatible bucket to objectstore.Store.
 type Store struct {
-	core   *minio.Core
+	// core is the underlying minio low-level client used for S3 operations.
+	core *minio.Core
+	// bucket is the S3 bucket that backs every key handled by this store.
 	bucket string
 }
 
@@ -339,6 +349,8 @@ func (store *Store) DeleteObject(ctx context.Context, params objectstore.DeleteO
 	return nil
 }
 
+// copyObjectMultipart copies a stored object using S3 multipart copy when the object exceeds
+// the single-copy size limit. It aborts the in-progress multipart upload if completion fails.
 func (store *Store) copyObjectMultipart(
 	ctx context.Context,
 	params objectstore.CopyObjectParams,
@@ -407,6 +419,8 @@ func (store *Store) copyObjectMultipart(
 	return uploadObjectInfo(uploadInfo, params.DestinationKey, sourceInfo.Size), nil
 }
 
+// client returns the underlying minio core client and bucket, or an error when the store
+// has not been constructed through New.
 func (store *Store) client() (*minio.Core, string, error) {
 	if store == nil || store.core == nil || store.bucket == "" {
 		return nil, "", errors.New("s3 objectstore is not open")
@@ -415,12 +429,15 @@ func (store *Store) client() (*minio.Core, string, error) {
 	return store.core, store.bucket, nil
 }
 
+// multipartCopyPart describes one byte range to copy as a single UploadPartCopy request.
 type multipartCopyPart struct {
 	number int
 	start  int64
 	size   int64
 }
 
+// multipartCopyParts splits an object size into S3 multipart copy ranges that respect S3's
+// per-part size limit and total part-count cap.
 func multipartCopyParts(size int64) ([]multipartCopyPart, error) {
 	if size < 0 {
 		return nil, fmt.Errorf("%w: object size must be non-negative", objectstore.ErrInvalid)
@@ -446,10 +463,12 @@ func multipartCopyParts(size int64) ([]multipartCopyPart, error) {
 	return parts, nil
 }
 
+// requiresMultipartCopy reports whether an object is too large for a single S3 CopyObject call.
 func requiresMultipartCopy(size int64) bool {
 	return size > maxSingleCopySizeBytes
 }
 
+// completePartsSize sums the byte sizes reported by every multipart completion part.
 func completePartsSize(parts []objectstore.CompletePart) int64 {
 	var size int64
 	for _, part := range parts {
@@ -459,6 +478,8 @@ func completePartsSize(parts []objectstore.CompletePart) int64 {
 	return size
 }
 
+// getObjectOptions builds the minio GetObjectOptions, including the optional byte-range header,
+// for an OpenObject request.
 func getObjectOptions(params objectstore.OpenObjectParams) (minio.GetObjectOptions, error) {
 	options := minio.GetObjectOptions{}
 	if params.Range == nil {
@@ -474,10 +495,13 @@ func getObjectOptions(params objectstore.OpenObjectParams) (minio.GetObjectOptio
 	return options, options.SetRange(params.Range.Start, params.Range.End)
 }
 
+// hasEffectiveRange reports whether byteRange would produce an actual S3 range request
+// rather than a full-object read.
 func hasEffectiveRange(byteRange *objectstore.ByteRange) bool {
 	return byteRange != nil && (!byteRange.OpenEnded || byteRange.Start != 0)
 }
 
+// objectSizeFromContentRange parses the total object size from an S3 Content-Range header value.
 func objectSizeFromContentRange(contentRange string) (int64, error) {
 	_, sizeText, ok := strings.Cut(contentRange, "/")
 	if !ok {
@@ -497,6 +521,7 @@ func objectSizeFromContentRange(contentRange string) (int64, error) {
 	return size, nil
 }
 
+// closeAfterError closes closer and joins any close error with the original error.
 func closeAfterError(closer io.Closer, err error) error {
 	if closeErr := closer.Close(); closeErr != nil {
 		return errors.Join(err, closeErr)
@@ -505,6 +530,8 @@ func closeAfterError(closer io.Closer, err error) error {
 	return err
 }
 
+// copyHeaders returns the S3 conditional headers required for a single CopyObject call,
+// or nil when no conditional headers apply.
 func copyHeaders(params objectstore.CopyObjectParams, sourceInfo minio.ObjectInfo) map[string]string {
 	headers := map[string]string{}
 	if sourceETag := sourceMatchETag(params, sourceInfo); sourceETag != "" {
@@ -520,6 +547,8 @@ func copyHeaders(params objectstore.CopyObjectParams, sourceInfo minio.ObjectInf
 	return headers
 }
 
+// sourceMatchHeaders returns the x-amz-copy-source-if-match header used during multipart copy
+// to keep every UploadPartCopy bound to the same source ETag, or nil when no source ETag is known.
 func sourceMatchHeaders(params objectstore.CopyObjectParams, sourceInfo minio.ObjectInfo) map[string]string {
 	sourceETag := sourceMatchETag(params, sourceInfo)
 	if sourceETag == "" {
@@ -529,6 +558,8 @@ func sourceMatchHeaders(params objectstore.CopyObjectParams, sourceInfo minio.Ob
 	return map[string]string{"x-amz-copy-source-if-match": sourceETag}
 }
 
+// sourceMatchETag picks the source ETag to enforce during a copy, preferring the caller-supplied
+// IfSourceETag and falling back to the freshly observed source object ETag.
 func sourceMatchETag(params objectstore.CopyObjectParams, sourceInfo minio.ObjectInfo) string {
 	if sourceETag := strings.TrimSpace(params.IfSourceETag); sourceETag != "" {
 		return sourceETag
@@ -537,6 +568,8 @@ func sourceMatchETag(params objectstore.CopyObjectParams, sourceInfo minio.Objec
 	return strings.TrimSpace(sourceInfo.ETag)
 }
 
+// mapSingleCopyError translates S3 conditional-copy precondition failures to objectstore.ErrConflict
+// and otherwise defers to mapError.
 func mapSingleCopyError(err error) error {
 	response := minio.ToErrorResponse(err)
 	switch response.Code {
@@ -547,6 +580,8 @@ func mapSingleCopyError(err error) error {
 	}
 }
 
+// completeMultipartUploadOptions returns the multipart-completion options that enforce
+// destination-absent semantics when the caller requested IfDestinationAbsent.
 func completeMultipartUploadOptions(params objectstore.CopyObjectParams) minio.PutObjectOptions {
 	options := minio.PutObjectOptions{}
 	if params.IfDestinationAbsent {
@@ -556,6 +591,7 @@ func completeMultipartUploadOptions(params objectstore.CopyObjectParams) minio.P
 	return options
 }
 
+// completeParts converts objectstore complete parts into the minio multipart completion payload.
 func completeParts(parts []objectstore.CompletePart) []minio.CompletePart {
 	converted := make([]minio.CompletePart, 0, len(parts))
 	for _, part := range parts {
@@ -568,6 +604,8 @@ func completeParts(parts []objectstore.CompletePart) []minio.CompletePart {
 	return converted
 }
 
+// objectInfo converts a minio object info value into the port-level ObjectInfo, falling back
+// to fallbackKey when the response key is empty.
 func objectInfo(info minio.ObjectInfo, fallbackKey string) objectstore.ObjectInfo {
 	return objectstore.ObjectInfo{
 		Key:       firstNonEmpty(info.Key, fallbackKey),
@@ -576,6 +614,8 @@ func objectInfo(info minio.ObjectInfo, fallbackKey string) objectstore.ObjectInf
 	}
 }
 
+// copyObjectInfo converts a minio CopyObject response into the port-level ObjectInfo and
+// fails when S3 omitted the destination ETag.
 func copyObjectInfo(info minio.ObjectInfo, fallbackKey string, sizeBytes int64) (objectstore.ObjectInfo, error) {
 	if strings.TrimSpace(info.ETag) == "" {
 		return objectstore.ObjectInfo{}, errors.New("s3 copy object response missing etag")
@@ -586,6 +626,7 @@ func copyObjectInfo(info minio.ObjectInfo, fallbackKey string, sizeBytes int64) 
 	return copiedInfo, nil
 }
 
+// validateCopiedPart returns an error when an UploadPartCopy response did not include an ETag.
 func validateCopiedPart(part minio.CompletePart) error {
 	if strings.TrimSpace(part.ETag) == "" {
 		return errors.New("s3 upload-part-copy response missing etag")
@@ -594,6 +635,8 @@ func validateCopiedPart(part minio.CompletePart) error {
 	return nil
 }
 
+// uploadObjectInfo converts a minio multipart-upload completion response into the port-level
+// ObjectInfo, preferring the response size when S3 reported one.
 func uploadObjectInfo(info minio.UploadInfo, fallbackKey string, sizeBytes int64) objectstore.ObjectInfo {
 	if info.Size > 0 {
 		sizeBytes = info.Size
@@ -606,6 +649,7 @@ func uploadObjectInfo(info minio.UploadInfo, fallbackKey string, sizeBytes int64
 	}
 }
 
+// firstNonEmpty returns the first value in values that is not the empty string.
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value != "" {
@@ -616,6 +660,8 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+// mapError translates known S3 not-found error codes into objectstore.ErrNotFound and otherwise
+// returns the original error unchanged.
 func mapError(err error) error {
 	if err == nil {
 		return nil
@@ -632,6 +678,8 @@ func mapError(err error) error {
 	}
 }
 
+// mapCopyError translates copy completion errors based on whether the caller required the
+// destination to be absent.
 func mapCopyError(err error, params objectstore.CopyObjectParams) error {
 	if !params.IfDestinationAbsent {
 		return mapError(err)
@@ -640,6 +688,8 @@ func mapCopyError(err error, params objectstore.CopyObjectParams) error {
 	return mapDestinationPreconditionError(err)
 }
 
+// mapDestinationPreconditionError maps S3 destination-conditional precondition failures to
+// objectstore.ErrAlreadyExists and concurrent destination conflicts to objectstore.ErrConflict.
 func mapDestinationPreconditionError(err error) error {
 	response := minio.ToErrorResponse(err)
 	switch response.Code {

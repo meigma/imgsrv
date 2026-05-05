@@ -7,10 +7,13 @@ import (
 	domain "github.com/meigma/imgsrv/internal/catalog"
 )
 
+// rowScanner is the minimal pgx row interface used by the catalog scan helpers.
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+// scanImage decodes a single images row into the domain Image type, lifting
+// nullable display name and description columns into optional pointer fields.
 func scanImage(row rowScanner) (domain.Image, error) {
 	var image domain.Image
 	var displayName sql.NullString
@@ -34,6 +37,8 @@ func scanImage(row rowScanner) (domain.Image, error) {
 	return image, nil
 }
 
+// scanVersion decodes a single image_versions row into the domain Version
+// type, lifting the nullable published_at column into an optional pointer.
 func scanVersion(row rowScanner) (domain.Version, error) {
 	var version domain.Version
 	var publishedAt sql.NullTime
@@ -56,6 +61,8 @@ func scanVersion(row rowScanner) (domain.Version, error) {
 	return version, nil
 }
 
+// scanImageAndVersion decodes a joined images and image_versions row into the
+// domain Image and Version pair used to construct manifest headers.
 func scanImageAndVersion(row rowScanner) (domain.Image, domain.Version, error) {
 	var image domain.Image
 	var version domain.Version
@@ -89,6 +96,8 @@ func scanImageAndVersion(row rowScanner) (domain.Image, domain.Version, error) {
 	return image, version, nil
 }
 
+// scanArtifact decodes a single release_artifacts row into the domain
+// Artifact type.
 func scanArtifact(row rowScanner) (domain.Artifact, error) {
 	var artifact domain.Artifact
 
@@ -111,6 +120,8 @@ func scanArtifact(row rowScanner) (domain.Artifact, error) {
 	return artifact, nil
 }
 
+// scanAttachment decodes a single artifact_attachments row into the domain
+// Attachment type.
 func scanAttachment(row rowScanner) (domain.Attachment, error) {
 	var attachment domain.Attachment
 
@@ -131,6 +142,7 @@ func scanAttachment(row rowScanner) (domain.Attachment, error) {
 	return attachment, nil
 }
 
+// scanAlias decodes a single aliases row into the domain Alias type.
 func scanAlias(row rowScanner) (domain.Alias, error) {
 	var alias domain.Alias
 
@@ -149,6 +161,8 @@ func scanAlias(row rowScanner) (domain.Alias, error) {
 	return alias, nil
 }
 
+// optionalString returns a pointer to value's string when valid, or nil when
+// the column was SQL NULL.
 func optionalString(value sql.NullString) *string {
 	if !value.Valid {
 		return nil
@@ -157,6 +171,8 @@ func optionalString(value sql.NullString) *string {
 	return &value.String
 }
 
+// optionalTime returns a pointer to value's time when valid, or nil when the
+// column was SQL NULL.
 func optionalTime(value sql.NullTime) *time.Time {
 	if !value.Valid {
 		return nil

@@ -17,6 +17,7 @@ import (
 )
 
 const (
+	// defaultHTTPClientTimeout bounds requests issued by the harness HTTP client.
 	defaultHTTPClientTimeout = 10 * time.Second
 )
 
@@ -42,11 +43,20 @@ func WithCASPromotion() Option {
 
 // Env owns a running imgsrv integration-test environment.
 type Env struct {
-	baseURL     string
-	httpClient  *http.Client
-	store       *postgres.Store
+	// baseURL is the root URL for the in-process imgsrv HTTP server.
+	baseURL string
+
+	// httpClient is the HTTP client integration tests use to call the server.
+	httpClient *http.Client
+
+	// store is the migrated Postgres store backing the environment.
+	store *postgres.Store
+
+	// objectStore is the Garage-backed object store wired into the server.
 	objectStore objectstore.Store
-	s3Config    s3.Config
+
+	// s3Config holds the S3-compatible storage configuration for Garage.
+	s3Config s3.Config
 }
 
 // Start creates a full imgsrv integration-test environment.
@@ -109,6 +119,8 @@ type options struct {
 	casPromotion bool
 }
 
+// newOptions applies opts to a zero options value and returns the resolved
+// startup configuration with a no-op logger as the default.
 func newOptions(opts ...Option) options {
 	result := options{
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -120,6 +132,8 @@ func newOptions(opts ...Option) options {
 	return result
 }
 
+// newHTTPClient builds the HTTP client integration tests use to talk to the
+// in-process imgsrv server.
 func newHTTPClient() *http.Client {
 	return &http.Client{Timeout: defaultHTTPClientTimeout}
 }

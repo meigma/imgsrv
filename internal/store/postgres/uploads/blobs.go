@@ -11,6 +11,8 @@ import (
 	"github.com/meigma/imgsrv/internal/cas"
 )
 
+// blobColumns enumerates the cas_blobs columns selected when scanning a
+// trusted CAS blob row.
 const blobColumns = `digest,
 	size_bytes,
 	storage_key,
@@ -43,6 +45,8 @@ func (store *Store) GetBlob(ctx context.Context, params cas.GetBlobParams) (cas.
 	return blob, nil
 }
 
+// scanBlob materializes a cas.Blob from a single row, translating nullable
+// columns into their domain representation.
 func scanBlob(row rowScanner) (cas.Blob, error) {
 	var blob cas.Blob
 	var mediaType sql.NullString
@@ -63,6 +67,8 @@ func scanBlob(row rowScanner) (cas.Blob, error) {
 	return blob, nil
 }
 
+// mapCASError translates a Postgres driver error into a cas package sentinel
+// error where one is defined, leaving other errors unwrapped.
 func mapCASError(err error) error {
 	if err == nil {
 		return nil

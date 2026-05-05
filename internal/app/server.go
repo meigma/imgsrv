@@ -22,6 +22,7 @@ import (
 	"github.com/meigma/imgsrv/internal/uploads"
 )
 
+// defaultReadHeaderTimeout bounds how long the HTTP servers wait for request headers.
 const defaultReadHeaderTimeout = 5 * time.Second
 
 // Dependencies contains adapters required to compose the imgsrv process.
@@ -47,12 +48,19 @@ type BackgroundJob interface {
 
 // Server owns the HTTP server runtime.
 type Server struct {
-	apiServer       *http.Server
-	backgroundJobs  []backgroundJobSpec
-	metricsServer   *http.Server
-	telemetry       *telemetry.Telemetry
-	logger          *slog.Logger
-	store           *postgres.Store
+	// apiServer is the HTTP server that handles client API traffic.
+	apiServer *http.Server
+	// backgroundJobs are the in-process background jobs run alongside the HTTP servers.
+	backgroundJobs []backgroundJobSpec
+	// metricsServer is the optional HTTP server that exposes Prometheus metrics.
+	metricsServer *http.Server
+	// telemetry holds the optional metrics provider wired into the API handler.
+	telemetry *telemetry.Telemetry
+	// logger receives Server lifecycle and component logs.
+	logger *slog.Logger
+	// store is the optional Postgres store closed during shutdown.
+	store *postgres.Store
+	// shutdownTimeout bounds graceful shutdown of HTTP servers and dependencies.
 	shutdownTimeout time.Duration
 }
 
@@ -159,11 +167,14 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 	return server, nil
 }
 
+// uploadServiceDependency bundles the upload service and the underlying object store it writes to.
 type uploadServiceDependency struct {
 	service httpapi.UploadService
 	objects objectstore.Store
 }
 
+// newUploadService builds the upload service and its S3 object store from cfg, returning a zero
+// value when no S3 configuration is present.
 func newUploadService(cfg Config, store *postgres.Store) (uploadServiceDependency, error) {
 	if !cfg.hasS3Config() {
 		return uploadServiceDependency{}, nil
@@ -256,6 +267,8 @@ func (s *Server) Serve(ctx context.Context, apiListener net.Listener, metricsLis
 	}
 }
 
+// servers returns the HTTP server specs that should run, requiring a metrics listener when the
+// metrics server is enabled.
 func (s *Server) servers(apiListener net.Listener, metricsListener ...net.Listener) ([]serverSpec, error) {
 	if apiListener == nil {
 		return nil, errors.New("api listener is required")
@@ -281,6 +294,8 @@ func (s *Server) servers(apiListener net.Listener, metricsListener ...net.Listen
 	return servers, nil
 }
 
+// shutdownComponents stops the HTTP servers and dependencies, then drains pending component
+// results into a joined error within the configured shutdown timeout.
 func (s *Server) shutdownComponents(
 	servers []serverSpec,
 	errCh <-chan componentResult,
@@ -324,26 +339,32 @@ func (s *Server) shutdownComponents(
 	return joined
 }
 
+// serverSpec pairs a named HTTP server with the listener it should serve on.
 type serverSpec struct {
 	name     string
 	server   *http.Server
 	listener net.Listener
 }
 
+// backgroundJobSpec pairs a BackgroundJob with the name used in lifecycle logging and errors.
 type backgroundJobSpec struct {
 	name string
 	job  BackgroundJob
 }
 
+// componentResult is the exit result of a server or background job goroutine.
 type componentResult struct {
 	name string
 	err  error
 }
 
+// formatComponentError wraps a componentResult error with the component name for reporting.
 func formatComponentError(result componentResult) error {
 	return fmt.Errorf("%s: %w", result.name, result.err)
 }
 
+// newCASPromotionJobs constructs the in-process CAS promotion background jobs when promotion is
+// enabled, returning an empty slice when it is disabled.
 func newCASPromotionJobs(
 	cfg Config,
 	store *postgres.Store,
@@ -384,6 +405,7 @@ func newCASPromotionJobs(
 	})}, nil
 }
 
+// backgroundJobSpecs wraps each non-nil BackgroundJob in a backgroundJobSpec with a derived name.
 func backgroundJobSpecs(jobs []BackgroundJob) []backgroundJobSpec {
 	specs := make([]backgroundJobSpec, 0, len(jobs))
 	for index, job := range jobs {
@@ -400,6 +422,7 @@ func backgroundJobSpecs(jobs []BackgroundJob) []backgroundJobSpec {
 	return specs
 }
 
+// joinError returns existing and next combined via [errors.Join], treating either nil as the other.
 func joinError(existing error, next error) error {
 	if next == nil {
 		return existing

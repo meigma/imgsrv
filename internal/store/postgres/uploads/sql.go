@@ -1,5 +1,7 @@
 package uploads
 
+// sessionColumns enumerates the upload_sessions columns selected when
+// scanning a domain.Session row, in the order scanSession expects.
 const sessionColumns = `id,
 	expected_digest,
 	expected_size_bytes,
@@ -19,6 +21,8 @@ const sessionColumns = `id,
 	created_at,
 	updated_at`
 
+// partColumns enumerates the upload_parts columns selected when scanning a
+// domain.Part row, in the order scanPart expects.
 const partColumns = `upload_id,
 	part_number,
 	etag,
@@ -26,6 +30,8 @@ const partColumns = `upload_id,
 	uploaded_at,
 	updated_at`
 
+// ingestJobColumns enumerates the cas_ingest_jobs columns selected when
+// scanning a domain.IngestJob row, in the order scanIngestJob expects.
 const ingestJobColumns = `id,
 	upload_id,
 	state,

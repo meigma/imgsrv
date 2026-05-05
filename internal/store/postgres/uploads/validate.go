@@ -8,6 +8,8 @@ import (
 	domain "github.com/meigma/imgsrv/internal/uploads"
 )
 
+// validateCreateSessionParams checks that params describe a well-formed
+// upload session before it is persisted.
 func validateCreateSessionParams(params domain.CreateSessionParams) error {
 	if err := validateUploadID(params.ID); err != nil {
 		return err
@@ -34,10 +36,13 @@ func validateCreateSessionParams(params domain.CreateSessionParams) error {
 	return nil
 }
 
+// validateGetSessionParams checks that params identify an upload session.
 func validateGetSessionParams(params domain.GetSessionParams) error {
 	return validateUploadID(params.ID)
 }
 
+// validatePutPartParams checks that params describe a well-formed multipart
+// part record before it is persisted.
 func validatePutPartParams(params domain.PutPartParams) error {
 	if err := validateUploadID(params.UploadID); err != nil {
 		return err
@@ -52,18 +57,24 @@ func validatePutPartParams(params domain.PutPartParams) error {
 	return domain.ValidateNonNegativeSize("part size", params.SizeBytes)
 }
 
+// validateCompleteSessionParams checks that params identify an upload session.
 func validateCompleteSessionParams(params domain.CompleteSessionParams) error {
 	return validateUploadID(params.ID)
 }
 
+// validateAbortSessionParams checks that params identify an upload session.
 func validateAbortSessionParams(params domain.AbortSessionParams) error {
 	return validateUploadID(params.ID)
 }
 
+// validateClaimIngestJobParams checks that params identify the worker
+// claiming an ingest job.
 func validateClaimIngestJobParams(params domain.ClaimIngestJobParams) error {
 	return domain.ValidateRequiredText("worker id", params.WorkerID)
 }
 
+// validateSucceedIngestJobParams checks that params describe a verified CAS
+// blob outcome before it is persisted.
 func validateSucceedIngestJobParams(params domain.SucceedIngestJobParams) error {
 	if err := validateIngestJobID(params.ID); err != nil {
 		return err
@@ -81,6 +92,8 @@ func validateSucceedIngestJobParams(params domain.SucceedIngestJobParams) error 
 	return domain.ValidateOptionalText("media type", params.MediaType)
 }
 
+// validateFailIngestJobParams checks that params describe a terminal ingest
+// failure before it is persisted.
 func validateFailIngestJobParams(params domain.FailIngestJobParams) error {
 	if err := validateIngestJobID(params.ID); err != nil {
 		return err
@@ -89,6 +102,7 @@ func validateFailIngestJobParams(params domain.FailIngestJobParams) error {
 	return domain.ValidateRequiredText("failure message", params.FailureMessage)
 }
 
+// validateUploadID returns ErrInvalid when id is the zero UUID.
 func validateUploadID(id uuid.UUID) error {
 	if id == uuid.Nil {
 		return fmt.Errorf("%w: upload id is required", domain.ErrInvalid)
@@ -97,6 +111,7 @@ func validateUploadID(id uuid.UUID) error {
 	return nil
 }
 
+// validateIngestJobID returns ErrInvalid when id is the zero UUID.
 func validateIngestJobID(id uuid.UUID) error {
 	if id == uuid.Nil {
 		return fmt.Errorf("%w: ingest job id is required", domain.ErrInvalid)

@@ -11,13 +11,23 @@ import (
 )
 
 const (
-	sqlStateCheckViolation      = "23514"
+	// sqlStateCheckViolation is the Postgres SQLSTATE for check_violation.
+	sqlStateCheckViolation = "23514"
+
+	// sqlStateForeignKeyViolation is the Postgres SQLSTATE for foreign_key_violation.
 	sqlStateForeignKeyViolation = "23503"
-	sqlStateInvalidText         = "22P02"
-	sqlStateNotNullViolation    = "23502"
-	sqlStateUniqueViolation     = "23505"
+
+	// sqlStateInvalidText is the Postgres SQLSTATE for invalid_text_representation.
+	sqlStateInvalidText = "22P02"
+
+	// sqlStateNotNullViolation is the Postgres SQLSTATE for not_null_violation.
+	sqlStateNotNullViolation = "23502"
+
+	// sqlStateUniqueViolation is the Postgres SQLSTATE for unique_violation.
+	sqlStateUniqueViolation = "23505"
 )
 
+// mapAuthError translates a pgx or pgconn error into a domain auth error.
 func mapAuthError(err error) error {
 	if err == nil {
 		return nil

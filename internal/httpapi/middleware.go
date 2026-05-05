@@ -19,6 +19,10 @@ func Chain(handler http.Handler, middleware ...Middleware) http.Handler {
 	return handler
 }
 
+// logRequests returns middleware that emits one structured log entry per request.
+//
+// The log level is selected by requestLogLevel based on the response status code.
+// A nil logger is replaced with a discarding [slog.Logger] so callers may omit it.
 func logRequests(logger *slog.Logger) Middleware {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -45,6 +49,7 @@ func logRequests(logger *slog.Logger) Middleware {
 	}
 }
 
+// requestLogLevel maps an HTTP response status code to a slog level.
 func requestLogLevel(status int) slog.Level {
 	switch {
 	case status >= http.StatusInternalServerError:
