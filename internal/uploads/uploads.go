@@ -40,13 +40,28 @@ const (
 
 // Store persists durable upload state and CAS ingest jobs.
 type Store interface {
+	// CreateSession creates durable upload state for a backing multipart upload.
 	CreateSession(context.Context, CreateSessionParams) (Session, error)
+
+	// GetSession returns durable upload state by upload ID.
 	GetSession(context.Context, GetSessionParams) (Session, error)
+
+	// PutPart records or replaces one accepted upload part.
 	PutPart(context.Context, PutPartParams) (Part, error)
+
+	// CompleteSession marks an upload completed and queues CAS ingest.
 	CompleteSession(context.Context, CompleteSessionParams) (Session, error)
+
+	// AbortSession marks an upload aborted before CAS ingest starts.
 	AbortSession(context.Context, AbortSessionParams) (Session, error)
+
+	// ClaimIngestJob claims the next CAS ingest job for a worker.
 	ClaimIngestJob(context.Context, ClaimIngestJobParams) (IngestJob, error)
+
+	// SucceedIngestJob records a successful CAS ingest outcome.
 	SucceedIngestJob(context.Context, SucceedIngestJobParams) (IngestJob, error)
+
+	// FailIngestJob records a failed CAS ingest outcome.
 	FailIngestJob(context.Context, FailIngestJobParams) (IngestJob, error)
 }
 

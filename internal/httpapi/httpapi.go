@@ -23,6 +23,7 @@ type Dependencies struct {
 
 // ReadinessChecker reports whether the service can accept operational traffic.
 type ReadinessChecker interface {
+	// CheckReady returns nil when the service can accept operational traffic.
 	CheckReady(context.Context) error
 }
 

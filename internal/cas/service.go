@@ -13,7 +13,10 @@ import (
 
 // Store records CAS ingest outcomes.
 type Store interface {
+	// SucceedIngestJob records a verified CAS commit for an ingest job.
 	SucceedIngestJob(context.Context, uploads.SucceedIngestJobParams) (uploads.IngestJob, error)
+
+	// FailIngestJob records a failed CAS commit for an ingest job.
 	FailIngestJob(context.Context, uploads.FailIngestJobParams) (uploads.IngestJob, error)
 }
 

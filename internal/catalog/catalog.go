@@ -35,13 +35,28 @@ const (
 
 // Store persists image catalog operations.
 type Store interface {
+	// CreateImage creates an operator-defined image namespace.
 	CreateImage(context.Context, CreateImageParams) (Image, error)
+
+	// CreateDraftVersion creates a mutable draft version for an image.
 	CreateDraftVersion(context.Context, CreateDraftVersionParams) (Version, error)
+
+	// AddArtifact adds or replaces a primary artifact on a draft version.
 	AddArtifact(context.Context, AddArtifactParams) (Artifact, error)
+
+	// AddAttachment adds or replaces a secondary attachment on a draft version.
 	AddAttachment(context.Context, AddAttachmentParams) (Attachment, error)
+
+	// PublishVersion marks a draft version immutable and publishable.
 	PublishVersion(context.Context, PublishVersionParams) (Version, error)
+
+	// PutAlias creates or moves an alias to a published version.
 	PutAlias(context.Context, PutAliasParams) (Alias, error)
+
+	// GetAlias returns an alias by image and alias name.
 	GetAlias(context.Context, GetAliasParams) (Alias, error)
+
+	// ResolveManifest resolves a published image manifest by version or alias.
 	ResolveManifest(context.Context, ResolveManifestParams) (Manifest, error)
 }
 

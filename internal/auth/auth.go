@@ -35,8 +35,13 @@ const (
 
 // Store persists API-token authentication state.
 type Store interface {
+	// LookupActiveToken returns a non-revoked token matching the supplied prefix and hash.
 	LookupActiveToken(context.Context, LookupActiveTokenParams) (Token, error)
+
+	// MarkTokenUsed records successful use of a token.
 	MarkTokenUsed(context.Context, MarkTokenUsedParams) (Token, error)
+
+	// RevokeToken marks a token revoked.
 	RevokeToken(context.Context, RevokeTokenParams) (Token, error)
 }
 
