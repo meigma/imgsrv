@@ -97,7 +97,7 @@ func claimIngestJob(ctx context.Context, tx pgx.Tx, workerID string) (domain.Ing
 	return scanIngestJob(tx.QueryRow(
 		ctx,
 		`WITH next_job AS (
-			SELECT id
+			SELECT id AS job_id
 			FROM cas_ingest_jobs
 			WHERE state = 'queued'
 				AND run_after <= now()
@@ -113,7 +113,7 @@ func claimIngestJob(ctx context.Context, tx pgx.Tx, workerID string) (domain.Ing
 			started_at = COALESCE(started_at, now()),
 			updated_at = now()
 		FROM next_job
-		WHERE cas_ingest_jobs.id = next_job.id
+		WHERE cas_ingest_jobs.id = next_job.job_id
 		RETURNING `+ingestJobColumns,
 		workerID,
 	))

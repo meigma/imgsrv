@@ -37,3 +37,6 @@ jobs:
 
       - name: Run Moon CI
         run: moon ci --summary minimal
+
+      - name: Run Integration Tests
+        run: moon run root:test-integration --summary minimal
