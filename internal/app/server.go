@@ -11,7 +11,11 @@ import (
 	"os"
 	"time"
 
+	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/httpapi"
+	"github.com/meigma/imgsrv/internal/jobs"
+	"github.com/meigma/imgsrv/internal/jobs/promote"
+	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/objectstore/s3"
 	"github.com/meigma/imgsrv/internal/store/postgres"
 	"github.com/meigma/imgsrv/internal/telemetry"
@@ -30,11 +34,21 @@ type Dependencies struct {
 
 	// Uploads coordinates client-facing upload writes.
 	Uploads httpapi.UploadService
+
+	// BackgroundJobs run process-local background work until shutdown.
+	BackgroundJobs []BackgroundJob
+}
+
+// BackgroundJob runs process-local background work until ctx is canceled.
+type BackgroundJob interface {
+	// Run executes background work until ctx is canceled or the job exits.
+	Run(context.Context) error
 }
 
 // Server owns the HTTP server runtime.
 type Server struct {
 	apiServer       *http.Server
+	backgroundJobs  []backgroundJobSpec
 	metricsServer   *http.Server
 	telemetry       *telemetry.Telemetry
 	logger          *slog.Logger
@@ -66,10 +80,18 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 		return err
 	}
+	backgroundJobs, err := newCASPromotionJobs(cfg, store, uploadDependency.objects, logger)
+	if err != nil {
+		if store != nil {
+			return joinError(err, store.Close())
+		}
+		return err
+	}
 
 	server, err := NewServer(cfg, Dependencies{
-		Logger:  logger,
-		Uploads: uploadDependency.service,
+		Logger:         logger,
+		Uploads:        uploadDependency.service,
+		BackgroundJobs: backgroundJobs,
 	})
 	if err != nil {
 		if store != nil {
@@ -125,6 +147,7 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 		logger:          logger,
 		shutdownTimeout: cfg.ShutdownTimeout,
 	}
+	server.backgroundJobs = backgroundJobSpecs(deps.BackgroundJobs)
 	if telemetryProviders != nil {
 		server.metricsServer = &http.Server{
 			Addr:              cfg.MetricsListen,
@@ -138,6 +161,7 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 
 type uploadServiceDependency struct {
 	service httpapi.UploadService
+	objects objectstore.Store
 }
 
 func newUploadService(cfg Config, store *postgres.Store) (uploadServiceDependency, error) {
@@ -162,10 +186,13 @@ func newUploadService(cfg Config, store *postgres.Store) (uploadServiceDependenc
 		return uploadServiceDependency{}, fmt.Errorf("open s3 object store: %w", err)
 	}
 
-	return uploadServiceDependency{service: uploads.NewService(uploads.ServiceConfig{
-		Store:   store.Uploads(),
-		Objects: objects,
-	})}, nil
+	return uploadServiceDependency{
+		service: uploads.NewService(uploads.ServiceConfig{
+			Store:   store.Uploads(),
+			Objects: objects,
+		}),
+		objects: objects,
+	}, nil
 }
 
 // Run listens on the configured address and serves HTTP until the context ends.
@@ -194,7 +221,11 @@ func (s *Server) Serve(ctx context.Context, apiListener net.Listener, metricsLis
 		return err
 	}
 
-	errCh := make(chan serverResult, len(servers))
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	componentCount := len(servers) + len(s.backgroundJobs)
+	errCh := make(chan componentResult, componentCount)
 	for _, spec := range servers {
 		go func(spec serverSpec) {
 			s.logger.Info("http server listening", "name", spec.name, "addr", spec.listener.Addr().String())
@@ -202,17 +233,24 @@ func (s *Server) Serve(ctx context.Context, apiListener net.Listener, metricsLis
 			if errors.Is(err, http.ErrServerClosed) {
 				err = nil
 			}
-			errCh <- serverResult{name: spec.name, err: err}
+			errCh <- componentResult{name: spec.name + " http server", err: err}
+		}(spec)
+	}
+	for _, spec := range s.backgroundJobs {
+		go func(spec backgroundJobSpec) {
+			errCh <- componentResult{name: spec.name, err: spec.job.Run(runCtx)}
 		}(spec)
 	}
 
 	select {
 	case <-ctx.Done():
-		return s.shutdownServers(servers, errCh, nil)
+		cancel()
+		return s.shutdownComponents(servers, errCh, componentCount, nil)
 	case result := <-errCh:
-		shutdownErr := s.shutdownServers(servers, errCh, &result)
+		cancel()
+		shutdownErr := s.shutdownComponents(servers, errCh, componentCount, &result)
 		if result.err != nil {
-			return joinError(fmt.Errorf("%s http server: %w", result.name, result.err), shutdownErr)
+			return joinError(formatComponentError(result), shutdownErr)
 		}
 		return shutdownErr
 	}
@@ -243,10 +281,11 @@ func (s *Server) servers(apiListener net.Listener, metricsListener ...net.Listen
 	return servers, nil
 }
 
-func (s *Server) shutdownServers(
+func (s *Server) shutdownComponents(
 	servers []serverSpec,
-	errCh <-chan serverResult,
-	first *serverResult,
+	errCh <-chan componentResult,
+	componentCount int,
+	first *componentResult,
 ) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
 	defer cancel()
@@ -263,22 +302,19 @@ func (s *Server) shutdownServers(
 	if err := s.store.Close(); err != nil {
 		joined = joinError(joined, fmt.Errorf("close postgres store: %w", err))
 	}
-	if joined != nil {
-		return joined
-	}
 
-	pending := len(servers)
+	pending := componentCount
 	if first != nil {
 		pending--
 		if first.err != nil {
-			joined = fmt.Errorf("%s http server: %w", first.name, first.err)
+			joined = joinError(joined, formatComponentError(*first))
 		}
 	}
 	for range pending {
 		select {
 		case result := <-errCh:
 			if result.err != nil {
-				joined = joinError(joined, fmt.Errorf("%s http server: %w", result.name, result.err))
+				joined = joinError(joined, formatComponentError(result))
 			}
 		case <-shutdownCtx.Done():
 			return joinError(joined, shutdownCtx.Err())
@@ -294,9 +330,74 @@ type serverSpec struct {
 	listener net.Listener
 }
 
-type serverResult struct {
+type backgroundJobSpec struct {
+	name string
+	job  BackgroundJob
+}
+
+type componentResult struct {
 	name string
 	err  error
+}
+
+func formatComponentError(result componentResult) error {
+	return fmt.Errorf("%s: %w", result.name, result.err)
+}
+
+func newCASPromotionJobs(
+	cfg Config,
+	store *postgres.Store,
+	objects objectstore.Store,
+	logger *slog.Logger,
+) ([]BackgroundJob, error) {
+	cfg = cfg.withDefaults()
+	if !cfg.CASPromotionEnabled {
+		return []BackgroundJob{}, nil
+	}
+	if store == nil {
+		return nil, errors.New("postgres url is required when cas promotion worker is enabled")
+	}
+	if objects == nil {
+		return nil, errors.New("s3 upload storage is required when cas promotion worker is enabled")
+	}
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+
+	casService := cas.NewService(cas.ServiceConfig{
+		Store:   store.CAS(),
+		Objects: objects,
+	})
+
+	return []BackgroundJob{jobs.New(jobs.Config{
+		Handler: promote.New(promote.Config{
+			Uploads: store.Uploads(),
+			CAS:     casService,
+		}),
+		WorkerID:               jobs.Identity{NodeName: cfg.NodeName, RunID: cfg.RunID}.WorkerID("cas-promotion"),
+		Interval:               cfg.CASPromotionPollInterval,
+		ErrorBackoffInitial:    cfg.CASPromotionErrorBackoffInitial,
+		ErrorBackoffMax:        cfg.CASPromotionErrorBackoffMax,
+		CircuitBreakerFailures: cfg.CASPromotionCircuitBreakerFailures,
+		CircuitBreakerCooldown: cfg.CASPromotionCircuitBreakerCooldown,
+		Logger:                 logger.With("component", "cas-promotion"),
+	})}, nil
+}
+
+func backgroundJobSpecs(jobs []BackgroundJob) []backgroundJobSpec {
+	specs := make([]backgroundJobSpec, 0, len(jobs))
+	for index, job := range jobs {
+		if job == nil {
+			continue
+		}
+
+		specs = append(specs, backgroundJobSpec{
+			name: fmt.Sprintf("background-%d", index+1),
+			job:  job,
+		})
+	}
+
+	return specs
 }
 
 func joinError(existing error, next error) error {
