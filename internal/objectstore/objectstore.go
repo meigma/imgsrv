@@ -44,13 +44,28 @@ const (
 
 // Store exposes bucket-relative object storage operations.
 type Store interface {
+	// CreateMultipartUpload starts a multipart write for a bucket-relative key.
 	CreateMultipartUpload(context.Context, CreateMultipartUploadParams) (MultipartUpload, error)
+
+	// PutPart writes or replaces one part in an active multipart upload.
 	PutPart(context.Context, PutPartParams) (Part, error)
+
+	// CompleteMultipartUpload commits an active multipart upload into an object.
 	CompleteMultipartUpload(context.Context, CompleteMultipartUploadParams) (ObjectInfo, error)
+
+	// AbortMultipartUpload discards an active multipart upload.
 	AbortMultipartUpload(context.Context, AbortMultipartUploadParams) error
+
+	// OpenObject opens a stored object, optionally constrained to a byte range.
 	OpenObject(context.Context, OpenObjectParams) (ObjectReader, error)
+
+	// StatObject returns metadata for a stored object.
 	StatObject(context.Context, StatObjectParams) (ObjectInfo, error)
+
+	// CopyObject copies an object to another bucket-relative key.
 	CopyObject(context.Context, CopyObjectParams) (ObjectInfo, error)
+
+	// DeleteObject removes a stored object.
 	DeleteObject(context.Context, DeleteObjectParams) error
 }
 
