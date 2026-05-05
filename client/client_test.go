@@ -122,6 +122,12 @@ func TestClientUploadFlowBuildsRequests(t *testing.T) {
 
 		writeJSON(t, w, http.StatusOK, uploadSessionFixture(UploadStateCompleted))
 	})
+	mux.HandleFunc("/api/v1/uploads/"+testUploadID+"/abort", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodPost)
+		assert.Zero(t, r.ContentLength)
+
+		writeJSON(t, w, http.StatusOK, uploadSessionFixture(UploadStateAborted))
+	})
 	mux.HandleFunc("/api/v1/uploads/"+testUploadID, func(w http.ResponseWriter, r *http.Request) {
 		assertRequestBasics(t, r, http.MethodGet)
 		writeJSON(t, w, http.StatusOK, uploadSessionFixture(UploadStateCompleted))
@@ -157,6 +163,10 @@ func TestClientUploadFlowBuildsRequests(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, UploadStateCompleted, complete.State)
+
+	aborted, err := uploads.AbortUpload(ctx, begin.ID.String())
+	require.NoError(t, err)
+	assert.Equal(t, UploadStateAborted, aborted.State)
 
 	status, err := uploads.GetUpload(ctx, begin.ID.String())
 	require.NoError(t, err)

@@ -19,6 +19,9 @@ type UploadsClient interface {
 	// CompleteUpload completes a staged multipart upload.
 	CompleteUpload(context.Context, string, CompleteUploadRequest) (UploadSession, error)
 
+	// AbortUpload aborts a mutable upload session.
+	AbortUpload(context.Context, string) (UploadSession, error)
+
 	// GetUpload returns current durable upload state.
 	GetUpload(context.Context, string) (UploadSession, error)
 }
@@ -139,6 +142,15 @@ func (client *HTTPUploadsClient) CompleteUpload(
 	var session UploadSession
 	path := "/v1/uploads/" + url.PathEscape(uploadID) + "/complete"
 	err := client.transport.doJSON(ctx, http.MethodPost, path, request, nil, http.StatusOK, &session)
+
+	return session, err
+}
+
+// AbortUpload aborts a mutable upload session.
+func (client *HTTPUploadsClient) AbortUpload(ctx context.Context, uploadID string) (UploadSession, error) {
+	var session UploadSession
+	path := "/v1/uploads/" + url.PathEscape(uploadID) + "/abort"
+	err := client.transport.do(ctx, http.MethodPost, path, nil, 0, nil, http.StatusOK, &session)
 
 	return session, err
 }

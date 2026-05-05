@@ -173,6 +173,25 @@ func (a *api) completeUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, newUploadSessionResponse(session))
 }
 
+func (a *api) abortUpload(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.uploadService(w)
+	if !ok {
+		return
+	}
+	uploadID, ok := parseUploadIDPath(w, r)
+	if !ok {
+		return
+	}
+
+	session, err := service.AbortUpload(r.Context(), uploads.AbortUploadParams{UploadID: uploadID})
+	if err != nil {
+		writeUploadError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newUploadSessionResponse(session))
+}
+
 func (a *api) uploadService(w http.ResponseWriter) (UploadService, bool) {
 	if a.uploads == nil {
 		writeProblem(w, http.StatusServiceUnavailable, errUploadServiceUnavailable.Error())
