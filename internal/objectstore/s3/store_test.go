@@ -251,6 +251,36 @@ func TestCopyObjectIfDestinationAbsentUsesSingleCopyPrecondition(t *testing.T) {
 	}, copied)
 }
 
+func TestCopyObjectUsesExplicitSourceETagPrecondition(t *testing.T) {
+	var sourceIfMatch string
+	store := newHTTPTestStore(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodHead && r.URL.Path == "/imgsrv/source":
+			writeObjectHeaders(w, 4, "current-source-etag")
+		case r.Method == http.MethodPut && r.URL.Path == "/imgsrv/dest" && r.URL.RawQuery == "":
+			sourceIfMatch = r.Header.Get("X-Amz-Copy-Source-If-Match")
+			writeXML(w, `<CopyObjectResult><ETag>"dest-etag"</ETag></CopyObjectResult>`)
+		default:
+			t.Errorf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+			http.NotFound(w, r)
+		}
+	}))
+
+	copied, err := store.CopyObject(context.Background(), objectstore.CopyObjectParams{
+		SourceKey:      "source",
+		IfSourceETag:   "verified-source-etag",
+		DestinationKey: "dest",
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "verified-source-etag", sourceIfMatch)
+	assert.Equal(t, objectstore.ObjectInfo{
+		Key:       "dest",
+		SizeBytes: 4,
+		ETag:      "dest-etag",
+	}, copied)
+}
+
 func TestCopyObjectMapsSourcePreconditionFailureToConflict(t *testing.T) {
 	var sourceIfMatch string
 	store := newHTTPTestStore(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

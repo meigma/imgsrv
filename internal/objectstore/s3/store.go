@@ -368,7 +368,7 @@ func (store *Store) copyObjectMultipart(
 	}()
 
 	completeParts := make([]minio.CompletePart, 0, len(parts))
-	matchSource := map[string]string{"x-amz-copy-source-if-match": sourceInfo.ETag}
+	matchSource := sourceMatchHeaders(params, sourceInfo)
 	for _, part := range parts {
 		completePart, copyErr := core.CopyObjectPart(
 			ctx,
@@ -383,7 +383,7 @@ func (store *Store) copyObjectMultipart(
 			matchSource,
 		)
 		if copyErr != nil {
-			return objectstore.ObjectInfo{}, mapError(copyErr)
+			return objectstore.ObjectInfo{}, mapSingleCopyError(copyErr)
 		}
 		if partErr := validateCopiedPart(completePart); partErr != nil {
 			return objectstore.ObjectInfo{}, partErr
@@ -507,8 +507,8 @@ func closeAfterError(closer io.Closer, err error) error {
 
 func copyHeaders(params objectstore.CopyObjectParams, sourceInfo minio.ObjectInfo) map[string]string {
 	headers := map[string]string{}
-	if strings.TrimSpace(sourceInfo.ETag) != "" {
-		headers["x-amz-copy-source-if-match"] = sourceInfo.ETag
+	if sourceETag := sourceMatchETag(params, sourceInfo); sourceETag != "" {
+		headers["x-amz-copy-source-if-match"] = sourceETag
 	}
 	if params.IfDestinationAbsent {
 		headers["If-None-Match"] = "*"
@@ -518,6 +518,23 @@ func copyHeaders(params objectstore.CopyObjectParams, sourceInfo minio.ObjectInf
 	}
 
 	return headers
+}
+
+func sourceMatchHeaders(params objectstore.CopyObjectParams, sourceInfo minio.ObjectInfo) map[string]string {
+	sourceETag := sourceMatchETag(params, sourceInfo)
+	if sourceETag == "" {
+		return nil
+	}
+
+	return map[string]string{"x-amz-copy-source-if-match": sourceETag}
+}
+
+func sourceMatchETag(params objectstore.CopyObjectParams, sourceInfo minio.ObjectInfo) string {
+	if sourceETag := strings.TrimSpace(params.IfSourceETag); sourceETag != "" {
+		return sourceETag
+	}
+
+	return strings.TrimSpace(sourceInfo.ETag)
 }
 
 func mapSingleCopyError(err error) error {
