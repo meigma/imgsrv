@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"net/http"
 	"testing"
 
 	"github.com/google/uuid"
@@ -107,6 +108,47 @@ func TestUploadFlowStagesCompletedObject(t *testing.T) {
 	opened, err := io.ReadAll(reader.Body)
 	require.NoError(t, err)
 	assert.Equal(t, payload, opened)
+}
+
+func TestUploadFlowAbortsMutableUpload(t *testing.T) {
+	env := harness.Start(t)
+	ctx := t.Context()
+	payload := []byte("imgsrv integration abort upload payload")
+	expectedDigest := imgsrv.Digest(digestFor(payload))
+	client := newClient(t, env)
+	uploadsClient := client.Uploads()
+
+	begin, err := uploadsClient.BeginUpload(ctx, imgsrv.BeginUploadRequest{
+		ExpectedDigest:    expectedDigest,
+		ExpectedSizeBytes: int64(len(payload)),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, imgsrv.UploadStateCreated, begin.State)
+
+	part, err := uploadsClient.PutUploadPart(ctx, begin.ID.String(), 1, bytes.NewReader(payload), int64(len(payload)))
+	require.NoError(t, err)
+	assert.Equal(t, begin.ID, part.UploadID)
+
+	aborted, err := uploadsClient.AbortUpload(ctx, begin.ID.String())
+	require.NoError(t, err)
+	assert.Equal(t, begin.ID, aborted.ID)
+	assert.Equal(t, imgsrv.UploadStateAborted, aborted.State)
+
+	status, err := uploadsClient.GetUpload(ctx, begin.ID.String())
+	require.NoError(t, err)
+	assert.Equal(t, begin.ID, status.ID)
+	assert.Equal(t, imgsrv.UploadStateAborted, status.State)
+
+	_, err = uploadsClient.CompleteUpload(ctx, begin.ID.String(), imgsrv.CompleteUploadRequest{
+		Parts: []imgsrv.CompleteUploadPart{{
+			Number:    part.PartNumber,
+			ETag:      part.ETag,
+			SizeBytes: part.SizeBytes,
+		}},
+	})
+	var problem *imgsrv.ProblemError
+	require.ErrorAs(t, err, &problem)
+	assert.Equal(t, http.StatusPreconditionFailed, problem.HTTPStatus)
 }
 
 type stagedObject struct {

@@ -38,6 +38,72 @@ func (_m *MockUploadService) EXPECT() *MockUploadService_Expecter {
 	return &MockUploadService_Expecter{mock: &_m.Mock}
 }
 
+// AbortUpload provides a mock function for the type MockUploadService
+func (_mock *MockUploadService) AbortUpload(context1 context.Context, abortUploadParams uploads.AbortUploadParams) (uploads.Session, error) {
+	ret := _mock.Called(context1, abortUploadParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for AbortUpload")
+	}
+
+	var r0 uploads.Session
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uploads.AbortUploadParams) (uploads.Session, error)); ok {
+		return returnFunc(context1, abortUploadParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uploads.AbortUploadParams) uploads.Session); ok {
+		r0 = returnFunc(context1, abortUploadParams)
+	} else {
+		r0 = ret.Get(0).(uploads.Session)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uploads.AbortUploadParams) error); ok {
+		r1 = returnFunc(context1, abortUploadParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockUploadService_AbortUpload_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AbortUpload'
+type MockUploadService_AbortUpload_Call struct {
+	*mock.Call
+}
+
+// AbortUpload is a helper method to define mock.On call
+//   - context1 context.Context
+//   - abortUploadParams uploads.AbortUploadParams
+func (_e *MockUploadService_Expecter) AbortUpload(context1 interface{}, abortUploadParams interface{}) *MockUploadService_AbortUpload_Call {
+	return &MockUploadService_AbortUpload_Call{Call: _e.mock.On("AbortUpload", context1, abortUploadParams)}
+}
+
+func (_c *MockUploadService_AbortUpload_Call) Run(run func(context1 context.Context, abortUploadParams uploads.AbortUploadParams)) *MockUploadService_AbortUpload_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uploads.AbortUploadParams
+		if args[1] != nil {
+			arg1 = args[1].(uploads.AbortUploadParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockUploadService_AbortUpload_Call) Return(session uploads.Session, err error) *MockUploadService_AbortUpload_Call {
+	_c.Call.Return(session, err)
+	return _c
+}
+
+func (_c *MockUploadService_AbortUpload_Call) RunAndReturn(run func(context1 context.Context, abortUploadParams uploads.AbortUploadParams) (uploads.Session, error)) *MockUploadService_AbortUpload_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // BeginUpload provides a mock function for the type MockUploadService
 func (_mock *MockUploadService) BeginUpload(context1 context.Context, beginUploadParams uploads.BeginUploadParams) (uploads.Session, error) {
 	ret := _mock.Called(context1, beginUploadParams)

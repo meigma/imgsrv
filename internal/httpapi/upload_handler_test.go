@@ -170,6 +170,30 @@ func TestCompleteUploadSubmitsAcceptedPartList(t *testing.T) {
 	assert.Equal(t, uploads.SessionStateCompleted, got.State)
 }
 
+func TestAbortUploadReturnsAbortedSession(t *testing.T) {
+	tc := newUploadHandlerTestContext(t)
+	wantSession := uploadSessionFixture(uploads.SessionStateAborted)
+
+	tc.uploads.EXPECT().
+		AbortUpload(mock.Anything, uploads.AbortUploadParams{UploadID: uploadIDFixture()}).
+		Return(wantSession, nil)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/uploads/"+uploadIDFixture().String()+"/abort",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got uploadSessionResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, uploadIDFixture().String(), got.ID)
+	assert.Equal(t, uploads.SessionStateAborted, got.State)
+}
+
 func TestUploadHandlersRejectInvalidRequests(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -230,6 +254,12 @@ func TestUploadHandlersRejectInvalidRequests(t *testing.T) {
 			body:   `{"parts":[]}`,
 			want:   "upload id must be a UUID",
 		},
+		{
+			name:   "abort rejects invalid upload id",
+			method: http.MethodPost,
+			path:   "/v1/uploads/not-a-uuid/abort",
+			want:   "upload id must be a UUID",
+		},
 	}
 
 	for _, tt := range tests {
@@ -245,6 +275,36 @@ func TestUploadHandlersRejectInvalidRequests(t *testing.T) {
 
 			require.Equal(t, http.StatusBadRequest, rec.Code)
 			assertProblem(t, rec, http.StatusBadRequest, tt.want)
+		})
+	}
+}
+
+func TestAbortUploadMapsDomainErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantCode int
+	}{
+		{name: "invalid input", err: uploads.ErrInvalid, wantCode: http.StatusBadRequest},
+		{name: "not found", err: uploads.ErrNotFound, wantCode: http.StatusNotFound},
+		{name: "conflict", err: uploads.ErrConflict, wantCode: http.StatusConflict},
+		{name: "failed precondition", err: uploads.ErrFailedPrecondition, wantCode: http.StatusPreconditionFailed},
+		{name: "unexpected", err: errors.New("database unavailable"), wantCode: http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := newUploadHandlerTestContext(t)
+			tc.uploads.EXPECT().
+				AbortUpload(mock.Anything, uploads.AbortUploadParams{UploadID: uploadIDFixture()}).
+				Return(uploads.Session{}, tt.err)
+			req := httptest.NewRequest(http.MethodPost, "/v1/uploads/"+uploadIDFixture().String()+"/abort", nil)
+			rec := httptest.NewRecorder()
+
+			tc.handler.ServeHTTP(rec, req)
+
+			require.Equal(t, tt.wantCode, rec.Code)
+			assertProblem(t, rec, tt.wantCode, tt.err.Error())
 		})
 	}
 }
@@ -329,6 +389,23 @@ func TestUploadHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 			name:   "get",
 			method: http.MethodGet,
 			path:   "/v1/uploads/" + uploadIDFixture().String(),
+		},
+		{
+			name:   "part",
+			method: http.MethodPut,
+			path:   "/v1/uploads/" + uploadIDFixture().String() + "/parts/1",
+			body:   "hello",
+		},
+		{
+			name:   "complete",
+			method: http.MethodPost,
+			path:   "/v1/uploads/" + uploadIDFixture().String() + "/complete",
+			body:   `{"parts":[]}`,
+		},
+		{
+			name:   "abort",
+			method: http.MethodPost,
+			path:   "/v1/uploads/" + uploadIDFixture().String() + "/abort",
 		},
 	}
 

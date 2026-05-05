@@ -59,6 +59,9 @@ type UploadService interface {
 	// CompleteUpload completes a staged multipart upload.
 	CompleteUpload(context.Context, uploads.CompleteUploadParams) (uploads.Session, error)
 
+	// AbortUpload aborts a mutable upload session.
+	AbortUpload(context.Context, uploads.AbortUploadParams) (uploads.Session, error)
+
 	// GetUpload returns current durable upload state.
 	GetUpload(context.Context, uploads.GetUploadParams) (uploads.Session, error)
 }
@@ -107,6 +110,7 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /v1/uploads/{upload_id}", api.getUpload)
 	mux.HandleFunc("PUT /v1/uploads/{upload_id}/parts/{part_number}", api.putUploadPart)
 	mux.HandleFunc("POST /v1/uploads/{upload_id}/complete", api.completeUpload)
+	mux.HandleFunc("POST /v1/uploads/{upload_id}/abort", api.abortUpload)
 
 	return deps.Telemetry.WrapHTTPHandler(Chain(mux, logRequests(logger)))
 }
