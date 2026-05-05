@@ -15,7 +15,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	imgsrv "github.com/meigma/imgsrv/client"
+	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/integration/harness"
+	"github.com/meigma/imgsrv/internal/jobs/promote"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
@@ -69,19 +71,42 @@ func TestUploadFlowStagesCompletedObject(t *testing.T) {
 	assert.Equal(t, payload, staged.Body)
 	assert.Equal(t, int64(len(payload)), staged.SizeBytes)
 
-	// This intentionally stops at the queued ingest handoff. Claiming proves
-	// completion enqueued durable CAS work, but worker and promotion wiring are
-	// not part of the current integration flow.
-	job, err := env.Store().Uploads().ClaimIngestJob(ctx, uploads.ClaimIngestJobParams{
-		WorkerID: "integration-test",
-	})
+	digest, err := uploads.ParseDigest(expectedDigest.String())
 	require.NoError(t, err)
-	assert.Equal(t, uploadID, job.UploadID)
-	assert.Equal(t, uploads.IngestJobStateRunning, job.State)
-	assert.Equal(t, 1, job.AttemptCount)
-	if assert.NotNil(t, job.LockedBy) {
-		assert.Equal(t, "integration-test", *job.LockedBy)
-	}
+	casService := cas.NewService(cas.ServiceConfig{
+		Store:   env.Store().CAS(),
+		Objects: env.ObjectStore(),
+	})
+	promotionJob := promote.New(promote.Config{
+		Uploads: env.Store().Uploads(),
+		CAS:     casService,
+	})
+	promotion, err := promotionJob.RunOnce(ctx, "integration-test")
+	require.NoError(t, err)
+	assert.True(t, promotion.Worked)
+
+	ready, err := uploadsClient.GetUpload(ctx, begin.ID.String())
+	require.NoError(t, err)
+	assert.Equal(t, begin.ID, ready.ID)
+	assert.Equal(t, imgsrv.UploadStateReady, ready.State)
+
+	blob, err := env.Store().CAS().GetBlob(ctx, cas.GetBlobParams{Digest: digest})
+	require.NoError(t, err)
+	assert.Equal(t, digest, blob.Digest)
+	assert.Equal(t, int64(len(payload)), blob.SizeBytes)
+
+	casObject := readObject(ctx, t, env, cas.StorageKey(digest))
+	assert.Equal(t, payload, casObject.Body)
+	assert.Equal(t, int64(len(payload)), casObject.SizeBytes)
+
+	reader, err := casService.OpenBlob(ctx, cas.OpenBlobParams{Digest: digest})
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, reader.Body.Close())
+	}()
+	opened, err := io.ReadAll(reader.Body)
+	require.NoError(t, err)
+	assert.Equal(t, payload, opened)
 }
 
 type stagedObject struct {
