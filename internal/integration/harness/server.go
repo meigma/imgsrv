@@ -23,16 +23,42 @@ import (
 )
 
 const (
-	serverStartupTimeout        = 5 * time.Second
-	serverShutdownTimeout       = 5 * time.Second
-	serverReadyInterval         = 10 * time.Millisecond
-	casPromotionWorkerNodeName  = "imgsrv-integration"
-	casPromotionWorkerRunID     = "test"
-	casPromotionWorkerName      = "cas-promotion"
-	casPromotionPollInterval    = 10 * time.Millisecond
+	// serverStartupTimeout bounds how long the harness waits for the in-process
+	// HTTP server to become ready.
+	serverStartupTimeout = 5 * time.Second
+
+	// serverShutdownTimeout bounds how long the harness gives the server to
+	// drain on test teardown.
+	serverShutdownTimeout = 5 * time.Second
+
+	// serverReadyInterval is the polling interval used while waiting for the
+	// server health endpoint to respond.
+	serverReadyInterval = 10 * time.Millisecond
+
+	// casPromotionWorkerNodeName is the static node name used in the worker ID
+	// for the integration CAS promotion job.
+	casPromotionWorkerNodeName = "imgsrv-integration"
+
+	// casPromotionWorkerRunID is the static run ID used in the worker ID for
+	// the integration CAS promotion job.
+	casPromotionWorkerRunID = "test"
+
+	// casPromotionWorkerName is the job name suffix used in the worker ID and
+	// in logger attributes for the CAS promotion job.
+	casPromotionWorkerName = "cas-promotion"
+
+	// casPromotionPollInterval is the poll cadence the integration CAS
+	// promotion job uses when looking for queued ingest jobs.
+	casPromotionPollInterval = 10 * time.Millisecond
+
+	// casPromotionErrorBackoffMax caps the exponential backoff applied after
+	// CAS promotion failures during integration runs.
 	casPromotionErrorBackoffMax = 100 * time.Millisecond
 )
 
+// startServer constructs and runs the in-process imgsrv HTTP server, waits for
+// it to become ready, and returns its base URL. It registers a cleanup that
+// shuts the server down at test teardown.
 func startServer(
 	ctx context.Context,
 	t testing.TB,
@@ -79,6 +105,8 @@ func startServer(
 	return baseURL
 }
 
+// waitForServer polls the server health endpoint until it returns 204, the
+// server exits early via errCh, or the startup timeout elapses.
 func waitForServer(ctx context.Context, t testing.TB, baseURL string, errCh <-chan error) {
 	t.Helper()
 
@@ -116,6 +144,9 @@ func waitForServer(ctx context.Context, t testing.TB, baseURL string, errCh <-ch
 	}
 }
 
+// backgroundJobs builds the optional in-process background jobs the harness
+// runs alongside the HTTP server. It returns nil unless CAS promotion was
+// requested via WithCASPromotion.
 func backgroundJobs(
 	options options,
 	store *postgres.Store,

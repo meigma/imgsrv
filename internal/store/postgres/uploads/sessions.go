@@ -156,6 +156,9 @@ func (store *Store) AbortSession(ctx context.Context, params domain.AbortSession
 	return session, nil
 }
 
+// requireMutableUploadSession transitions the upload session into uploading
+// when it is still in created or uploading, and returns ErrFailedPrecondition
+// when the session exists but no longer accepts new parts.
 func requireMutableUploadSession(ctx context.Context, tx pgx.Tx, uploadID uuid.UUID) error {
 	tag, err := tx.Exec(
 		ctx,
@@ -190,6 +193,9 @@ func requireMutableUploadSession(ctx context.Context, tx pgx.Tx, uploadID uuid.U
 	return fmt.Errorf("%w: upload session does not accept parts", domain.ErrFailedPrecondition)
 }
 
+// completeSession marks the upload session completed and queues a CAS ingest
+// job, treating a session that is already past completion idempotently and
+// returning ErrFailedPrecondition for terminal or pre-completion states.
 func completeSession(ctx context.Context, tx pgx.Tx, uploadID uuid.UUID) (domain.Session, error) {
 	session, err := scanSession(tx.QueryRow(
 		ctx,
@@ -239,6 +245,9 @@ func completeSession(ctx context.Context, tx pgx.Tx, uploadID uuid.UUID) (domain
 	)
 }
 
+// abortSession transitions the upload session to aborted from created or
+// uploading and returns ErrFailedPrecondition when the session is in any
+// other state.
 func abortSession(ctx context.Context, tx pgx.Tx, uploadID uuid.UUID) (domain.Session, error) {
 	session, err := scanSession(tx.QueryRow(
 		ctx,
@@ -275,6 +284,8 @@ func abortSession(ctx context.Context, tx pgx.Tx, uploadID uuid.UUID) (domain.Se
 	)
 }
 
+// queueIngestJob inserts a queued CAS ingest job for the completed upload
+// session, treating an existing job for the same upload as a no-op.
 func queueIngestJob(ctx context.Context, tx pgx.Tx, session domain.Session) (domain.Session, error) {
 	_, err := tx.Exec(
 		ctx,

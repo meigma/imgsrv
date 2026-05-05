@@ -14,44 +14,85 @@ import (
 	"github.com/meigma/imgsrv/internal/uploads"
 )
 
+// jsonControlBodyLimitBytes caps the size of JSON control-plane request bodies.
 const jsonControlBodyLimitBytes = 1 << 20
 
+// errUploadServiceUnavailable signals that upload routes were called without a configured UploadService.
 var errUploadServiceUnavailable = errors.New("upload service is not configured")
 
+// beginUploadRequest is the JSON body for POST /v1/uploads.
 type beginUploadRequest struct {
-	ExpectedDigest    string  `json:"expected_digest"`
-	ExpectedSizeBytes int64   `json:"expected_size_bytes"`
-	MediaTypeHint     *string `json:"media_type_hint,omitempty"`
-	FilenameHint      *string `json:"filename_hint,omitempty"`
+	// ExpectedDigest is the sha256 digest the uploaded bytes must verify against.
+	ExpectedDigest string `json:"expected_digest"`
+
+	// ExpectedSizeBytes is the declared total size of the uploaded object.
+	ExpectedSizeBytes int64 `json:"expected_size_bytes"`
+
+	// MediaTypeHint optionally carries operator-provided content-type context.
+	MediaTypeHint *string `json:"media_type_hint,omitempty"`
+
+	// FilenameHint optionally carries operator-provided filename context.
+	FilenameHint *string `json:"filename_hint,omitempty"`
 }
 
+// completeUploadRequest is the JSON body for POST /v1/uploads/{upload_id}/complete.
 type completeUploadRequest struct {
+	// Parts lists every uploaded part in S3-compatible multipart order.
 	Parts []completeUploadPartRequest `json:"parts"`
 }
 
+// completeUploadPartRequest describes one part as the client observed it during upload.
 type completeUploadPartRequest struct {
-	Number    int    `json:"number"`
-	ETag      string `json:"etag"`
-	SizeBytes int64  `json:"size_bytes"`
+	// Number is the S3-compatible multipart part number.
+	Number int `json:"number"`
+
+	// ETag is the backing object-storage part ETag the server returned during PUT.
+	ETag string `json:"etag"`
+
+	// SizeBytes is the part size the client uploaded.
+	SizeBytes int64 `json:"size_bytes"`
 }
 
+// uploadSessionResponse is the JSON wire shape of an upload session.
 type uploadSessionResponse struct {
-	ID                string               `json:"id"`
-	ExpectedDigest    string               `json:"expected_digest"`
-	ExpectedSizeBytes int64                `json:"expected_size_bytes"`
-	State             uploads.SessionState `json:"state"`
-	ExpiresAt         string               `json:"expires_at"`
-	MediaTypeHint     *string              `json:"media_type_hint,omitempty"`
-	FilenameHint      *string              `json:"filename_hint,omitempty"`
+	// ID is the stable upload session identity.
+	ID string `json:"id"`
+
+	// ExpectedDigest is the sha256 digest the uploaded bytes must verify against.
+	ExpectedDigest string `json:"expected_digest"`
+
+	// ExpectedSizeBytes is the declared total size of the uploaded object.
+	ExpectedSizeBytes int64 `json:"expected_size_bytes"`
+
+	// State is the durable upload lifecycle state.
+	State uploads.SessionState `json:"state"`
+
+	// ExpiresAt is the RFC 3339 timestamp at which unfinished upload state may be cleaned up.
+	ExpiresAt string `json:"expires_at"`
+
+	// MediaTypeHint echoes the operator-provided content-type context when supplied.
+	MediaTypeHint *string `json:"media_type_hint,omitempty"`
+
+	// FilenameHint echoes the operator-provided filename context when supplied.
+	FilenameHint *string `json:"filename_hint,omitempty"`
 }
 
+// uploadPartResponse is the JSON wire shape returned after a successful part PUT.
 type uploadPartResponse struct {
-	UploadID   string `json:"upload_id"`
-	PartNumber int    `json:"part_number"`
-	ETag       string `json:"etag"`
-	SizeBytes  int64  `json:"size_bytes"`
+	// UploadID identifies the parent upload session.
+	UploadID string `json:"upload_id"`
+
+	// PartNumber is the S3-compatible multipart part number that was accepted.
+	PartNumber int `json:"part_number"`
+
+	// ETag is the backing object-storage part ETag for the accepted bytes.
+	ETag string `json:"etag"`
+
+	// SizeBytes is the accepted part size.
+	SizeBytes int64 `json:"size_bytes"`
 }
 
+// beginUpload handles POST /v1/uploads and starts a new upload session.
 func (a *api) beginUpload(w http.ResponseWriter, r *http.Request) {
 	service, ok := a.uploadService(w)
 	if !ok {
@@ -84,6 +125,7 @@ func (a *api) beginUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, newUploadSessionResponse(session))
 }
 
+// putUploadPart handles PUT /v1/uploads/{upload_id}/parts/{part_number} and stores or replaces one part.
 func (a *api) putUploadPart(w http.ResponseWriter, r *http.Request) {
 	service, ok := a.uploadService(w)
 	if !ok {
@@ -117,6 +159,7 @@ func (a *api) putUploadPart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// getUpload handles GET /v1/uploads/{upload_id} and returns current durable upload state.
 func (a *api) getUpload(w http.ResponseWriter, r *http.Request) {
 	service, ok := a.uploadService(w)
 	if !ok {
@@ -136,6 +179,7 @@ func (a *api) getUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, newUploadSessionResponse(session))
 }
 
+// completeUpload handles POST /v1/uploads/{upload_id}/complete and finalizes a staged multipart upload.
 func (a *api) completeUpload(w http.ResponseWriter, r *http.Request) {
 	service, ok := a.uploadService(w)
 	if !ok {
@@ -173,6 +217,7 @@ func (a *api) completeUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, newUploadSessionResponse(session))
 }
 
+// abortUpload handles POST /v1/uploads/{upload_id}/abort and aborts a mutable upload session.
 func (a *api) abortUpload(w http.ResponseWriter, r *http.Request) {
 	service, ok := a.uploadService(w)
 	if !ok {
@@ -192,6 +237,7 @@ func (a *api) abortUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, newUploadSessionResponse(session))
 }
 
+// uploadService returns the configured UploadService or writes a 503 problem and reports false.
 func (a *api) uploadService(w http.ResponseWriter) (UploadService, bool) {
 	if a.uploads == nil {
 		writeProblem(w, http.StatusServiceUnavailable, errUploadServiceUnavailable.Error())
@@ -201,6 +247,9 @@ func (a *api) uploadService(w http.ResponseWriter) (UploadService, bool) {
 	return a.uploads, true
 }
 
+// parseUploadPartPath extracts and validates the upload ID and part number path values.
+//
+// On failure it writes a problem response and returns false; callers should not write further.
 func parseUploadPartPath(w http.ResponseWriter, r *http.Request) (uuid.UUID, int, bool) {
 	uploadID, ok := parseUploadIDPath(w, r)
 	if !ok {
@@ -220,6 +269,9 @@ func parseUploadPartPath(w http.ResponseWriter, r *http.Request) (uuid.UUID, int
 	return uploadID, partNumber, true
 }
 
+// parseUploadIDPath extracts and validates the upload ID path value.
+//
+// On failure it writes a problem response and returns false; callers should not write further.
 func parseUploadIDPath(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	uploadID, err := uuid.Parse(r.PathValue("upload_id"))
 	if err != nil {
@@ -230,6 +282,10 @@ func parseUploadIDPath(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool)
 	return uploadID, true
 }
 
+// decodeControlJSON strictly decodes a single JSON value into dst.
+//
+// The request body is bounded by jsonControlBodyLimitBytes, unknown fields are
+// rejected, and bodies containing more than one JSON value are rejected.
 func decodeControlJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, jsonControlBodyLimitBytes)
 	decoder := json.NewDecoder(r.Body)
@@ -244,12 +300,14 @@ func decodeControlJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	return nil
 }
 
+// writeJSON writes value as application/json with the provided status code.
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
 
+// newUploadSessionResponse projects a durable upload session onto its JSON wire shape.
 func newUploadSessionResponse(session uploads.Session) uploadSessionResponse {
 	return uploadSessionResponse{
 		ID:                session.ID.String(),

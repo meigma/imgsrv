@@ -11,13 +11,24 @@ import (
 )
 
 const (
-	sqlStateCheckViolation      = "23514"
+	// sqlStateCheckViolation is the Postgres SQLSTATE for a check-constraint failure.
+	sqlStateCheckViolation = "23514"
+
+	// sqlStateForeignKeyViolation is the Postgres SQLSTATE for a foreign-key violation.
 	sqlStateForeignKeyViolation = "23503"
-	sqlStateInvalidText         = "22P02"
-	sqlStateNotNullViolation    = "23502"
-	sqlStateUniqueViolation     = "23505"
+
+	// sqlStateInvalidText is the Postgres SQLSTATE for invalid text representation.
+	sqlStateInvalidText = "22P02"
+
+	// sqlStateNotNullViolation is the Postgres SQLSTATE for a not-null constraint violation.
+	sqlStateNotNullViolation = "23502"
+
+	// sqlStateUniqueViolation is the Postgres SQLSTATE for a unique-constraint violation.
+	sqlStateUniqueViolation = "23505"
 )
 
+// mapCatalogError translates a Postgres driver error into the matching catalog
+// domain error sentinel, returning the original error when no mapping applies.
 func mapCatalogError(err error) error {
 	if err == nil {
 		return nil

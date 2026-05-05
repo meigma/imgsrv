@@ -7,10 +7,15 @@ import (
 	domain "github.com/meigma/imgsrv/internal/uploads"
 )
 
+// rowScanner is the minimal pgx row interface used by the scan helpers in
+// this package, keeping them usable with both QueryRow results and rows
+// iterated from Query.
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+// scanSession materializes a domain.Session from a single row, translating
+// nullable columns into their domain pointer or value representation.
 func scanSession(row rowScanner) (domain.Session, error) {
 	var session domain.Session
 	var mediaTypeHint sql.NullString
@@ -60,6 +65,7 @@ func scanSession(row rowScanner) (domain.Session, error) {
 	return session, nil
 }
 
+// scanPart materializes a domain.Part from a single row.
 func scanPart(row rowScanner) (domain.Part, error) {
 	var part domain.Part
 
@@ -78,6 +84,8 @@ func scanPart(row rowScanner) (domain.Part, error) {
 	return part, nil
 }
 
+// scanIngestJob materializes a domain.IngestJob from a single row, translating
+// nullable columns into their domain pointer representation.
 func scanIngestJob(row rowScanner) (domain.IngestJob, error) {
 	var job domain.IngestJob
 	var lockedBy sql.NullString
@@ -116,6 +124,7 @@ func scanIngestJob(row rowScanner) (domain.IngestJob, error) {
 	return job, nil
 }
 
+// optionalString returns a pointer to value.String when valid, or nil.
 func optionalString(value sql.NullString) *string {
 	if !value.Valid {
 		return nil
@@ -124,6 +133,7 @@ func optionalString(value sql.NullString) *string {
 	return &value.String
 }
 
+// optionalTime returns a pointer to value.Time when valid, or nil.
 func optionalTime(value sql.NullTime) *time.Time {
 	if !value.Valid {
 		return nil
@@ -132,6 +142,8 @@ func optionalTime(value sql.NullTime) *time.Time {
 	return &value.Time
 }
 
+// optionalDigest returns a pointer to a domain.Digest derived from value when
+// valid, or nil.
 func optionalDigest(value sql.NullString) *domain.Digest {
 	if !value.Valid {
 		return nil

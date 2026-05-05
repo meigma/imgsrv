@@ -22,12 +22,18 @@ import (
 )
 
 const (
-	databaseDriverName      = "pgx"
-	migrationTableName      = "imgsrv_schema_migrations"
-	migrationsPath          = "migrations"
+	// databaseDriverName is the database/sql driver name registered by pgx.
+	databaseDriverName = "pgx"
+	// migrationTableName is the Goose schema-migration tracking table.
+	migrationTableName = "imgsrv_schema_migrations"
+	// migrationsPath is the embedded filesystem subdirectory holding migration SQL files.
+	migrationsPath = "migrations"
+	// postgresMigrationLockID is the advisory-lock key used to serialize schema migrations across processes.
 	postgresMigrationLockID = int64(0x696d677372763201)
 )
 
+// embeddedMigrations is the embedded Goose migration filesystem applied at store open.
+//
 //go:embed migrations/*.sql
 var embeddedMigrations embed.FS
 
@@ -39,10 +45,15 @@ type Config struct {
 
 // Store owns the Postgres database connection.
 type Store struct {
-	auth    auth.Store
-	cas     cas.Store
-	pool    *pgxpool.Pool
+	// auth is the API-token auth adapter backed by the shared pool.
+	auth auth.Store
+	// cas is the CAS blob and ingest-job adapter backed by the shared pool.
+	cas cas.Store
+	// pool is the underlying pgx connection pool shared by all adapters.
+	pool *pgxpool.Pool
+	// catalog is the image catalog adapter backed by the shared pool.
 	catalog catalog.Store
+	// uploads is the upload-session adapter backed by the shared pool.
 	uploads uploads.Store
 }
 
@@ -180,6 +191,7 @@ func (store *Store) SchemaVersion(ctx context.Context) (int64, error) {
 	return version, nil
 }
 
+// newMigrationProvider builds a Goose provider rooted at the embedded migration filesystem.
 func newMigrationProvider(db *sql.DB) (*goose.Provider, error) {
 	if db == nil {
 		return nil, errors.New("postgres database is required")
@@ -204,6 +216,10 @@ func newMigrationProvider(db *sql.DB) (*goose.Provider, error) {
 	return provider, nil
 }
 
+// withMigrationLock runs apply while holding the Postgres advisory migration lock.
+//
+// The lock serializes concurrent migration attempts across processes and is released even
+// when apply returns an error or the context that opened the connection is cancelled.
 func withMigrationLock(ctx context.Context, db *sql.DB, apply func() error) (err error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {
@@ -229,12 +245,14 @@ func withMigrationLock(ctx context.Context, db *sql.DB, apply func() error) (err
 	return apply()
 }
 
+// closePoolAfterError closes pool and returns the original err for the caller to propagate.
 func closePoolAfterError(pool *pgxpool.Pool, err error) error {
 	pool.Close()
 
 	return err
 }
 
+// closeMigrationAfterError closes the migration database and pool, joining any close error onto err.
 func closeMigrationAfterError(pool *pgxpool.Pool, db *sql.DB, err error) error {
 	if closeErr := db.Close(); closeErr != nil {
 		err = errors.Join(err, fmt.Errorf("close migration database: %w", closeErr))

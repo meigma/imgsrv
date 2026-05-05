@@ -115,6 +115,7 @@ func ValidateTokenID(id uuid.UUID) error {
 	return nil
 }
 
+// matches reports whether value matches the supplied regular expression pattern.
 func matches(pattern string, value string) bool {
 	matched, err := regexp.MatchString(pattern, value)
 	return err == nil && matched

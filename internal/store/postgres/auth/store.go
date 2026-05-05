@@ -9,6 +9,7 @@ import (
 
 // Store persists API-token authentication state in Postgres.
 type Store struct {
+	// pool is the pgx connection pool used for all auth queries.
 	pool *pgxpool.Pool
 }
 
@@ -17,6 +18,7 @@ func New(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
+// authDB returns the underlying pool or an error when the store is not initialized.
 func (store *Store) authDB() (*pgxpool.Pool, error) {
 	if store == nil || store.pool == nil {
 		return nil, errors.New("postgres auth store is not open")

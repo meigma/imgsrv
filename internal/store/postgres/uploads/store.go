@@ -12,6 +12,7 @@ import (
 
 // Store persists upload and CAS ingest operations in Postgres.
 type Store struct {
+	// pool is the pgx connection pool used for every read and transaction.
 	pool *pgxpool.Pool
 }
 
@@ -20,6 +21,8 @@ func New(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
+// uploadDB returns the underlying pgx pool, or an error when the store is nil
+// or has no pool wired.
 func (store *Store) uploadDB() (*pgxpool.Pool, error) {
 	if store == nil || store.pool == nil {
 		return nil, errors.New("postgres uploads store is not open")
@@ -28,6 +31,8 @@ func (store *Store) uploadDB() (*pgxpool.Pool, error) {
 	return store.pool, nil
 }
 
+// withTx runs apply inside a Postgres transaction, committing on success and
+// rolling back on any error or panic.
 func (store *Store) withTx(ctx context.Context, apply func(pgx.Tx) error) error {
 	db, err := store.uploadDB()
 	if err != nil {

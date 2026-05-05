@@ -36,8 +36,10 @@ type Config struct {
 
 // Job claims one completed upload and promotes it into CAS.
 type Job struct {
+	// uploads claims CAS ingest jobs and loads their upload sessions.
 	uploads UploadStore
-	cas     Committer
+	// cas commits verified staged uploads into content-addressed storage.
+	cas Committer
 }
 
 // New constructs a CAS promotion job from config.
@@ -89,6 +91,7 @@ func (job *Job) RunOnce(ctx context.Context, workerID string) (jobs.Result, erro
 	return jobs.Result{Worked: true}, nil
 }
 
+// dependencies returns the configured upload store and CAS committer or an error when the job is not usable.
 func (job *Job) dependencies() (UploadStore, Committer, error) {
 	if job == nil {
 		return nil, nil, errors.New("cas promotion job is not configured")

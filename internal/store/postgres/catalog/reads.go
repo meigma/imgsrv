@@ -9,6 +9,7 @@ import (
 	domain "github.com/meigma/imgsrv/internal/catalog"
 )
 
+// queryer is the subset of the pgx connection surface used by catalog read helpers.
 type queryer interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -74,6 +75,8 @@ func (store *Store) ResolveManifest(
 	return manifest, nil
 }
 
+// resolveManifestHeader loads the image and published version that form the
+// manifest header for the requested image and version.
 func resolveManifestHeader(
 	ctx context.Context,
 	db queryer,
@@ -111,6 +114,8 @@ func resolveManifestHeader(
 	return domain.Manifest{Image: image, Version: version}, nil
 }
 
+// resolveManifestArtifacts loads the artifacts for versionID and joins each
+// with its attachments in stable catalog order.
 func resolveManifestArtifacts(
 	ctx context.Context,
 	db queryer,
@@ -145,6 +150,8 @@ func resolveManifestArtifacts(
 	return manifestArtifacts, nil
 }
 
+// listArtifacts returns the release artifacts for versionID ordered by
+// operating system, architecture, format, and id.
 func listArtifacts(ctx context.Context, db queryer, versionID uuid.UUID) ([]domain.Artifact, error) {
 	rows, err := db.Query(
 		ctx,
@@ -183,6 +190,8 @@ func listArtifacts(ctx context.Context, db queryer, versionID uuid.UUID) ([]doma
 	return artifacts, nil
 }
 
+// listAttachmentsByArtifact returns the attachments for the given artifactIDs
+// grouped by parent artifact in stable catalog order.
 func listAttachmentsByArtifact(
 	ctx context.Context,
 	db queryer,

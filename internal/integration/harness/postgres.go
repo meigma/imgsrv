@@ -14,12 +14,22 @@ import (
 )
 
 const (
-	postgresImage    = "postgres:16-alpine"
+	// postgresImage is the Postgres container image used for the integration
+	// harness.
+	postgresImage = "postgres:16-alpine"
+
+	// postgresDatabase is the database name created inside the container.
 	postgresDatabase = "imgsrv"
+
+	// postgresUsername is the role the harness connects as.
 	postgresUsername = "imgsrv"
+
+	// postgresPassword is the static password seeded for the test role.
 	postgresPassword = "imgsrv"
 )
 
+// startPostgres launches a disposable Postgres container for the harness and
+// returns its connection string with sslmode disabled.
 func startPostgres(ctx context.Context, t testing.TB) string {
 	t.Helper()
 
@@ -40,6 +50,8 @@ func startPostgres(ctx context.Context, t testing.TB) string {
 	return databaseURL
 }
 
+// openStore opens the migrated Postgres store against postgresURL and
+// registers a cleanup that closes the store at test teardown.
 func openStore(ctx context.Context, t testing.TB, postgresURL string) *postgres.Store {
 	t.Helper()
 

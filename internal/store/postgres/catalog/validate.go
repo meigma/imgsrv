@@ -8,6 +8,7 @@ import (
 	domain "github.com/meigma/imgsrv/internal/catalog"
 )
 
+// validateCreateImageParams validates the inputs to Store.CreateImage.
 func validateCreateImageParams(params domain.CreateImageParams) error {
 	if err := domain.ValidateImageName(params.Name); err != nil {
 		return err
@@ -19,6 +20,8 @@ func validateCreateImageParams(params domain.CreateImageParams) error {
 	return validateOptionalText("description", params.Description)
 }
 
+// validateCreateDraftVersionParams validates the inputs to
+// Store.CreateDraftVersion.
 func validateCreateDraftVersionParams(params domain.CreateDraftVersionParams) error {
 	if err := domain.ValidateImageName(params.ImageName); err != nil {
 		return err
@@ -27,6 +30,7 @@ func validateCreateDraftVersionParams(params domain.CreateDraftVersionParams) er
 	return domain.ValidateVersion(params.Version)
 }
 
+// validateAddArtifactParams validates the inputs to Store.AddArtifact.
 func validateAddArtifactParams(params domain.AddArtifactParams) error {
 	if err := validateCreateDraftVersionParams(domain.CreateDraftVersionParams{
 		ImageName: params.ImageName,
@@ -53,6 +57,7 @@ func validateAddArtifactParams(params domain.AddArtifactParams) error {
 	return domain.ValidateRequiredText("primary media type", params.PrimaryMediaType)
 }
 
+// validateAddAttachmentParams validates the inputs to Store.AddAttachment.
 func validateAddAttachmentParams(params domain.AddAttachmentParams) error {
 	if params.ArtifactID == uuid.Nil {
 		return fmt.Errorf("%w: artifact id is required", domain.ErrInvalid)
@@ -70,10 +75,12 @@ func validateAddAttachmentParams(params domain.AddAttachmentParams) error {
 	return domain.ValidateNonNegativeSize("attachment blob size", params.BlobSizeBytes)
 }
 
+// validatePublishVersionParams validates the inputs to Store.PublishVersion.
 func validatePublishVersionParams(params domain.PublishVersionParams) error {
 	return validateCreateDraftVersionParams(domain.CreateDraftVersionParams(params))
 }
 
+// validatePutAliasParams validates the inputs to Store.PutAlias.
 func validatePutAliasParams(params domain.PutAliasParams) error {
 	if err := domain.ValidateImageName(params.ImageName); err != nil {
 		return err
@@ -85,6 +92,7 @@ func validatePutAliasParams(params domain.PutAliasParams) error {
 	return domain.ValidateVersion(params.Version)
 }
 
+// validateGetAliasParams validates the inputs to Store.GetAlias.
 func validateGetAliasParams(params domain.GetAliasParams) error {
 	if err := domain.ValidateImageName(params.ImageName); err != nil {
 		return err
@@ -93,10 +101,13 @@ func validateGetAliasParams(params domain.GetAliasParams) error {
 	return domain.ValidateAlias(params.Alias)
 }
 
+// validateResolveManifestParams validates the inputs to Store.ResolveManifest.
 func validateResolveManifestParams(params domain.ResolveManifestParams) error {
 	return validateCreateDraftVersionParams(domain.CreateDraftVersionParams(params))
 }
 
+// validateOptionalText accepts nil and otherwise enforces the required-text
+// rule for the named field.
 func validateOptionalText(field string, value *string) error {
 	if value == nil {
 		return nil
@@ -105,6 +116,7 @@ func validateOptionalText(field string, value *string) error {
 	return domain.ValidateRequiredText(field, *value)
 }
 
+// validateDigest validates that digest matches the catalog sha256 digest form.
 func validateDigest(digest domain.Digest) error {
 	_, err := domain.ParseDigest(digest.String())
 	return err

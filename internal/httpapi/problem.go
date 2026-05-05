@@ -9,6 +9,7 @@ import (
 )
 
 const (
+	// problemMediaType is the RFC 9457 problem response Content-Type.
 	problemMediaType = "application/problem+json"
 
 	// defaultProblemType keeps the initial API contract conservative. Specific
@@ -17,15 +18,28 @@ const (
 	defaultProblemType = "about:blank"
 )
 
+// problemResponse is the wire shape of an RFC 9457 problem document emitted by the API.
 type problemResponse struct {
-	Type       string                     `json:"type"`
-	Title      string                     `json:"title"`
-	Status     int                        `json:"status"`
-	Detail     string                     `json:"detail,omitempty"`
-	Instance   string                     `json:"instance,omitempty"`
+	// Type is the problem type URI. defaultProblemType is used when no specific type applies.
+	Type string `json:"type"`
+
+	// Title is a short human-readable problem summary.
+	Title string `json:"title"`
+
+	// Status is the HTTP status code embedded in the problem body.
+	Status int `json:"status"`
+
+	// Detail is an optional human-readable occurrence detail.
+	Detail string `json:"detail,omitempty"`
+
+	// Instance optionally identifies this problem occurrence.
+	Instance string `json:"instance,omitempty"`
+
+	// Extensions carries problem-type-specific extension members merged at marshal time.
 	Extensions map[string]json.RawMessage `json:"-"`
 }
 
+// MarshalJSON encodes the problem response and merges extension members alongside the RFC 9457 base fields.
 func (problem problemResponse) MarshalJSON() ([]byte, error) {
 	members := map[string]any{
 		"type":   problem.Type,
@@ -48,6 +62,7 @@ func (problem problemResponse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(members)
 }
 
+// writeProblem writes an RFC 9457 problem response with the provided status and detail.
 func writeProblem(w http.ResponseWriter, status int, detail string) {
 	w.Header().Set("Content-Type", problemMediaType)
 	w.WriteHeader(status)
@@ -59,10 +74,12 @@ func writeProblem(w http.ResponseWriter, status int, detail string) {
 	})
 }
 
+// writeUploadError translates an uploads-package error into a problem response.
 func writeUploadError(w http.ResponseWriter, err error) {
 	writeProblem(w, uploadErrorStatus(err), err.Error())
 }
 
+// uploadErrorStatus maps an uploads-package sentinel error to an HTTP status code.
 func uploadErrorStatus(err error) int {
 	switch {
 	case errors.Is(err, uploads.ErrInvalid):
@@ -78,6 +95,7 @@ func uploadErrorStatus(err error) int {
 	}
 }
 
+// isProblemBaseMember reports whether key names an RFC 9457 base problem member.
 func isProblemBaseMember(key string) bool {
 	switch key {
 	case "type", "title", "status", "detail", "instance":

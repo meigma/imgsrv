@@ -17,6 +17,7 @@ import (
 	"github.com/meigma/imgsrv/internal/uploads"
 )
 
+// storageKeyPrefix is the object-store key prefix shared by every CAS blob.
 const storageKeyPrefix = "cas/sha256/"
 
 // Error identifies a category of CAS failure.
@@ -61,7 +62,10 @@ type ServiceConfig struct {
 
 // Service commits staged objects into content-addressed storage.
 type Service struct {
-	store   Store
+	// store records verified blob state and ingest job outcomes.
+	store Store
+
+	// objects reads staged bytes and writes digest-addressed CAS objects.
 	objects objectstore.Store
 }
 
@@ -282,6 +286,8 @@ func (service *Service) OpenBlob(ctx context.Context, params OpenBlobParams) (ob
 	return reader, nil
 }
 
+// dependencies returns the configured store and object adapter or an error
+// when the service is not fully wired.
 func (service *Service) dependencies() (Store, objectstore.Store, error) {
 	if service == nil {
 		return nil, nil, errors.New("cas service is not configured")
@@ -296,6 +302,8 @@ func (service *Service) dependencies() (Store, objectstore.Store, error) {
 	return service.store, service.objects, nil
 }
 
+// validateCommitStagedUploadParams checks that params describe a CAS commit
+// the service can attempt against staged bytes.
 func validateCommitStagedUploadParams(params CommitStagedUploadParams) error {
 	if params.JobID == uuid.Nil {
 		return fmt.Errorf("%w: ingest job id is required", ErrInvalid)
@@ -322,6 +330,8 @@ func validateCommitStagedUploadParams(params CommitStagedUploadParams) error {
 	return nil
 }
 
+// validateOpenBlobParams checks that params identify a trusted CAS blob and
+// that any byte range is well formed.
 func validateOpenBlobParams(params OpenBlobParams) error {
 	if err := validateDigest(params.Digest); err != nil {
 		return err
@@ -336,6 +346,8 @@ func validateOpenBlobParams(params OpenBlobParams) error {
 	return nil
 }
 
+// validateDigest wraps the upload digest validator so CAS callers receive
+// ErrInvalid for malformed input.
 func validateDigest(digest uploads.Digest) error {
 	if err := uploads.ValidateDigest(digest); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalid, err)
@@ -344,6 +356,8 @@ func validateDigest(digest uploads.Digest) error {
 	return nil
 }
 
+// validateObjectKey wraps the object-store text validator so CAS callers
+// receive ErrInvalid for missing or blank keys.
 func validateObjectKey(field string, key string) error {
 	if err := objectstore.ValidateRequiredText(field, key); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalid, err)
@@ -352,6 +366,8 @@ func validateObjectKey(field string, key string) error {
 	return nil
 }
 
+// verifyObjectReader streams an opened object through SHA-256, closes the
+// reader, and returns the observed digest, byte count, and source info.
 func verifyObjectReader(reader objectstore.ObjectReader) (verifiedObject, error) {
 	if reader.Body == nil {
 		return verifiedObject{}, errors.New("object reader body is required")
@@ -382,6 +398,9 @@ type ensureCASObjectParams struct {
 	VerifiedSourceETag string
 }
 
+// ensureCASObject copies the staged object into its digest-addressed CAS
+// key, falling back to recovery when the destination already exists or the
+// source ETag is missing.
 func ensureCASObject(
 	ctx context.Context,
 	store Store,
@@ -430,6 +449,8 @@ func ensureCASObject(
 	return objectstore.ObjectInfo{}, errors.Join(err, fmt.Errorf("recover existing CAS object: %w", recoverErr))
 }
 
+// recoverExistingCASObject reconciles an already-present CAS object against
+// the trusted blob record, re-verifying bytes when the blob is unknown.
 func recoverExistingCASObject(
 	ctx context.Context,
 	store Store,
@@ -472,6 +493,8 @@ func recoverExistingCASObject(
 	return verified.info, nil
 }
 
+// verifyExistingCASObject opens the CAS object at storageKey and returns its
+// observed digest and size for reconciliation.
 func verifyExistingCASObject(
 	ctx context.Context,
 	objects objectstore.Store,
@@ -485,6 +508,8 @@ func verifyExistingCASObject(
 	return verifyObjectReader(reader)
 }
 
+// requireTrustedBlob asserts a stored CAS blob record matches the expected
+// storage key and size before reuse.
 func requireTrustedBlob(blob Blob, storageKey string, sizeBytes int64) error {
 	if blob.StorageKey != storageKey {
 		return fmt.Errorf(
@@ -506,6 +531,8 @@ func requireTrustedBlob(blob Blob, storageKey string, sizeBytes int64) error {
 	return nil
 }
 
+// requireCASObjectInfo asserts an object-store result matches the expected
+// CAS storage key and size after a write.
 func requireCASObjectInfo(info objectstore.ObjectInfo, storageKey string, sizeBytes int64) error {
 	if info.Key != storageKey {
 		return fmt.Errorf("%w: CAS object key is %s, expected %s", ErrFailedPrecondition, info.Key, storageKey)
@@ -522,6 +549,8 @@ func requireCASObjectInfo(info objectstore.ObjectInfo, storageKey string, sizeBy
 	return nil
 }
 
+// requireOpenedBlobInfo asserts the freshly opened object matches the
+// trusted blob record's storage key and size.
 func requireOpenedBlobInfo(info objectstore.ObjectInfo, blob Blob) error {
 	if info.Key != blob.StorageKey {
 		return fmt.Errorf("%w: opened object key is %s, expected %s", ErrFailedPrecondition, info.Key, blob.StorageKey)
@@ -538,6 +567,8 @@ func requireOpenedBlobInfo(info objectstore.ObjectInfo, blob Blob) error {
 	return nil
 }
 
+// failCommit records the durable ingest job as failed and returns the
+// composed precondition error so callers can propagate a single failure.
 func failCommit(
 	ctx context.Context,
 	store Store,
@@ -561,10 +592,14 @@ func failCommit(
 	return CommitStagedUploadResult{}, failureErr
 }
 
+// failureMessage strips the ErrFailedPrecondition prefix from err so the
+// remaining text can be stored as the durable failure reason.
 func failureMessage(err error) string {
 	return strings.TrimPrefix(err.Error(), ErrFailedPrecondition.Error()+": ")
 }
 
+// closeReaderAfterError closes reader and joins any close error onto the
+// existing error so callers cannot leak the body when failing fast.
 func closeReaderAfterError(reader io.ReadCloser, err error) error {
 	if reader == nil {
 		return err

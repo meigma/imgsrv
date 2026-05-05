@@ -11,6 +11,7 @@ import (
 	"github.com/meigma/imgsrv/internal/uploads"
 )
 
+// defaultUploadTTL is the upload session lifetime applied when Dependencies.UploadTTL is zero.
 const defaultUploadTTL = 24 * time.Hour
 
 // Dependencies contains adapters used by the HTTP API.
@@ -66,6 +67,7 @@ type UploadService interface {
 	GetUpload(context.Context, uploads.GetUploadParams) (uploads.Session, error)
 }
 
+// api carries the configured HTTP adapter state shared across handlers.
 type api struct {
 	logger    *slog.Logger
 	readiness ReadinessChecker
@@ -115,10 +117,12 @@ func New(deps Dependencies) http.Handler {
 	return deps.Telemetry.WrapHTTPHandler(Chain(mux, logRequests(logger)))
 }
 
+// healthz handles GET /healthz and reports liveness with no body.
 func (a *api) healthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// readyz handles GET /readyz and delegates to the configured ReadinessChecker.
 func (a *api) readyz(w http.ResponseWriter, r *http.Request) {
 	if err := a.readiness.CheckReady(r.Context()); err != nil {
 		a.logger.Warn("readiness check failed", "error", err)

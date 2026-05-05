@@ -26,9 +26,14 @@ type ServiceConfig struct {
 
 // Service coordinates client-facing upload staging before CAS ingest.
 type Service struct {
-	store   Store
+	// store persists durable upload session and part state.
+	store Store
+
+	// objects writes staged upload bytes to object storage.
 	objects objectstore.Store
-	now     func() time.Time
+
+	// now returns the current time for generated upload state.
+	now func() time.Time
 }
 
 // NewService constructs an upload staging service from config.
@@ -294,6 +299,7 @@ func (service *Service) GetUpload(ctx context.Context, params GetUploadParams) (
 	return store.GetSession(ctx, GetSessionParams{ID: params.UploadID})
 }
 
+// dependencies returns the configured store and object-store dependencies or an error when any are missing.
 func (service *Service) dependencies() (Store, objectstore.Store, error) {
 	if service == nil {
 		return nil, nil, errors.New("uploads service is not configured")
@@ -308,6 +314,7 @@ func (service *Service) dependencies() (Store, objectstore.Store, error) {
 	return service.store, service.objects, nil
 }
 
+// validateBeginUploadParams validates the inputs for BeginUpload against the current time.
 func validateBeginUploadParams(params BeginUploadParams, now time.Time) error {
 	if err := ValidateDigest(params.ExpectedDigest); err != nil {
 		return err
@@ -331,6 +338,7 @@ func validateBeginUploadParams(params BeginUploadParams, now time.Time) error {
 	return nil
 }
 
+// validatePutUploadPartParams validates the inputs for PutUploadPart.
 func validatePutUploadPartParams(params PutUploadPartParams) error {
 	if err := validateUploadID(params.UploadID); err != nil {
 		return err
@@ -348,18 +356,22 @@ func validatePutUploadPartParams(params PutUploadPartParams) error {
 	return nil
 }
 
+// validateCompleteUploadParams validates the inputs for CompleteUpload.
 func validateCompleteUploadParams(params CompleteUploadParams) error {
 	return validateUploadID(params.UploadID)
 }
 
+// validateAbortUploadParams validates the inputs for AbortUpload.
 func validateAbortUploadParams(params AbortUploadParams) error {
 	return validateUploadID(params.UploadID)
 }
 
+// validateGetUploadParams validates the inputs for GetUpload.
 func validateGetUploadParams(params GetUploadParams) error {
 	return validateUploadID(params.UploadID)
 }
 
+// validateUploadID rejects a zero upload identity.
 func validateUploadID(id uuid.UUID) error {
 	if id == uuid.Nil {
 		return fmt.Errorf("%w: upload id is required", ErrInvalid)
@@ -368,6 +380,7 @@ func validateUploadID(id uuid.UUID) error {
 	return nil
 }
 
+// requireUploadAcceptsParts returns an error when session state does not accept new parts.
 func requireUploadAcceptsParts(session Session) error {
 	if session.State == SessionStateCreated || session.State == SessionStateUploading {
 		return nil
@@ -376,10 +389,12 @@ func requireUploadAcceptsParts(session Session) error {
 	return fmt.Errorf("%w: upload session does not accept parts from %s", ErrFailedPrecondition, session.State)
 }
 
+// shouldReturnCompletedSession reports whether CompleteUpload should return the existing session unchanged.
 func shouldReturnCompletedSession(state SessionState) bool {
 	return state == SessionStateCompleted || state == SessionStateIngesting || state == SessionStateReady
 }
 
+// requireUploadCanComplete returns an error when session state cannot transition to completed.
 func requireUploadCanComplete(session Session) error {
 	if session.State == SessionStateCreated || session.State == SessionStateUploading {
 		return nil
@@ -388,6 +403,7 @@ func requireUploadCanComplete(session Session) error {
 	return fmt.Errorf("%w: upload session cannot be completed from %s", ErrFailedPrecondition, session.State)
 }
 
+// requireUploadCanAbort returns an error when session state cannot transition to aborted.
 func requireUploadCanAbort(session Session) error {
 	if session.State == SessionStateCreated || session.State == SessionStateUploading {
 		return nil
@@ -396,6 +412,7 @@ func requireUploadCanAbort(session Session) error {
 	return fmt.Errorf("%w: upload session cannot be aborted from %s", ErrFailedPrecondition, session.State)
 }
 
+// requireUploadNotExpired returns an error when the session has passed its expiration time.
 func requireUploadNotExpired(session Session, now time.Time) error {
 	if uploadExpired(session, now) {
 		return uploadExpiredError(session)
@@ -404,14 +421,17 @@ func requireUploadNotExpired(session Session, now time.Time) error {
 	return nil
 }
 
+// uploadExpired reports whether the session is past its expiration time.
 func uploadExpired(session Session, now time.Time) bool {
 	return !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(now)
 }
 
+// uploadExpiredError builds the failed-precondition error for an expired upload session.
 func uploadExpiredError(session Session) error {
 	return fmt.Errorf("%w: upload session expired at %s", ErrFailedPrecondition, session.ExpiresAt.Format(time.RFC3339))
 }
 
+// recoverExpiredUploadCompletion recovers a completed staged object for an expired session or returns an expiration error when no staged object exists.
 func recoverExpiredUploadCompletion(
 	ctx context.Context,
 	store Store,
@@ -429,6 +449,7 @@ func recoverExpiredUploadCompletion(
 	return Session{}, err
 }
 
+// completeMultipartOrRecover completes the staged multipart upload, falling back to recovering an already-completed staged object when the multipart upload is no longer present.
 func completeMultipartOrRecover(
 	ctx context.Context,
 	store Store,
@@ -459,6 +480,7 @@ func completeMultipartOrRecover(
 	return Session{}, false, errors.Join(err, fmt.Errorf("recover completed staged object: %w", recoverErr))
 }
 
+// abortMultipartOrRecover aborts the staged multipart upload, falling back to recovering an already-completed staged object when the multipart upload is no longer present.
 func abortMultipartOrRecover(
 	ctx context.Context,
 	store Store,
@@ -487,6 +509,7 @@ func abortMultipartOrRecover(
 	return Session{}, false, errors.Join(err, fmt.Errorf("recover completed staged object: %w", recoverErr))
 }
 
+// recoverCompletedStagedObject verifies an existing staged object matches the expected size and marks the session completed.
 func recoverCompletedStagedObject(
 	ctx context.Context,
 	store Store,
@@ -509,6 +532,7 @@ func recoverCompletedStagedObject(
 	return store.CompleteSession(ctx, CompleteSessionParams{ID: session.ID})
 }
 
+// normalizeCompleteUploadParts converts service-level complete parts into normalized object-store parts and returns their total size.
 func normalizeCompleteUploadParts(parts []CompleteUploadPart) ([]objectstore.CompletePart, int64, error) {
 	completeParts := make([]objectstore.CompletePart, 0, len(parts))
 	for _, part := range parts {

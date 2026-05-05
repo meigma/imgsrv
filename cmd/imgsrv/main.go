@@ -15,6 +15,8 @@ func main() {
 	os.Exit(run())
 }
 
+// run wires SIGINT and SIGTERM cancellation into the CLI dispatch and returns
+// the process exit code, reporting any error from cli.ExecuteContext to stderr.
 func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

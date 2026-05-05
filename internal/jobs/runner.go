@@ -11,9 +11,12 @@ import (
 )
 
 const (
-	defaultInterval        = 5 * time.Second
+	// defaultInterval is the idle polling delay used when Config.Interval is unset.
+	defaultInterval = 5 * time.Second
+	// defaultErrorBackoffMax caps the retry delay used when Config.ErrorBackoffMax is unset.
 	defaultErrorBackoffMax = time.Minute
-	errorBackoffFactor     = 2
+	// errorBackoffFactor is the multiplier applied to the retry delay after each failed attempt.
+	errorBackoffFactor = 2
 )
 
 // Handler executes one background job attempt for a worker.
@@ -57,12 +60,18 @@ type Config struct {
 
 // Runner repeatedly executes a background job handler.
 type Runner struct {
-	handler        Handler
-	workerID       string
-	interval       time.Duration
-	backoff        errorBackoff
+	// handler executes one background job attempt per iteration.
+	handler Handler
+	// workerID identifies this runner in durable job state.
+	workerID string
+	// interval is the idle polling delay between attempts that found no work.
+	interval time.Duration
+	// backoff drives the retry delay after a failed attempt.
+	backoff errorBackoff
+	// circuitBreaker pauses the loop after repeated consecutive failures.
 	circuitBreaker circuitBreaker
-	logger         *slog.Logger
+	// logger receives background job logs.
+	logger *slog.Logger
 }
 
 // New constructs a Runner from config.
@@ -168,6 +177,7 @@ func (runner *Runner) Run(ctx context.Context) error {
 	}
 }
 
+// canceled reports whether ctx has been canceled.
 func canceled(ctx context.Context) bool {
 	select {
 	case <-ctx.Done():
@@ -177,6 +187,7 @@ func canceled(ctx context.Context) bool {
 	}
 }
 
+// dependencies returns the configured handler and worker ID or an error when the runner is not usable.
 func (runner *Runner) dependencies() (Handler, string, error) {
 	if runner == nil {
 		return nil, "", errors.New("job runner is not configured")
@@ -191,11 +202,13 @@ func (runner *Runner) dependencies() (Handler, string, error) {
 	return runner.handler, runner.workerID, nil
 }
 
+// errorBackoff captures the initial and maximum retry delays after a failed attempt.
 type errorBackoff struct {
 	initial time.Duration
 	max     time.Duration
 }
 
+// newErrorBackoff builds an errorBackoff, falling back to interval and the package default when values are unset.
 func newErrorBackoff(interval time.Duration, initial time.Duration, maxDelay time.Duration) errorBackoff {
 	if initial <= 0 {
 		initial = interval
@@ -213,6 +226,7 @@ func newErrorBackoff(interval time.Duration, initial time.Duration, maxDelay tim
 	}
 }
 
+// nextBackoff doubles current up to maxDelay, guarding against overflow.
 func nextBackoff(current time.Duration, maxDelay time.Duration) time.Duration {
 	next := current * errorBackoffFactor
 	if next < current || next > maxDelay {
@@ -222,11 +236,13 @@ func nextBackoff(current time.Duration, maxDelay time.Duration) time.Duration {
 	return next
 }
 
+// circuitBreaker pauses the loop for cooldown after failures consecutive errors.
 type circuitBreaker struct {
 	failures int
 	cooldown time.Duration
 }
 
+// newCircuitBreaker builds a circuitBreaker, using fallbackCooldown when cooldown is unset.
 func newCircuitBreaker(failures int, cooldown time.Duration, fallbackCooldown time.Duration) circuitBreaker {
 	if cooldown <= 0 {
 		cooldown = fallbackCooldown
@@ -238,10 +254,12 @@ func newCircuitBreaker(failures int, cooldown time.Duration, fallbackCooldown ti
 	}
 }
 
+// open reports whether the breaker should trip given the current consecutive failure count.
 func (breaker circuitBreaker) open(failures int) bool {
 	return breaker.failures > 0 && failures >= breaker.failures
 }
 
+// sleep waits for delay or until ctx is canceled. It returns true when the delay elapsed.
 func sleep(ctx context.Context, delay time.Duration) bool {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()

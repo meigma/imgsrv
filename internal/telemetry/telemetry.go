@@ -20,7 +20,9 @@ import (
 )
 
 const (
-	defaultServiceName       = "imgsrv"
+	// defaultServiceName is the fallback service.name resource attribute when Config.ServiceName is empty.
+	defaultServiceName = "imgsrv"
+	// defaultHTTPOperationName is the operation label applied to HTTP handlers wrapped via otelhttp.
 	defaultHTTPOperationName = "imgsrv.http"
 )
 
@@ -50,7 +52,9 @@ type Telemetry struct {
 	// MetricsPath is the path registered on MetricsHandler.
 	MetricsPath string
 
-	propagators   propagation.TextMapPropagator
+	// propagators carries the W3C trace context and baggage propagators applied to wrapped HTTP handlers.
+	propagators propagation.TextMapPropagator
+	// meterProvider retains the concrete SDK meter provider so it can be shut down cleanly.
 	meterProvider *sdkmetric.MeterProvider
 }
 
@@ -124,6 +128,7 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// newResource builds the OpenTelemetry resource describing this process from the supplied config.
 func newResource(config Config) *resource.Resource {
 	attrs := []attribute.KeyValue{
 		attribute.String("service.name", config.ServiceName),
@@ -135,6 +140,7 @@ func newResource(config Config) *resource.Resource {
 	return resource.NewWithAttributes("", attrs...)
 }
 
+// formatSpanName derives an HTTP span name from the request, preferring the matched route pattern over the raw URL path.
 func formatSpanName(_ string, r *http.Request) string {
 	if r.Pattern != "" {
 		return r.Method + " " + r.Pattern

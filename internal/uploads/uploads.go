@@ -12,7 +12,10 @@ import (
 )
 
 const (
-	maxPartNumber       = 10000
+	// maxPartNumber is the maximum S3-compatible multipart part number accepted by the service.
+	maxPartNumber = 10000
+
+	// stagingUploadPrefix is the object-storage key prefix for staged upload sessions.
 	stagingUploadPrefix = "staging/uploads/"
 )
 
@@ -382,6 +385,7 @@ func ValidateOptionalText(field string, value *string) error {
 	return ValidateRequiredText(field, *value)
 }
 
+// matches reports whether value matches the regular expression pattern.
 func matches(pattern string, value string) bool {
 	matched, err := regexp.MatchString(pattern, value)
 	return err == nil && matched

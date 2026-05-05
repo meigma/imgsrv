@@ -30,6 +30,8 @@ func WithCASPromotion() Option {
 
 // Env owns a running imgsrv functional-test environment.
 type Env struct {
+	// harness is the underlying internal integration harness that drives the
+	// in-process imgsrv server, dependencies, and lifecycle.
 	harness *harness.Env
 }
 
@@ -79,10 +81,13 @@ func (env *Env) Client(t testing.TB) *imgsrv.Client {
 	return client
 }
 
+// options holds the resolved startup configuration produced by applying the
+// caller-provided Option values.
 type options struct {
 	harness []harness.Option
 }
 
+// newOptions applies opts and returns the resolved startup configuration.
 func newOptions(opts ...Option) options {
 	var result options
 	for _, opt := range opts {

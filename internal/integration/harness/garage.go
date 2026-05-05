@@ -22,18 +22,43 @@ import (
 )
 
 const (
-	garageImage           = "dxflrs/garage:v2.3.0"
-	garageS3Port          = "3900/tcp"
-	garageRegion          = "garage"
-	garageBucket          = "imgsrv-integration"
-	garageAccessKeyID     = "GK00000000000000000000000000000000"
+	// garageImage is the Garage container image used for the integration harness.
+	garageImage = "dxflrs/garage:v2.3.0"
+
+	// garageS3Port is the container port serving the S3-compatible API.
+	garageS3Port = "3900/tcp"
+
+	// garageRegion is the S3 region advertised by the Garage instance.
+	garageRegion = "garage"
+
+	// garageBucket is the bucket pre-created for integration tests.
+	garageBucket = "imgsrv-integration"
+
+	// garageAccessKeyID is the static access key seeded into the container.
+	garageAccessKeyID = "GK00000000000000000000000000000000"
+
+	// garageSecretAccessKey is the static secret key seeded into the container.
 	garageSecretAccessKey = "0000000000000000000000000000000000000000000000000000000000000000"
-	garageStartupTimeout  = time.Minute
-	garageReadyTimeout    = 30 * time.Second
-	garageReadyInterval   = 100 * time.Millisecond
-	garageConfigFileMode  = 0600
+
+	// garageStartupTimeout bounds how long the harness waits for the container
+	// to begin listening on its S3 port.
+	garageStartupTimeout = time.Minute
+
+	// garageReadyTimeout bounds how long the harness waits for the default
+	// bucket to become reachable.
+	garageReadyTimeout = 30 * time.Second
+
+	// garageReadyInterval is the polling interval used while waiting for the
+	// default bucket to appear.
+	garageReadyInterval = 100 * time.Millisecond
+
+	// garageConfigFileMode is the file mode for the rendered garage.toml on
+	// both the host and inside the container.
+	garageConfigFileMode = 0600
 )
 
+// startGarage launches a single-node Garage container, waits for the default
+// bucket to be reachable, and returns the S3 configuration tests should use.
 func startGarage(ctx context.Context, t testing.TB) s3.Config {
 	t.Helper()
 
@@ -79,6 +104,8 @@ func startGarage(ctx context.Context, t testing.TB) s3.Config {
 	return config
 }
 
+// writeGarageConfig renders the embedded garage.toml into a temporary file and
+// returns the host path for the testcontainers file mount.
 func writeGarageConfig(t testing.TB) string {
 	t.Helper()
 
@@ -89,6 +116,8 @@ func writeGarageConfig(t testing.TB) string {
 	return path
 }
 
+// garageConfig returns the static garage.toml the harness writes into the
+// container, configured for single-node use with path-style S3 access.
 func garageConfig() string {
 	return `metadata_dir = "/tmp/garage/meta"
 data_dir = "/tmp/garage/data"
@@ -111,6 +140,8 @@ metrics_token = "test-metrics-token"
 `
 }
 
+// waitForGarageBucket polls the Garage S3 endpoint until the default bucket
+// reports as existing or the configured ready timeout elapses.
 func waitForGarageBucket(ctx context.Context, t testing.TB, config s3.Config) {
 	t.Helper()
 
@@ -149,6 +180,8 @@ func waitForGarageBucket(ctx context.Context, t testing.TB, config s3.Config) {
 	}
 }
 
+// openObjectStore constructs the S3-backed object store used by the in-process
+// imgsrv server against the running Garage container.
 func openObjectStore(t testing.TB, config s3.Config) objectstore.Store {
 	t.Helper()
 

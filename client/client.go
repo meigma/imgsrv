@@ -6,6 +6,7 @@ package client
 // Code that needs a mockable dependency should prefer narrow operation-group
 // interfaces such as UploadsClient instead of depending on Client directly.
 type Client struct {
+	// uploads holds the HTTP-backed upload operation group.
 	uploads *HTTPUploadsClient
 }
 

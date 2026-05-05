@@ -94,6 +94,8 @@ func (err *HTTPError) Error() string {
 	return fmt.Sprintf("imgsrv: %s: %s", err.Status, strings.TrimSpace(string(err.Body)))
 }
 
+// decodeStringMember returns the named member decoded as a string, or the empty
+// string when the member is absent or not a JSON string.
 func decodeStringMember(raw map[string]json.RawMessage, name string) string {
 	var value string
 	if err := json.Unmarshal(raw[name], &value); err != nil {
@@ -103,6 +105,8 @@ func decodeStringMember(raw map[string]json.RawMessage, name string) string {
 	return value
 }
 
+// decodeIntMember returns the named member decoded as an int, or zero when the
+// member is absent or not a JSON number.
 func decodeIntMember(raw map[string]json.RawMessage, name string) int {
 	var value int
 	if err := json.Unmarshal(raw[name], &value); err != nil {
@@ -112,6 +116,8 @@ func decodeIntMember(raw map[string]json.RawMessage, name string) int {
 	return value
 }
 
+// problemExtensions returns the raw object members that are not RFC 9457 known
+// fields, or nil when no extension members are present.
 func problemExtensions(raw map[string]json.RawMessage) map[string]json.RawMessage {
 	extensions := maps.Clone(raw)
 	delete(extensions, "type")
