@@ -7,6 +7,7 @@ package mocks
 import (
 	"context"
 
+	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/uploads"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -100,6 +101,72 @@ func (_c *MockStore_FailIngestJob_Call) Return(ingestJob uploads.IngestJob, err 
 }
 
 func (_c *MockStore_FailIngestJob_Call) RunAndReturn(run func(context1 context.Context, failIngestJobParams uploads.FailIngestJobParams) (uploads.IngestJob, error)) *MockStore_FailIngestJob_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetBlob provides a mock function for the type MockStore
+func (_mock *MockStore) GetBlob(context1 context.Context, getBlobParams cas.GetBlobParams) (cas.Blob, error) {
+	ret := _mock.Called(context1, getBlobParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetBlob")
+	}
+
+	var r0 cas.Blob
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, cas.GetBlobParams) (cas.Blob, error)); ok {
+		return returnFunc(context1, getBlobParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, cas.GetBlobParams) cas.Blob); ok {
+		r0 = returnFunc(context1, getBlobParams)
+	} else {
+		r0 = ret.Get(0).(cas.Blob)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, cas.GetBlobParams) error); ok {
+		r1 = returnFunc(context1, getBlobParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockStore_GetBlob_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetBlob'
+type MockStore_GetBlob_Call struct {
+	*mock.Call
+}
+
+// GetBlob is a helper method to define mock.On call
+//   - context1 context.Context
+//   - getBlobParams cas.GetBlobParams
+func (_e *MockStore_Expecter) GetBlob(context1 interface{}, getBlobParams interface{}) *MockStore_GetBlob_Call {
+	return &MockStore_GetBlob_Call{Call: _e.mock.On("GetBlob", context1, getBlobParams)}
+}
+
+func (_c *MockStore_GetBlob_Call) Run(run func(context1 context.Context, getBlobParams cas.GetBlobParams)) *MockStore_GetBlob_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 cas.GetBlobParams
+		if args[1] != nil {
+			arg1 = args[1].(cas.GetBlobParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_GetBlob_Call) Return(blob cas.Blob, err error) *MockStore_GetBlob_Call {
+	_c.Call.Return(blob, err)
+	return _c
+}
+
+func (_c *MockStore_GetBlob_Call) RunAndReturn(run func(context1 context.Context, getBlobParams cas.GetBlobParams) (cas.Blob, error)) *MockStore_GetBlob_Call {
 	_c.Call.Return(run)
 	return _c
 }

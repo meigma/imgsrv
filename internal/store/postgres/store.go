@@ -13,6 +13,7 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"github.com/meigma/imgsrv/internal/auth"
+	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
 	postgresauth "github.com/meigma/imgsrv/internal/store/postgres/auth"
 	postgrescatalog "github.com/meigma/imgsrv/internal/store/postgres/catalog"
@@ -39,6 +40,7 @@ type Config struct {
 // Store owns the Postgres database connection.
 type Store struct {
 	auth    auth.Store
+	cas     cas.Store
 	pool    *pgxpool.Pool
 	catalog catalog.Store
 	uploads uploads.Store
@@ -72,11 +74,14 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 		return nil, closePoolAfterError(pool, fmt.Errorf("close migration database: %w", err))
 	}
 
+	uploadStore := postgresuploads.New(pool)
+
 	return &Store{
 		auth:    postgresauth.New(pool),
+		cas:     uploadStore,
 		pool:    pool,
 		catalog: postgrescatalog.New(pool),
-		uploads: postgresuploads.New(pool),
+		uploads: uploadStore,
 	}, nil
 }
 
@@ -109,6 +114,7 @@ func (store *Store) Close() error {
 	store.pool.Close()
 	store.pool = nil
 	store.auth = nil
+	store.cas = nil
 	store.catalog = nil
 	store.uploads = nil
 
@@ -131,6 +137,15 @@ func (store *Store) Catalog() catalog.Store {
 	}
 
 	return store.catalog
+}
+
+// CAS returns the CAS blob and ingest adapter.
+func (store *Store) CAS() cas.Store {
+	if store == nil {
+		return nil
+	}
+
+	return store.cas
 }
 
 // Uploads returns the upload and CAS ingest adapter.

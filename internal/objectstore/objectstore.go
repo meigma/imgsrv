@@ -273,6 +273,10 @@ type CopyObjectParams struct {
 	// SourceKey is the bucket-relative object key to copy from.
 	SourceKey string
 
+	// IfSourceETag copies only when the source object matches this ETag.
+	// Stores return ErrConflict when the provider reports a source mismatch.
+	IfSourceETag string
+
 	// DestinationKey is the bucket-relative object key to copy to.
 	DestinationKey string
 
