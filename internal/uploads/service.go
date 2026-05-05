@@ -116,12 +116,12 @@ type GetUploadParams struct {
 
 // BeginUpload starts durable upload state and backing multipart staging storage.
 func (service *Service) BeginUpload(ctx context.Context, params BeginUploadParams) (Session, error) {
-	store, objects, err := service.dependencies()
-	if err != nil {
-		return Session{}, err
+	store, objects, depErr := service.dependencies()
+	if depErr != nil {
+		return Session{}, depErr
 	}
-	if err := validateBeginUploadParams(params, service.now()); err != nil {
-		return Session{}, err
+	if validationErr := validateBeginUploadParams(params, service.now()); validationErr != nil {
+		return Session{}, validationErr
 	}
 
 	id := params.ID
@@ -163,23 +163,23 @@ func (service *Service) BeginUpload(ctx context.Context, params BeginUploadParam
 
 // PutUploadPart stores or replaces one upload part in staging storage.
 func (service *Service) PutUploadPart(ctx context.Context, params PutUploadPartParams) (Part, error) {
-	store, objects, err := service.dependencies()
-	if err != nil {
-		return Part{}, err
+	store, objects, depErr := service.dependencies()
+	if depErr != nil {
+		return Part{}, depErr
 	}
-	if err := validatePutUploadPartParams(params); err != nil {
-		return Part{}, err
+	if validationErr := validatePutUploadPartParams(params); validationErr != nil {
+		return Part{}, validationErr
 	}
 
 	session, err := store.GetSession(ctx, GetSessionParams{ID: params.UploadID})
 	if err != nil {
 		return Part{}, err
 	}
-	if err := requireUploadAcceptsParts(session); err != nil {
-		return Part{}, err
+	if stateErr := requireUploadAcceptsParts(session); stateErr != nil {
+		return Part{}, stateErr
 	}
-	if err := requireUploadNotExpired(session, service.now()); err != nil {
-		return Part{}, err
+	if expiryErr := requireUploadNotExpired(session, service.now()); expiryErr != nil {
+		return Part{}, expiryErr
 	}
 
 	part, err := objects.PutPart(ctx, objectstore.PutPartParams{
@@ -203,12 +203,12 @@ func (service *Service) PutUploadPart(ctx context.Context, params PutUploadPartP
 
 // CompleteUpload completes the staged multipart object and queues CAS ingest.
 func (service *Service) CompleteUpload(ctx context.Context, params CompleteUploadParams) (Session, error) {
-	store, objects, err := service.dependencies()
-	if err != nil {
-		return Session{}, err
+	store, objects, depErr := service.dependencies()
+	if depErr != nil {
+		return Session{}, depErr
 	}
-	if err := validateCompleteUploadParams(params); err != nil {
-		return Session{}, err
+	if validationErr := validateCompleteUploadParams(params); validationErr != nil {
+		return Session{}, validationErr
 	}
 
 	session, err := store.GetSession(ctx, GetSessionParams{ID: params.UploadID})
@@ -218,8 +218,8 @@ func (service *Service) CompleteUpload(ctx context.Context, params CompleteUploa
 	if shouldReturnCompletedSession(session.State) {
 		return session, nil
 	}
-	if err := requireUploadCanComplete(session); err != nil {
-		return Session{}, err
+	if stateErr := requireUploadCanComplete(session); stateErr != nil {
+		return Session{}, stateErr
 	}
 
 	parts, sizeBytes, err := normalizeCompleteUploadParts(params.Parts)
@@ -235,36 +235,15 @@ func (service *Service) CompleteUpload(ctx context.Context, params CompleteUploa
 		)
 	}
 	if uploadExpired(session, service.now()) {
-		recovered, err := recoverCompletedStagedObject(ctx, store, objects, session)
-		if err == nil {
-			return recovered, nil
-		}
-		if errors.Is(err, objectstore.ErrNotFound) {
-			return Session{}, uploadExpiredError(session)
-		}
-
-		return Session{}, err
+		return recoverExpiredUploadCompletion(ctx, store, objects, session)
 	}
 
-	_, err = objects.CompleteMultipartUpload(ctx, objectstore.CompleteMultipartUploadParams{
-		Key:      session.StagingKey,
-		UploadID: session.StorageUploadID,
-		Parts:    parts,
-	})
+	recovered, ok, err := completeMultipartOrRecover(ctx, store, objects, session, parts)
 	if err != nil {
-		if errors.Is(err, objectstore.ErrNotFound) {
-			recovered, recoverErr := recoverCompletedStagedObject(ctx, store, objects, session)
-			if recoverErr == nil {
-				return recovered, nil
-			}
-			if errors.Is(recoverErr, objectstore.ErrNotFound) {
-				return Session{}, err
-			}
-
-			return Session{}, errors.Join(err, fmt.Errorf("recover completed staged object: %w", recoverErr))
-		}
-
 		return Session{}, err
+	}
+	if ok {
+		return recovered, nil
 	}
 
 	return store.CompleteSession(ctx, CompleteSessionParams{ID: params.UploadID})
@@ -272,12 +251,12 @@ func (service *Service) CompleteUpload(ctx context.Context, params CompleteUploa
 
 // AbortUpload aborts staging storage and marks durable upload state aborted.
 func (service *Service) AbortUpload(ctx context.Context, params AbortUploadParams) (Session, error) {
-	store, objects, err := service.dependencies()
-	if err != nil {
-		return Session{}, err
+	store, objects, depErr := service.dependencies()
+	if depErr != nil {
+		return Session{}, depErr
 	}
-	if err := validateAbortUploadParams(params); err != nil {
-		return Session{}, err
+	if validationErr := validateAbortUploadParams(params); validationErr != nil {
+		return Session{}, validationErr
 	}
 
 	session, err := store.GetSession(ctx, GetSessionParams{ID: params.UploadID})
@@ -287,26 +266,16 @@ func (service *Service) AbortUpload(ctx context.Context, params AbortUploadParam
 	if session.State == SessionStateAborted {
 		return session, nil
 	}
-	if err := requireUploadCanAbort(session); err != nil {
-		return Session{}, err
+	if stateErr := requireUploadCanAbort(session); stateErr != nil {
+		return Session{}, stateErr
 	}
 
-	err = objects.AbortMultipartUpload(ctx, objectstore.AbortMultipartUploadParams{
-		Key:      session.StagingKey,
-		UploadID: session.StorageUploadID,
-	})
+	recovered, ok, err := abortMultipartOrRecover(ctx, store, objects, session)
 	if err != nil {
-		if !errors.Is(err, objectstore.ErrNotFound) {
-			return Session{}, err
-		}
-
-		recovered, recoverErr := recoverCompletedStagedObject(ctx, store, objects, session)
-		if recoverErr == nil {
-			return recovered, nil
-		}
-		if !errors.Is(recoverErr, objectstore.ErrNotFound) {
-			return Session{}, errors.Join(err, fmt.Errorf("recover completed staged object: %w", recoverErr))
-		}
+		return Session{}, err
+	}
+	if ok {
+		return recovered, nil
 	}
 
 	return store.AbortSession(ctx, AbortSessionParams{ID: params.UploadID})
@@ -314,12 +283,12 @@ func (service *Service) AbortUpload(ctx context.Context, params AbortUploadParam
 
 // GetUpload returns current durable upload state.
 func (service *Service) GetUpload(ctx context.Context, params GetUploadParams) (Session, error) {
-	store, _, err := service.dependencies()
-	if err != nil {
-		return Session{}, err
+	store, _, depErr := service.dependencies()
+	if depErr != nil {
+		return Session{}, depErr
 	}
-	if err := validateGetUploadParams(params); err != nil {
-		return Session{}, err
+	if validationErr := validateGetUploadParams(params); validationErr != nil {
+		return Session{}, validationErr
 	}
 
 	return store.GetSession(ctx, GetSessionParams{ID: params.UploadID})
@@ -400,39 +369,31 @@ func validateUploadID(id uuid.UUID) error {
 }
 
 func requireUploadAcceptsParts(session Session) error {
-	switch session.State {
-	case SessionStateCreated, SessionStateUploading:
+	if session.State == SessionStateCreated || session.State == SessionStateUploading {
 		return nil
-	default:
-		return fmt.Errorf("%w: upload session does not accept parts from %s", ErrFailedPrecondition, session.State)
 	}
+
+	return fmt.Errorf("%w: upload session does not accept parts from %s", ErrFailedPrecondition, session.State)
 }
 
 func shouldReturnCompletedSession(state SessionState) bool {
-	switch state {
-	case SessionStateCompleted, SessionStateIngesting, SessionStateReady:
-		return true
-	default:
-		return false
-	}
+	return state == SessionStateCompleted || state == SessionStateIngesting || state == SessionStateReady
 }
 
 func requireUploadCanComplete(session Session) error {
-	switch session.State {
-	case SessionStateCreated, SessionStateUploading:
+	if session.State == SessionStateCreated || session.State == SessionStateUploading {
 		return nil
-	default:
-		return fmt.Errorf("%w: upload session cannot be completed from %s", ErrFailedPrecondition, session.State)
 	}
+
+	return fmt.Errorf("%w: upload session cannot be completed from %s", ErrFailedPrecondition, session.State)
 }
 
 func requireUploadCanAbort(session Session) error {
-	switch session.State {
-	case SessionStateCreated, SessionStateUploading:
+	if session.State == SessionStateCreated || session.State == SessionStateUploading {
 		return nil
-	default:
-		return fmt.Errorf("%w: upload session cannot be aborted from %s", ErrFailedPrecondition, session.State)
 	}
+
+	return fmt.Errorf("%w: upload session cannot be aborted from %s", ErrFailedPrecondition, session.State)
 }
 
 func requireUploadNotExpired(session Session, now time.Time) error {
@@ -449,6 +410,81 @@ func uploadExpired(session Session, now time.Time) bool {
 
 func uploadExpiredError(session Session) error {
 	return fmt.Errorf("%w: upload session expired at %s", ErrFailedPrecondition, session.ExpiresAt.Format(time.RFC3339))
+}
+
+func recoverExpiredUploadCompletion(
+	ctx context.Context,
+	store Store,
+	objects objectstore.Store,
+	session Session,
+) (Session, error) {
+	recovered, err := recoverCompletedStagedObject(ctx, store, objects, session)
+	if err == nil {
+		return recovered, nil
+	}
+	if errors.Is(err, objectstore.ErrNotFound) {
+		return Session{}, uploadExpiredError(session)
+	}
+
+	return Session{}, err
+}
+
+func completeMultipartOrRecover(
+	ctx context.Context,
+	store Store,
+	objects objectstore.Store,
+	session Session,
+	parts []objectstore.CompletePart,
+) (Session, bool, error) {
+	_, err := objects.CompleteMultipartUpload(ctx, objectstore.CompleteMultipartUploadParams{
+		Key:      session.StagingKey,
+		UploadID: session.StorageUploadID,
+		Parts:    parts,
+	})
+	if err == nil {
+		return Session{}, false, nil
+	}
+	if !errors.Is(err, objectstore.ErrNotFound) {
+		return Session{}, false, err
+	}
+
+	recovered, recoverErr := recoverCompletedStagedObject(ctx, store, objects, session)
+	if recoverErr == nil {
+		return recovered, true, nil
+	}
+	if errors.Is(recoverErr, objectstore.ErrNotFound) {
+		return Session{}, false, err
+	}
+
+	return Session{}, false, errors.Join(err, fmt.Errorf("recover completed staged object: %w", recoverErr))
+}
+
+func abortMultipartOrRecover(
+	ctx context.Context,
+	store Store,
+	objects objectstore.Store,
+	session Session,
+) (Session, bool, error) {
+	err := objects.AbortMultipartUpload(ctx, objectstore.AbortMultipartUploadParams{
+		Key:      session.StagingKey,
+		UploadID: session.StorageUploadID,
+	})
+	if err == nil {
+		return Session{}, false, nil
+	}
+	if !errors.Is(err, objectstore.ErrNotFound) {
+		return Session{}, false, err
+	}
+
+	recovered, recoverErr := recoverCompletedStagedObject(ctx, store, objects, session)
+	if recoverErr == nil {
+		return recovered, true, nil
+	}
+	if errors.Is(recoverErr, objectstore.ErrNotFound) {
+		return Session{}, false, nil
+	}
+
+	return Session{}, false, errors.Join(err, fmt.Errorf("recover completed staged object: %w", recoverErr))
 }
 
 func recoverCompletedStagedObject(

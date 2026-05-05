@@ -87,13 +87,13 @@ type OpenBlobParams struct {
 
 // CommitStagedUpload verifies staged bytes and commits them into CAS.
 func (service *Service) CommitStagedUpload(
-	ctx context.Context,
-	params CommitStagedUploadParams,
+	_ context.Context,
+	_ CommitStagedUploadParams,
 ) (CommitStagedUploadResult, error) {
 	return CommitStagedUploadResult{}, errors.ErrUnsupported
 }
 
 // OpenBlob opens a verified CAS blob for proxied download.
-func (service *Service) OpenBlob(ctx context.Context, params OpenBlobParams) (objectstore.ObjectReader, error) {
+func (service *Service) OpenBlob(_ context.Context, _ OpenBlobParams) (objectstore.ObjectReader, error) {
 	return objectstore.ObjectReader{}, errors.ErrUnsupported
 }

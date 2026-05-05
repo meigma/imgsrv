@@ -18,14 +18,23 @@ import (
 	uploadmocks "github.com/meigma/imgsrv/internal/uploads/mocks"
 )
 
-var (
-	testUploadID = uuid.MustParse("11111111-2222-3333-4444-555555555555")
-	testDigest   = uploads.Digest("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-	testNow      = time.Date(2026, 5, 4, 16, 0, 0, 0, time.UTC)
-	testExpires  = time.Date(2026, 5, 4, 17, 0, 0, 0, time.UTC)
-)
-
 const testStorageUploadID = "storage-upload-1"
+
+func uploadIDFixture() uuid.UUID {
+	return uuid.MustParse("11111111-2222-3333-4444-555555555555")
+}
+
+func digestFixture() uploads.Digest {
+	return uploads.Digest("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+}
+
+func nowFixture() time.Time {
+	return time.Date(2026, 5, 4, 16, 0, 0, 0, time.UTC)
+}
+
+func expiresFixture() time.Time {
+	return time.Date(2026, 5, 4, 17, 0, 0, 0, time.UTC)
+}
 
 type serviceTestContext struct {
 	store   *uploadmocks.MockStore
@@ -45,9 +54,7 @@ func newServiceTestContext(t *testing.T) *serviceTestContext {
 		service: uploads.NewService(uploads.ServiceConfig{
 			Store:   store,
 			Objects: objects,
-			Now: func() time.Time {
-				return testNow
-			},
+			Now:     nowFixture,
 		}),
 	}
 }
@@ -67,10 +74,10 @@ func TestServiceBeginUploadCreatesObjectstoreUploadThenSession(t *testing.T) {
 	tc.store.EXPECT().
 		CreateSession(mock.Anything, mock.MatchedBy(func(params uploads.CreateSessionParams) bool {
 			return params.ID != uuid.Nil &&
-				params.ExpectedDigest == testDigest &&
+				params.ExpectedDigest == digestFixture() &&
 				params.ExpectedSizeBytes == 12 &&
 				params.StorageUploadID == testStorageUploadID &&
-				params.ExpiresAt.Equal(testExpires) &&
+				params.ExpiresAt.Equal(expiresFixture()) &&
 				uploads.StagingKey(params.ID) == stagingKey
 		})).
 		RunAndReturn(func(_ context.Context, params uploads.CreateSessionParams) (uploads.Session, error) {
@@ -78,9 +85,9 @@ func TestServiceBeginUploadCreatesObjectstoreUploadThenSession(t *testing.T) {
 		})
 
 	got, err := tc.service.BeginUpload(ctx, uploads.BeginUploadParams{
-		ExpectedDigest:    testDigest,
+		ExpectedDigest:    digestFixture(),
 		ExpectedSizeBytes: 12,
-		ExpiresAt:         testExpires,
+		ExpiresAt:         expiresFixture(),
 	})
 
 	require.NoError(t, err)
@@ -95,30 +102,30 @@ func TestServiceBeginUploadAbortsObjectstoreUploadWhenSessionCreateFails(t *test
 
 	tc.objects.EXPECT().
 		CreateMultipartUpload(mock.Anything, objectstore.CreateMultipartUploadParams{
-			Key: uploads.StagingKey(testUploadID),
+			Key: uploads.StagingKey(uploadIDFixture()),
 		}).
 		Return(objectstore.MultipartUpload{UploadID: testStorageUploadID}, nil)
 	tc.store.EXPECT().
 		CreateSession(mock.Anything, uploads.CreateSessionParams{
-			ID:                testUploadID,
-			ExpectedDigest:    testDigest,
+			ID:                uploadIDFixture(),
+			ExpectedDigest:    digestFixture(),
 			ExpectedSizeBytes: 12,
 			StorageUploadID:   testStorageUploadID,
-			ExpiresAt:         testExpires,
+			ExpiresAt:         expiresFixture(),
 		}).
 		Return(uploads.Session{}, storeErr)
 	tc.objects.EXPECT().
 		AbortMultipartUpload(mock.Anything, objectstore.AbortMultipartUploadParams{
-			Key:      uploads.StagingKey(testUploadID),
+			Key:      uploads.StagingKey(uploadIDFixture()),
 			UploadID: testStorageUploadID,
 		}).
 		Return(nil)
 
 	got, err := tc.service.BeginUpload(context.Background(), uploads.BeginUploadParams{
-		ID:                testUploadID,
-		ExpectedDigest:    testDigest,
+		ID:                uploadIDFixture(),
+		ExpectedDigest:    digestFixture(),
 		ExpectedSizeBytes: 12,
-		ExpiresAt:         testExpires,
+		ExpiresAt:         expiresFixture(),
 	})
 
 	require.ErrorIs(t, err, storeErr)
@@ -129,7 +136,7 @@ func TestServiceBeginUploadRejectsInvalidInput(t *testing.T) {
 	tc := newServiceTestContext(t)
 
 	got, err := tc.service.BeginUpload(context.Background(), uploads.BeginUploadParams{
-		ExpectedDigest:    testDigest,
+		ExpectedDigest:    digestFixture(),
 		ExpectedSizeBytes: 12,
 	})
 
@@ -141,9 +148,9 @@ func TestServiceBeginUploadRejectsExpiredInput(t *testing.T) {
 	tc := newServiceTestContext(t)
 
 	got, err := tc.service.BeginUpload(context.Background(), uploads.BeginUploadParams{
-		ExpectedDigest:    testDigest,
+		ExpectedDigest:    digestFixture(),
 		ExpectedSizeBytes: 12,
-		ExpiresAt:         testNow,
+		ExpiresAt:         nowFixture(),
 	})
 
 	require.ErrorIs(t, err, uploads.ErrInvalid)
@@ -173,16 +180,16 @@ func TestServiceBeginUploadRejectsMissingDependencies(t *testing.T) {
 func TestServicePutUploadPartStoresObjectPartThenDurablePart(t *testing.T) {
 	tc := newServiceTestContext(t)
 	body := strings.NewReader("hello")
-	session := uploadSession(testUploadID, uploads.SessionStateCreated, 5)
+	session := uploadSession(uploadIDFixture(), uploads.SessionStateCreated, 5)
 	wantPart := uploads.Part{
-		UploadID:   testUploadID,
+		UploadID:   uploadIDFixture(),
 		PartNumber: 1,
 		ETag:       "etag-1",
 		SizeBytes:  5,
 	}
 
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
 		Return(session, nil)
 	tc.objects.EXPECT().
 		PutPart(mock.Anything, mock.MatchedBy(func(params objectstore.PutPartParams) bool {
@@ -195,7 +202,7 @@ func TestServicePutUploadPartStoresObjectPartThenDurablePart(t *testing.T) {
 		Return(objectstore.Part{Number: 1, ETag: "etag-1", SizeBytes: 5}, nil)
 	tc.store.EXPECT().
 		PutPart(mock.Anything, uploads.PutPartParams{
-			UploadID:   testUploadID,
+			UploadID:   uploadIDFixture(),
 			PartNumber: 1,
 			ETag:       "etag-1",
 			SizeBytes:  5,
@@ -203,7 +210,7 @@ func TestServicePutUploadPartStoresObjectPartThenDurablePart(t *testing.T) {
 		Return(wantPart, nil)
 
 	got, err := tc.service.PutUploadPart(context.Background(), uploads.PutUploadPartParams{
-		UploadID:   testUploadID,
+		UploadID:   uploadIDFixture(),
 		PartNumber: 1,
 		Body:       body,
 		SizeBytes:  5,
@@ -229,11 +236,11 @@ func TestServicePutUploadPartRejectsTerminalStatesBeforeObjectstore(t *testing.T
 		t.Run(tt.name, func(t *testing.T) {
 			tc := newServiceTestContext(t)
 			tc.store.EXPECT().
-				GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
-				Return(uploadSession(testUploadID, tt.state, 5), nil)
+				GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
+				Return(uploadSession(uploadIDFixture(), tt.state, 5), nil)
 
 			got, err := tc.service.PutUploadPart(context.Background(), uploads.PutUploadPartParams{
-				UploadID:   testUploadID,
+				UploadID:   uploadIDFixture(),
 				PartNumber: 1,
 				Body:       strings.NewReader("hello"),
 				SizeBytes:  5,
@@ -260,14 +267,14 @@ func TestServicePutUploadPartRejectsInvalidInputBeforeStore(t *testing.T) {
 
 func TestServicePutUploadPartRejectsExpiredSessionBeforeObjectstore(t *testing.T) {
 	tc := newServiceTestContext(t)
-	session := uploadSession(testUploadID, uploads.SessionStateUploading, 5)
-	session.ExpiresAt = testNow
+	session := uploadSession(uploadIDFixture(), uploads.SessionStateUploading, 5)
+	session.ExpiresAt = nowFixture()
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
 		Return(session, nil)
 
 	got, err := tc.service.PutUploadPart(context.Background(), uploads.PutUploadPartParams{
-		UploadID:   testUploadID,
+		UploadID:   uploadIDFixture(),
 		PartNumber: 1,
 		Body:       strings.NewReader("hello"),
 		SizeBytes:  5,
@@ -280,15 +287,15 @@ func TestServicePutUploadPartRejectsExpiredSessionBeforeObjectstore(t *testing.T
 func TestServiceCompleteUploadCompletesObjectstoreThenDurableState(t *testing.T) {
 	tc := newServiceTestContext(t)
 	sizeBytes := objectstore.MultipartMinPartSizeBytes + 3
-	session := uploadSession(testUploadID, uploads.SessionStateUploading, sizeBytes)
-	wantSession := uploadSession(testUploadID, uploads.SessionStateCompleted, sizeBytes)
+	session := uploadSession(uploadIDFixture(), uploads.SessionStateUploading, sizeBytes)
+	wantSession := uploadSession(uploadIDFixture(), uploads.SessionStateCompleted, sizeBytes)
 	completeParts := []objectstore.CompletePart{
 		{Number: 1, ETag: "etag-1", SizeBytes: objectstore.MultipartMinPartSizeBytes},
 		{Number: 2, ETag: "etag-2", SizeBytes: 3},
 	}
 
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
 		Return(session, nil)
 	tc.objects.EXPECT().
 		CompleteMultipartUpload(mock.Anything, objectstore.CompleteMultipartUploadParams{
@@ -298,11 +305,11 @@ func TestServiceCompleteUploadCompletesObjectstoreThenDurableState(t *testing.T)
 		}).
 		Return(objectstore.ObjectInfo{Key: session.StagingKey, SizeBytes: sizeBytes}, nil)
 	tc.store.EXPECT().
-		CompleteSession(mock.Anything, uploads.CompleteSessionParams{ID: testUploadID}).
+		CompleteSession(mock.Anything, uploads.CompleteSessionParams{ID: uploadIDFixture()}).
 		Return(wantSession, nil)
 
 	got, err := tc.service.CompleteUpload(context.Background(), uploads.CompleteUploadParams{
-		UploadID: testUploadID,
+		UploadID: uploadIDFixture(),
 		Parts: []uploads.CompleteUploadPart{
 			{Number: 2, ETag: "etag-2", SizeBytes: 3},
 			{Number: 1, ETag: "etag-1", SizeBytes: objectstore.MultipartMinPartSizeBytes},
@@ -316,11 +323,11 @@ func TestServiceCompleteUploadCompletesObjectstoreThenDurableState(t *testing.T)
 func TestServiceCompleteUploadRecoversCompletedStagingObjectAfterMissingMultipartUpload(t *testing.T) {
 	tc := newServiceTestContext(t)
 	sizeBytes := objectstore.MultipartMinPartSizeBytes + 3
-	session := uploadSession(testUploadID, uploads.SessionStateUploading, sizeBytes)
-	wantSession := uploadSession(testUploadID, uploads.SessionStateCompleted, sizeBytes)
+	session := uploadSession(uploadIDFixture(), uploads.SessionStateUploading, sizeBytes)
+	wantSession := uploadSession(uploadIDFixture(), uploads.SessionStateCompleted, sizeBytes)
 
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
 		Return(session, nil)
 	tc.objects.EXPECT().
 		CompleteMultipartUpload(mock.Anything, mock.Anything).
@@ -329,11 +336,11 @@ func TestServiceCompleteUploadRecoversCompletedStagingObjectAfterMissingMultipar
 		StatObject(mock.Anything, objectstore.StatObjectParams{Key: session.StagingKey}).
 		Return(objectstore.ObjectInfo{Key: session.StagingKey, SizeBytes: sizeBytes}, nil)
 	tc.store.EXPECT().
-		CompleteSession(mock.Anything, uploads.CompleteSessionParams{ID: testUploadID}).
+		CompleteSession(mock.Anything, uploads.CompleteSessionParams{ID: uploadIDFixture()}).
 		Return(wantSession, nil)
 
 	got, err := tc.service.CompleteUpload(context.Background(), uploads.CompleteUploadParams{
-		UploadID: testUploadID,
+		UploadID: uploadIDFixture(),
 		Parts: []uploads.CompleteUploadPart{
 			{Number: 1, ETag: "etag-1", SizeBytes: objectstore.MultipartMinPartSizeBytes},
 			{Number: 2, ETag: "etag-2", SizeBytes: 3},
@@ -357,13 +364,13 @@ func TestServiceCompleteUploadReturnsCurrentStateWithoutObjectstore(t *testing.T
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := newServiceTestContext(t)
-			wantSession := uploadSession(testUploadID, tt.state, 12)
+			wantSession := uploadSession(uploadIDFixture(), tt.state, 12)
 			tc.store.EXPECT().
-				GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
+				GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
 				Return(wantSession, nil)
 
 			got, err := tc.service.CompleteUpload(context.Background(), uploads.CompleteUploadParams{
-				UploadID: testUploadID,
+				UploadID: uploadIDFixture(),
 			})
 
 			require.NoError(t, err)
@@ -375,11 +382,11 @@ func TestServiceCompleteUploadReturnsCurrentStateWithoutObjectstore(t *testing.T
 func TestServiceCompleteUploadRejectsSizeMismatchBeforeObjectstore(t *testing.T) {
 	tc := newServiceTestContext(t)
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
-		Return(uploadSession(testUploadID, uploads.SessionStateUploading, 10), nil)
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
+		Return(uploadSession(uploadIDFixture(), uploads.SessionStateUploading, 10), nil)
 
 	got, err := tc.service.CompleteUpload(context.Background(), uploads.CompleteUploadParams{
-		UploadID: testUploadID,
+		UploadID: uploadIDFixture(),
 		Parts: []uploads.CompleteUploadPart{
 			{Number: 1, ETag: "etag-1", SizeBytes: 12},
 		},
@@ -391,17 +398,17 @@ func TestServiceCompleteUploadRejectsSizeMismatchBeforeObjectstore(t *testing.T)
 
 func TestServiceCompleteUploadRejectsExpiredSessionBeforeObjectstoreCompletion(t *testing.T) {
 	tc := newServiceTestContext(t)
-	session := uploadSession(testUploadID, uploads.SessionStateUploading, 12)
-	session.ExpiresAt = testNow
+	session := uploadSession(uploadIDFixture(), uploads.SessionStateUploading, 12)
+	session.ExpiresAt = nowFixture()
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
 		Return(session, nil)
 	tc.objects.EXPECT().
 		StatObject(mock.Anything, objectstore.StatObjectParams{Key: session.StagingKey}).
 		Return(objectstore.ObjectInfo{}, objectNotFoundErr())
 
 	got, err := tc.service.CompleteUpload(context.Background(), uploads.CompleteUploadParams{
-		UploadID: testUploadID,
+		UploadID: uploadIDFixture(),
 		Parts: []uploads.CompleteUploadPart{
 			{Number: 1, ETag: "etag-1", SizeBytes: 12},
 		},
@@ -414,11 +421,11 @@ func TestServiceCompleteUploadRejectsExpiredSessionBeforeObjectstoreCompletion(t
 func TestServiceCompleteUploadRejectsInvalidPartsBeforeObjectstore(t *testing.T) {
 	tc := newServiceTestContext(t)
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
-		Return(uploadSession(testUploadID, uploads.SessionStateUploading, 10), nil)
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
+		Return(uploadSession(uploadIDFixture(), uploads.SessionStateUploading, 10), nil)
 
 	got, err := tc.service.CompleteUpload(context.Background(), uploads.CompleteUploadParams{
-		UploadID: testUploadID,
+		UploadID: uploadIDFixture(),
 	})
 
 	require.ErrorIs(t, err, uploads.ErrInvalid)
@@ -438,11 +445,11 @@ func TestServiceCompleteUploadRejectsFailedAndAbortedStates(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := newServiceTestContext(t)
 			tc.store.EXPECT().
-				GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
-				Return(uploadSession(testUploadID, tt.state, 12), nil)
+				GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
+				Return(uploadSession(uploadIDFixture(), tt.state, 12), nil)
 
 			got, err := tc.service.CompleteUpload(context.Background(), uploads.CompleteUploadParams{
-				UploadID: testUploadID,
+				UploadID: uploadIDFixture(),
 			})
 
 			require.ErrorIs(t, err, uploads.ErrFailedPrecondition)
@@ -453,11 +460,11 @@ func TestServiceCompleteUploadRejectsFailedAndAbortedStates(t *testing.T) {
 
 func TestServiceAbortUploadAbortsObjectstoreThenDurableState(t *testing.T) {
 	tc := newServiceTestContext(t)
-	session := uploadSession(testUploadID, uploads.SessionStateUploading, 12)
-	wantSession := uploadSession(testUploadID, uploads.SessionStateAborted, 12)
+	session := uploadSession(uploadIDFixture(), uploads.SessionStateUploading, 12)
+	wantSession := uploadSession(uploadIDFixture(), uploads.SessionStateAborted, 12)
 
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
 		Return(session, nil)
 	tc.objects.EXPECT().
 		AbortMultipartUpload(mock.Anything, objectstore.AbortMultipartUploadParams{
@@ -466,11 +473,11 @@ func TestServiceAbortUploadAbortsObjectstoreThenDurableState(t *testing.T) {
 		}).
 		Return(nil)
 	tc.store.EXPECT().
-		AbortSession(mock.Anything, uploads.AbortSessionParams{ID: testUploadID}).
+		AbortSession(mock.Anything, uploads.AbortSessionParams{ID: uploadIDFixture()}).
 		Return(wantSession, nil)
 
 	got, err := tc.service.AbortUpload(context.Background(), uploads.AbortUploadParams{
-		UploadID: testUploadID,
+		UploadID: uploadIDFixture(),
 	})
 
 	require.NoError(t, err)
@@ -479,11 +486,11 @@ func TestServiceAbortUploadAbortsObjectstoreThenDurableState(t *testing.T) {
 
 func TestServiceAbortUploadTreatsMissingObjectstoreUploadAsAlreadyAbsent(t *testing.T) {
 	tc := newServiceTestContext(t)
-	session := uploadSession(testUploadID, uploads.SessionStateCreated, 12)
-	wantSession := uploadSession(testUploadID, uploads.SessionStateAborted, 12)
+	session := uploadSession(uploadIDFixture(), uploads.SessionStateCreated, 12)
+	wantSession := uploadSession(uploadIDFixture(), uploads.SessionStateAborted, 12)
 
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
 		Return(session, nil)
 	tc.objects.EXPECT().
 		AbortMultipartUpload(mock.Anything, objectstore.AbortMultipartUploadParams{
@@ -495,11 +502,11 @@ func TestServiceAbortUploadTreatsMissingObjectstoreUploadAsAlreadyAbsent(t *test
 		StatObject(mock.Anything, objectstore.StatObjectParams{Key: session.StagingKey}).
 		Return(objectstore.ObjectInfo{}, objectNotFoundErr())
 	tc.store.EXPECT().
-		AbortSession(mock.Anything, uploads.AbortSessionParams{ID: testUploadID}).
+		AbortSession(mock.Anything, uploads.AbortSessionParams{ID: uploadIDFixture()}).
 		Return(wantSession, nil)
 
 	got, err := tc.service.AbortUpload(context.Background(), uploads.AbortUploadParams{
-		UploadID: testUploadID,
+		UploadID: uploadIDFixture(),
 	})
 
 	require.NoError(t, err)
@@ -508,11 +515,11 @@ func TestServiceAbortUploadTreatsMissingObjectstoreUploadAsAlreadyAbsent(t *test
 
 func TestServiceAbortUploadCompletesSessionWhenMissingMultipartHasStagedObject(t *testing.T) {
 	tc := newServiceTestContext(t)
-	session := uploadSession(testUploadID, uploads.SessionStateCreated, 12)
-	wantSession := uploadSession(testUploadID, uploads.SessionStateCompleted, 12)
+	session := uploadSession(uploadIDFixture(), uploads.SessionStateCreated, 12)
+	wantSession := uploadSession(uploadIDFixture(), uploads.SessionStateCompleted, 12)
 
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
 		Return(session, nil)
 	tc.objects.EXPECT().
 		AbortMultipartUpload(mock.Anything, objectstore.AbortMultipartUploadParams{
@@ -524,11 +531,11 @@ func TestServiceAbortUploadCompletesSessionWhenMissingMultipartHasStagedObject(t
 		StatObject(mock.Anything, objectstore.StatObjectParams{Key: session.StagingKey}).
 		Return(objectstore.ObjectInfo{Key: session.StagingKey, SizeBytes: 12}, nil)
 	tc.store.EXPECT().
-		CompleteSession(mock.Anything, uploads.CompleteSessionParams{ID: testUploadID}).
+		CompleteSession(mock.Anything, uploads.CompleteSessionParams{ID: uploadIDFixture()}).
 		Return(wantSession, nil)
 
 	got, err := tc.service.AbortUpload(context.Background(), uploads.AbortUploadParams{
-		UploadID: testUploadID,
+		UploadID: uploadIDFixture(),
 	})
 
 	require.NoError(t, err)
@@ -537,13 +544,13 @@ func TestServiceAbortUploadCompletesSessionWhenMissingMultipartHasStagedObject(t
 
 func TestServiceAbortUploadReturnsAlreadyAbortedSession(t *testing.T) {
 	tc := newServiceTestContext(t)
-	wantSession := uploadSession(testUploadID, uploads.SessionStateAborted, 12)
+	wantSession := uploadSession(uploadIDFixture(), uploads.SessionStateAborted, 12)
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
 		Return(wantSession, nil)
 
 	got, err := tc.service.AbortUpload(context.Background(), uploads.AbortUploadParams{
-		UploadID: testUploadID,
+		UploadID: uploadIDFixture(),
 	})
 
 	require.NoError(t, err)
@@ -553,11 +560,11 @@ func TestServiceAbortUploadReturnsAlreadyAbortedSession(t *testing.T) {
 func TestServiceAbortUploadRejectsNonMutableStateBeforeObjectstore(t *testing.T) {
 	tc := newServiceTestContext(t)
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
-		Return(uploadSession(testUploadID, uploads.SessionStateCompleted, 12), nil)
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
+		Return(uploadSession(uploadIDFixture(), uploads.SessionStateCompleted, 12), nil)
 
 	got, err := tc.service.AbortUpload(context.Background(), uploads.AbortUploadParams{
-		UploadID: testUploadID,
+		UploadID: uploadIDFixture(),
 	})
 
 	require.ErrorIs(t, err, uploads.ErrFailedPrecondition)
@@ -566,13 +573,13 @@ func TestServiceAbortUploadRejectsNonMutableStateBeforeObjectstore(t *testing.T)
 
 func TestServiceGetUploadDelegatesToStore(t *testing.T) {
 	tc := newServiceTestContext(t)
-	wantSession := uploadSession(testUploadID, uploads.SessionStateUploading, 12)
+	wantSession := uploadSession(uploadIDFixture(), uploads.SessionStateUploading, 12)
 	tc.store.EXPECT().
-		GetSession(mock.Anything, uploads.GetSessionParams{ID: testUploadID}).
+		GetSession(mock.Anything, uploads.GetSessionParams{ID: uploadIDFixture()}).
 		Return(wantSession, nil)
 
 	got, err := tc.service.GetUpload(context.Background(), uploads.GetUploadParams{
-		UploadID: testUploadID,
+		UploadID: uploadIDFixture(),
 	})
 
 	require.NoError(t, err)
@@ -591,21 +598,21 @@ func TestServiceGetUploadRejectsInvalidInputBeforeStore(t *testing.T) {
 func uploadSession(id uuid.UUID, state uploads.SessionState, sizeBytes int64) uploads.Session {
 	return uploads.Session{
 		ID:                id,
-		ExpectedDigest:    testDigest,
+		ExpectedDigest:    digestFixture(),
 		ExpectedSizeBytes: sizeBytes,
 		State:             state,
 		StorageUploadID:   testStorageUploadID,
 		StagingKey:        uploads.StagingKey(id),
-		ExpiresAt:         testExpires,
+		ExpiresAt:         expiresFixture(),
 	}
 }
 
 func validBeginUploadParams() uploads.BeginUploadParams {
 	return uploads.BeginUploadParams{
-		ID:                testUploadID,
-		ExpectedDigest:    testDigest,
+		ID:                uploadIDFixture(),
+		ExpectedDigest:    digestFixture(),
 		ExpectedSizeBytes: 12,
-		ExpiresAt:         testExpires,
+		ExpiresAt:         expiresFixture(),
 	}
 }
 
