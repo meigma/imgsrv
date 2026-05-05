@@ -114,7 +114,7 @@ func newHTTPUploadsClient(transport *transport) *HTTPUploadsClient {
 // BeginUpload starts a new upload session.
 func (client *HTTPUploadsClient) BeginUpload(ctx context.Context, request BeginUploadRequest) (UploadSession, error) {
 	var session UploadSession
-	err := client.transport.doJSON(ctx, http.MethodPost, "/v1/uploads", request, nil, http.StatusCreated, &session)
+	err := client.transport.doJSON(ctx, "/v1/uploads", request, http.StatusCreated, &session)
 
 	return session, err
 }
@@ -143,7 +143,7 @@ func (client *HTTPUploadsClient) CompleteUpload(
 ) (UploadSession, error) {
 	var session UploadSession
 	path := "/v1/uploads/" + url.PathEscape(uploadID) + "/complete"
-	err := client.transport.doJSON(ctx, http.MethodPost, path, request, nil, http.StatusOK, &session)
+	err := client.transport.doJSON(ctx, path, request, http.StatusOK, &session)
 
 	return session, err
 }

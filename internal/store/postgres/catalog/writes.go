@@ -148,7 +148,13 @@ func (store *Store) AddAttachment(
 			blob_digest,
 			blob_size_bytes
 		)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		SELECT $1, release_artifacts.id, $5, $6, $7, $8
+		FROM release_artifacts
+		INNER JOIN image_versions ON image_versions.id = release_artifacts.version_id
+		INNER JOIN images ON images.id = image_versions.image_id
+		WHERE images.name = $2
+			AND image_versions.version = $3
+			AND release_artifacts.id = $4
 		RETURNING id,
 			artifact_id,
 			name,
@@ -158,6 +164,8 @@ func (store *Store) AddAttachment(
 			created_at,
 			updated_at`,
 		uuid.New(),
+		params.ImageName,
+		params.Version,
 		params.ArtifactID,
 		params.Name,
 		params.MediaType,

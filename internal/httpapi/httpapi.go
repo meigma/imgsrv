@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/meigma/imgsrv/internal/catalog"
 	"github.com/meigma/imgsrv/internal/telemetry"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
@@ -27,6 +28,9 @@ type Dependencies struct {
 
 	// Uploads coordinates client-facing upload operations. Nil leaves upload routes unavailable.
 	Uploads UploadService
+
+	// Catalog coordinates client-facing image catalog operations. Nil leaves catalog routes unavailable.
+	Catalog CatalogService
 
 	// Now returns the current time for upload HTTP policy. Nil selects time.Now.
 	Now func() time.Time
@@ -67,11 +71,36 @@ type UploadService interface {
 	GetUpload(context.Context, uploads.GetUploadParams) (uploads.Session, error)
 }
 
+// CatalogService coordinates catalog operations for HTTP callers.
+type CatalogService interface {
+	// CreateImage creates an operator-defined image namespace.
+	CreateImage(context.Context, catalog.CreateImageParams) (catalog.Image, error)
+
+	// CreateDraftVersion creates a mutable draft version for an image.
+	CreateDraftVersion(context.Context, catalog.CreateDraftVersionParams) (catalog.Version, error)
+
+	// AddArtifact adds a primary artifact on a draft version.
+	AddArtifact(context.Context, catalog.AddArtifactParams) (catalog.Artifact, error)
+
+	// AddAttachment adds a secondary attachment on a draft version.
+	AddAttachment(context.Context, catalog.AddAttachmentParams) (catalog.Attachment, error)
+
+	// PublishVersion marks a draft version immutable and publishable.
+	PublishVersion(context.Context, catalog.PublishVersionParams) (catalog.Version, error)
+
+	// GetVersionManifest resolves an exact draft or published image version manifest.
+	GetVersionManifest(context.Context, catalog.GetVersionManifestParams) (catalog.Manifest, error)
+
+	// ResolveManifest resolves a published image manifest by version or alias.
+	ResolveManifest(context.Context, catalog.ResolveManifestParams) (catalog.Manifest, error)
+}
+
 // api carries the configured HTTP adapter state shared across handlers.
 type api struct {
 	logger    *slog.Logger
 	readiness ReadinessChecker
 	uploads   UploadService
+	catalog   CatalogService
 	now       func() time.Time
 	uploadTTL time.Duration
 }
@@ -101,6 +130,7 @@ func New(deps Dependencies) http.Handler {
 		logger:    logger,
 		readiness: readiness,
 		uploads:   deps.Uploads,
+		catalog:   deps.Catalog,
 		now:       now,
 		uploadTTL: uploadTTL,
 	}
@@ -113,6 +143,15 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("PUT /v1/uploads/{upload_id}/parts/{part_number}", api.putUploadPart)
 	mux.HandleFunc("POST /v1/uploads/{upload_id}/complete", api.completeUpload)
 	mux.HandleFunc("POST /v1/uploads/{upload_id}/abort", api.abortUpload)
+	mux.HandleFunc("POST /v1/images", api.createImage)
+	mux.HandleFunc("POST /v1/images/{name}/versions", api.createDraftVersion)
+	mux.HandleFunc("GET /v1/images/{name}/versions/{version}", api.getVersionManifest)
+	mux.HandleFunc("POST /v1/images/{name}/versions/{version}/artifacts", api.addArtifact)
+	mux.HandleFunc(
+		"POST /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments",
+		api.addAttachment,
+	)
+	mux.HandleFunc("POST /v1/images/{name}/versions/{version}/publish", api.publishVersion)
 
 	return deps.Telemetry.WrapHTTPHandler(Chain(mux, logRequests(logger)))
 }

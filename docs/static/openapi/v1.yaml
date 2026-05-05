@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: imgsrv API
   version: v1
-  description: Initial contract for the implemented imgsrv upload API.
+  description: Contract for the implemented imgsrv v1 upload and catalog API.
 servers:
   - url: /
 paths:
@@ -129,6 +129,171 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /v1/images:
+    post:
+      operationId: createImage
+      summary: Create an image namespace.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateImageRequest'
+      responses:
+        '201':
+          description: Image namespace created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Image'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/images/{name}/versions:
+    post:
+      operationId: createDraftVersion
+      summary: Create a draft image version.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDraftVersionRequest'
+      responses:
+        '201':
+          description: Draft image version created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageVersion'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/images/{name}/versions/{version}:
+    get:
+      operationId: getVersionManifest
+      summary: Get an exact draft or published version manifest.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+        - $ref: '#/components/parameters/ImageVersion'
+      responses:
+        '200':
+          description: Exact image version manifest.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Manifest'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/images/{name}/versions/{version}/artifacts:
+    post:
+      operationId: addArtifact
+      summary: Add a primary artifact to a draft version.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+        - $ref: '#/components/parameters/ImageVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddArtifactRequest'
+      responses:
+        '201':
+          description: Artifact declaration created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments:
+    post:
+      operationId: addAttachment
+      summary: Add an attachment to a draft artifact.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+        - $ref: '#/components/parameters/ImageVersion'
+        - $ref: '#/components/parameters/ArtifactID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddAttachmentRequest'
+      responses:
+        '201':
+          description: Attachment declaration created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/images/{name}/versions/{version}/publish:
+    post:
+      operationId: publishVersion
+      summary: Publish a draft image version.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+        - $ref: '#/components/parameters/ImageVersion'
+      responses:
+        '200':
+          description: Image version published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageVersion'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
 components:
   parameters:
     UploadID:
@@ -137,6 +302,26 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/UploadID'
+    ImageName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9._-]{0,127}$'
+    ImageVersion:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$'
+    ArtifactID:
+      name: artifact_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/ArtifactID'
   responses:
     Problem:
       description: RFC 9457 problem details.
@@ -153,6 +338,9 @@ components:
     UploadID:
       type: string
       format: uuid
+    ArtifactID:
+      type: string
+      format: uuid
     UploadState:
       type: string
       enum:
@@ -163,6 +351,16 @@ components:
         - ready
         - failed
         - aborted
+    ImageVersionState:
+      type: string
+      enum:
+        - draft
+        - published
+    ArtifactFormat:
+      type: string
+      enum:
+        - raw
+        - qcow2
     BeginUploadRequest:
       type: object
       required:
@@ -262,6 +460,241 @@ components:
           type: integer
           format: int64
           minimum: 0
+      additionalProperties: false
+    CreateImageRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{0,127}$'
+        display_name:
+          type: string
+        description:
+          type: string
+      additionalProperties: false
+    CreateDraftVersionRequest:
+      type: object
+      required:
+        - version
+      properties:
+        version:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$'
+      additionalProperties: false
+    AddArtifactRequest:
+      type: object
+      required:
+        - operating_system
+        - architecture
+        - format
+        - primary_blob_digest
+        - primary_blob_size_bytes
+        - primary_media_type
+      properties:
+        operating_system:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+        architecture:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+        format:
+          $ref: '#/components/schemas/ArtifactFormat'
+        primary_blob_digest:
+          $ref: '#/components/schemas/Digest'
+        primary_blob_size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        primary_media_type:
+          type: string
+          minLength: 1
+      additionalProperties: false
+    AddAttachmentRequest:
+      type: object
+      required:
+        - name
+        - media_type
+        - blob_digest
+        - blob_size_bytes
+      properties:
+        name:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+        media_type:
+          type: string
+          minLength: 1
+        blob_digest:
+          $ref: '#/components/schemas/Digest'
+        blob_size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    Image:
+      type: object
+      required:
+        - id
+        - name
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{0,127}$'
+        display_name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    ImageVersion:
+      type: object
+      required:
+        - id
+        - image_id
+        - version
+        - state
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        image_id:
+          type: string
+          format: uuid
+        version:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$'
+        state:
+          $ref: '#/components/schemas/ImageVersionState'
+        published_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    Artifact:
+      type: object
+      required:
+        - id
+        - version_id
+        - operating_system
+        - architecture
+        - format
+        - primary_blob_digest
+        - primary_blob_size_bytes
+        - primary_media_type
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/ArtifactID'
+        version_id:
+          type: string
+          format: uuid
+        operating_system:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+        architecture:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+        format:
+          $ref: '#/components/schemas/ArtifactFormat'
+        primary_blob_digest:
+          $ref: '#/components/schemas/Digest'
+        primary_blob_size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        primary_media_type:
+          type: string
+          minLength: 1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    Attachment:
+      type: object
+      required:
+        - id
+        - artifact_id
+        - name
+        - media_type
+        - blob_digest
+        - blob_size_bytes
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        artifact_id:
+          $ref: '#/components/schemas/ArtifactID'
+        name:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+        media_type:
+          type: string
+          minLength: 1
+        blob_digest:
+          $ref: '#/components/schemas/Digest'
+        blob_size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    Manifest:
+      type: object
+      required:
+        - image
+        - version
+        - artifacts
+      properties:
+        image:
+          $ref: '#/components/schemas/Image'
+        version:
+          $ref: '#/components/schemas/ImageVersion'
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManifestArtifact'
+      additionalProperties: false
+    ManifestArtifact:
+      type: object
+      required:
+        - artifact
+        - attachments
+      properties:
+        artifact:
+          $ref: '#/components/schemas/Artifact'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
       additionalProperties: false
     Problem:
       type: object

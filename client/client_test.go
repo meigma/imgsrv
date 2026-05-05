@@ -14,8 +14,12 @@ import (
 )
 
 const (
-	testDigest   = Digest("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-	testUploadID = "11111111-2222-3333-4444-555555555555"
+	testArtifactID   = "33333333-4444-5555-6666-777777777777"
+	testAttachmentID = "44444444-5555-6666-7777-888888888888"
+	testDigest       = Digest("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	testImageID      = "22222222-3333-4444-5555-666666666666"
+	testUploadID     = "11111111-2222-3333-4444-555555555555"
+	testVersionID    = "55555555-6666-7777-8888-999999999999"
 )
 
 func TestNewValidatesBaseURL(t *testing.T) {
@@ -173,6 +177,145 @@ func TestClientUploadFlowBuildsRequests(t *testing.T) {
 	assert.Equal(t, UploadStateCompleted, status.State)
 }
 
+func TestClientCatalogFlowBuildsRequests(t *testing.T) {
+	ctx := context.Background()
+	displayName := "Debian 12"
+	description := "Base image"
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/images", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodPost)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		var got CreateImageRequest
+		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+			return
+		}
+		assert.Equal(t, "debian", got.Name)
+		if assert.NotNil(t, got.DisplayName) {
+			assert.Equal(t, displayName, *got.DisplayName)
+		}
+		if assert.NotNil(t, got.Description) {
+			assert.Equal(t, description, *got.Description)
+		}
+
+		writeJSON(t, w, http.StatusCreated, imageFixture())
+	})
+	mux.HandleFunc("/api/v1/images/debian/versions", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodPost)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		var got CreateDraftVersionRequest
+		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+			return
+		}
+		assert.Equal(t, "v1.0.0", got.Version)
+
+		writeJSON(t, w, http.StatusCreated, versionFixture(ImageVersionStateDraft))
+	})
+	mux.HandleFunc("/api/v1/images/debian/versions/v1.0.0", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodGet)
+		writeJSON(t, w, http.StatusOK, manifestFixture(ImageVersionStateDraft))
+	})
+	mux.HandleFunc("/api/v1/images/debian/versions/v1.0.0/artifacts", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodPost)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		var got AddArtifactRequest
+		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+			return
+		}
+		assert.Equal(t, "linux", got.OperatingSystem)
+		assert.Equal(t, "x86_64", got.Architecture)
+		assert.Equal(t, ArtifactFormatQCOW2, got.Format)
+		assert.Equal(t, testDigest, got.PrimaryBlobDigest)
+		assert.Equal(t, int64(12), got.PrimaryBlobSizeBytes)
+		assert.Equal(t, "application/x-qcow2", got.PrimaryMediaType)
+
+		writeJSON(t, w, http.StatusCreated, artifactFixture())
+	})
+	mux.HandleFunc(
+		"/api/v1/images/debian/versions/v1.0.0/artifacts/"+testArtifactID+"/attachments",
+		func(w http.ResponseWriter, r *http.Request) {
+			assertRequestBasics(t, r, http.MethodPost)
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			var got AddAttachmentRequest
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+				return
+			}
+			assert.Equal(t, "rootfs.sha256", got.Name)
+			assert.Equal(t, "text/plain", got.MediaType)
+			assert.Equal(t, testDigest, got.BlobDigest)
+			assert.Equal(t, int64(64), got.BlobSizeBytes)
+
+			writeJSON(t, w, http.StatusCreated, attachmentFixture())
+		},
+	)
+	mux.HandleFunc("/api/v1/images/debian/versions/v1.0.0/publish", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodPost)
+		assert.Zero(t, r.ContentLength)
+		writeJSON(t, w, http.StatusOK, versionFixture(ImageVersionStatePublished))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	client, err := New(Options{
+		BaseURL:     server.URL + "/api/",
+		BearerToken: "test-token",
+		UserAgent:   "imgsrv-test-client",
+	})
+	require.NoError(t, err)
+	catalog := client.Catalog()
+	require.NotNil(t, catalog)
+
+	image, err := catalog.CreateImage(ctx, CreateImageRequest{
+		Name:        "debian",
+		DisplayName: &displayName,
+		Description: &description,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, testImageID, image.ID)
+
+	version, err := catalog.CreateDraftVersion(ctx, image.Name, CreateDraftVersionRequest{Version: "v1.0.0"})
+	require.NoError(t, err)
+	assert.Equal(t, ImageVersionStateDraft, version.State)
+
+	artifact, err := catalog.AddArtifact(ctx, image.Name, version.Version, AddArtifactRequest{
+		OperatingSystem:      "linux",
+		Architecture:         "x86_64",
+		Format:               ArtifactFormatQCOW2,
+		PrimaryBlobDigest:    testDigest,
+		PrimaryBlobSizeBytes: 12,
+		PrimaryMediaType:     "application/x-qcow2",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, ArtifactID(testArtifactID), artifact.ID)
+
+	attachment, err := catalog.AddAttachment(
+		ctx,
+		image.Name,
+		version.Version,
+		artifact.ID.String(),
+		AddAttachmentRequest{
+			Name:          "rootfs.sha256",
+			MediaType:     "text/plain",
+			BlobDigest:    testDigest,
+			BlobSizeBytes: 64,
+		},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, testAttachmentID, attachment.ID)
+
+	manifest, err := catalog.GetVersionManifest(ctx, image.Name, version.Version)
+	require.NoError(t, err)
+	assert.Equal(t, ImageVersionStateDraft, manifest.Version.State)
+	require.Len(t, manifest.Artifacts, 1)
+
+	published, err := catalog.PublishVersion(ctx, image.Name, version.Version)
+	require.NoError(t, err)
+	assert.Equal(t, ImageVersionStatePublished, published.State)
+}
+
 func TestClientDecodesProblemError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
@@ -266,6 +409,76 @@ func uploadSessionFixture(state UploadState) UploadSession {
 		ExpectedSizeBytes: 12,
 		State:             state,
 		ExpiresAt:         "2026-05-05T12:00:00Z",
+	}
+}
+
+func imageFixture() Image {
+	displayName := "Debian 12"
+	description := "Base image"
+
+	return Image{
+		ID:          testImageID,
+		Name:        "debian",
+		DisplayName: &displayName,
+		Description: &description,
+		CreatedAt:   "2026-05-05T12:00:00Z",
+		UpdatedAt:   "2026-05-05T12:00:00Z",
+	}
+}
+
+func versionFixture(state ImageVersionState) ImageVersion {
+	version := ImageVersion{
+		ID:        testVersionID,
+		ImageID:   testImageID,
+		Version:   "v1.0.0",
+		State:     state,
+		CreatedAt: "2026-05-05T12:00:00Z",
+		UpdatedAt: "2026-05-05T12:00:00Z",
+	}
+	if state == ImageVersionStatePublished {
+		publishedAt := "2026-05-05T12:01:00Z"
+		version.PublishedAt = &publishedAt
+	}
+
+	return version
+}
+
+func artifactFixture() Artifact {
+	return Artifact{
+		ID:                   ArtifactID(testArtifactID),
+		VersionID:            testVersionID,
+		OperatingSystem:      "linux",
+		Architecture:         "x86_64",
+		Format:               ArtifactFormatQCOW2,
+		PrimaryBlobDigest:    testDigest,
+		PrimaryBlobSizeBytes: 12,
+		PrimaryMediaType:     "application/x-qcow2",
+		CreatedAt:            "2026-05-05T12:00:00Z",
+		UpdatedAt:            "2026-05-05T12:00:00Z",
+	}
+}
+
+func attachmentFixture() Attachment {
+	return Attachment{
+		ID:            testAttachmentID,
+		ArtifactID:    ArtifactID(testArtifactID),
+		Name:          "rootfs.sha256",
+		MediaType:     "text/plain",
+		BlobDigest:    testDigest,
+		BlobSizeBytes: 64,
+		CreatedAt:     "2026-05-05T12:00:00Z",
+		UpdatedAt:     "2026-05-05T12:00:00Z",
+	}
+}
+
+func manifestFixture(state ImageVersionState) Manifest {
+	return Manifest{
+		Image:   imageFixture(),
+		Version: versionFixture(state),
+		Artifacts: []ManifestArtifact{{
+			Artifact:    artifactFixture(),
+			Attachments: []Attachment{attachmentFixture()},
+		}},
 	}
 }
 

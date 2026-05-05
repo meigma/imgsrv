@@ -41,10 +41,10 @@ type Store interface {
 	// CreateDraftVersion creates a mutable draft version for an image.
 	CreateDraftVersion(context.Context, CreateDraftVersionParams) (Version, error)
 
-	// AddArtifact adds or replaces a primary artifact on a draft version.
+	// AddArtifact adds a primary artifact on a draft version.
 	AddArtifact(context.Context, AddArtifactParams) (Artifact, error)
 
-	// AddAttachment adds or replaces a secondary attachment on a draft version.
+	// AddAttachment adds a secondary attachment on a draft version.
 	AddAttachment(context.Context, AddAttachmentParams) (Attachment, error)
 
 	// PublishVersion marks a draft version immutable and publishable.
@@ -55,6 +55,9 @@ type Store interface {
 
 	// GetAlias returns an alias by image and alias name.
 	GetAlias(context.Context, GetAliasParams) (Alias, error)
+
+	// GetVersionManifest resolves an exact draft or published image version manifest.
+	GetVersionManifest(context.Context, GetVersionManifestParams) (Manifest, error)
 
 	// ResolveManifest resolves a published image manifest by version or alias.
 	ResolveManifest(context.Context, ResolveManifestParams) (Manifest, error)
@@ -296,6 +299,12 @@ type AddArtifactParams struct {
 
 // AddAttachmentParams adds an attachment blob to a draft artifact.
 type AddAttachmentParams struct {
+	// ImageName identifies the parent image by name.
+	ImageName string
+
+	// Version identifies the draft image version.
+	Version string
+
 	// ArtifactID identifies the parent artifact.
 	ArtifactID uuid.UUID
 
@@ -342,14 +351,17 @@ type GetAliasParams struct {
 	Alias string
 }
 
-// ResolveManifestParams resolves a published manifest by exact version.
-type ResolveManifestParams struct {
+// GetVersionManifestParams resolves an exact draft or published manifest.
+type GetVersionManifestParams struct {
 	// ImageName identifies the parent image by name.
 	ImageName string
 
-	// Version identifies the published image version.
+	// Version identifies the draft or published image version.
 	Version string
 }
+
+// ResolveManifestParams resolves a published manifest by exact version or alias.
+type ResolveManifestParams GetVersionManifestParams
 
 // ValidateImageName validates an image name.
 func ValidateImageName(name string) error {

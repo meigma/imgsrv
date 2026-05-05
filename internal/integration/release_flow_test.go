@@ -1,0 +1,328 @@
+//go:build integration
+
+package integration
+
+import (
+	"bytes"
+	"context"
+	"net/http"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	imgsrv "github.com/meigma/imgsrv/client"
+	"github.com/meigma/imgsrv/internal/cas"
+	"github.com/meigma/imgsrv/internal/integration/harness"
+	"github.com/meigma/imgsrv/internal/jobs/promote"
+	"github.com/meigma/imgsrv/internal/uploads"
+)
+
+func TestReleaseFlowPublishesDraft(t *testing.T) {
+	env := harness.Start(t)
+	ctx := t.Context()
+	client := newClient(t, env)
+	catalog := client.Catalog()
+	primaryBlob := uploadBlobToCAS(ctx, t, env, client, []byte("imgsrv release primary artifact"))
+	attachmentBlob := uploadBlobToCAS(ctx, t, env, client, []byte("imgsrv release attachment"))
+	displayName := "Debian 12"
+	description := "Integration release flow image"
+
+	image, err := catalog.CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name:        "release-flow",
+		DisplayName: &displayName,
+		Description: &description,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "release-flow", image.Name)
+	require.NotNil(t, image.DisplayName)
+	assert.Equal(t, displayName, *image.DisplayName)
+
+	version, err := catalog.CreateDraftVersion(ctx, image.Name, imgsrv.CreateDraftVersionRequest{Version: "v1.0.0"})
+	require.NoError(t, err)
+	assert.Equal(t, "v1.0.0", version.Version)
+	assert.Equal(t, imgsrv.ImageVersionStateDraft, version.State)
+
+	artifact, err := catalog.AddArtifact(ctx, image.Name, version.Version, artifactRequest(primaryBlob))
+	require.NoError(t, err)
+	assert.Equal(t, "linux", artifact.OperatingSystem)
+	assert.Equal(t, "x86_64", artifact.Architecture)
+	assert.Equal(t, imgsrv.ArtifactFormatQCOW2, artifact.Format)
+	assert.Equal(t, primaryBlob.Digest, artifact.PrimaryBlobDigest)
+	assert.Equal(t, primaryBlob.SizeBytes, artifact.PrimaryBlobSizeBytes)
+
+	attachment, err := catalog.AddAttachment(
+		ctx,
+		image.Name,
+		version.Version,
+		artifact.ID.String(),
+		attachmentRequest("rootfs.sha256", attachmentBlob),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, artifact.ID, attachment.ArtifactID)
+	assert.Equal(t, "rootfs.sha256", attachment.Name)
+	assert.Equal(t, attachmentBlob.Digest, attachment.BlobDigest)
+	assert.Equal(t, attachmentBlob.SizeBytes, attachment.BlobSizeBytes)
+
+	draft, err := catalog.GetVersionManifest(ctx, image.Name, version.Version)
+	require.NoError(t, err)
+	assertManifest(t, draft, image.Name, imgsrv.ImageVersionStateDraft, primaryBlob, attachmentBlob)
+
+	published, err := catalog.PublishVersion(ctx, image.Name, version.Version)
+	require.NoError(t, err)
+	assert.Equal(t, imgsrv.ImageVersionStatePublished, published.State)
+	assert.NotNil(t, published.PublishedAt)
+
+	manifest, err := catalog.GetVersionManifest(ctx, image.Name, version.Version)
+	require.NoError(t, err)
+	assertManifest(t, manifest, image.Name, imgsrv.ImageVersionStatePublished, primaryBlob, attachmentBlob)
+}
+
+func TestReleaseFlowRejectsInvalidDraftWrites(t *testing.T) {
+	env := harness.Start(t)
+	ctx := t.Context()
+	client := newClient(t, env)
+	catalog := client.Catalog()
+	primaryBlob := uploadBlobToCAS(ctx, t, env, client, []byte("imgsrv invalid draft primary artifact"))
+	attachmentBlob := uploadBlobToCAS(ctx, t, env, client, []byte("imgsrv invalid draft attachment"))
+
+	_, duplicateVersion := createDraftRelease(ctx, t, catalog, "release-duplicate-writes", "v1.0.0")
+	duplicateArtifact, err := catalog.AddArtifact(
+		ctx,
+		"release-duplicate-writes",
+		duplicateVersion.Version,
+		artifactRequest(primaryBlob),
+	)
+	require.NoError(t, err)
+
+	_, err = catalog.AddArtifact(
+		ctx,
+		"release-duplicate-writes",
+		duplicateVersion.Version,
+		artifactRequest(primaryBlob),
+	)
+	assertProblemStatus(t, err, http.StatusConflict)
+
+	_, err = catalog.AddAttachment(
+		ctx,
+		"release-duplicate-writes",
+		duplicateVersion.Version,
+		duplicateArtifact.ID.String(),
+		attachmentRequest("rootfs.sha256", attachmentBlob),
+	)
+	require.NoError(t, err)
+
+	_, err = catalog.AddAttachment(
+		ctx,
+		"release-duplicate-writes",
+		duplicateVersion.Version,
+		duplicateArtifact.ID.String(),
+		attachmentRequest("rootfs.sha256", attachmentBlob),
+	)
+	assertProblemStatus(t, err, http.StatusConflict)
+
+	_, foreignVersion := createDraftRelease(ctx, t, catalog, "release-foreign-attachment", "v1.0.0")
+	_, err = catalog.AddAttachment(
+		ctx,
+		"release-foreign-attachment",
+		foreignVersion.Version,
+		duplicateArtifact.ID.String(),
+		attachmentRequest("foreign.sha256", attachmentBlob),
+	)
+	assertProblemStatus(t, err, http.StatusNotFound)
+
+	_, publishedVersion := createDraftRelease(ctx, t, catalog, "release-published-rejects-edits", "v1.0.0")
+	publishedArtifact, err := catalog.AddArtifact(
+		ctx,
+		"release-published-rejects-edits",
+		publishedVersion.Version,
+		artifactRequest(primaryBlob),
+	)
+	require.NoError(t, err)
+	_, err = catalog.PublishVersion(ctx, "release-published-rejects-edits", publishedVersion.Version)
+	require.NoError(t, err)
+
+	_, err = catalog.AddArtifact(
+		ctx,
+		"release-published-rejects-edits",
+		publishedVersion.Version,
+		artifactRequestForArchitecture("aarch64", primaryBlob),
+	)
+	assertProblemStatus(t, err, http.StatusPreconditionFailed)
+
+	_, err = catalog.AddAttachment(
+		ctx,
+		"release-published-rejects-edits",
+		publishedVersion.Version,
+		publishedArtifact.ID.String(),
+		attachmentRequest("metadata.json", attachmentBlob),
+	)
+	assertProblemStatus(t, err, http.StatusPreconditionFailed)
+}
+
+func TestReleaseFlowRejectsUnverifiedPublish(t *testing.T) {
+	env := harness.Start(t)
+	ctx := t.Context()
+	client := newClient(t, env)
+	catalog := client.Catalog()
+	verifiedBlob := uploadBlobToCAS(ctx, t, env, client, []byte("imgsrv size mismatch primary artifact"))
+
+	_, missingVersion := createDraftRelease(ctx, t, catalog, "release-missing-cas", "v1.0.0")
+	_, err := catalog.AddArtifact(ctx, "release-missing-cas", missingVersion.Version, imgsrv.AddArtifactRequest{
+		OperatingSystem:      "linux",
+		Architecture:         "x86_64",
+		Format:               imgsrv.ArtifactFormatQCOW2,
+		PrimaryBlobDigest:    imgsrv.Digest("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+		PrimaryBlobSizeBytes: 1,
+		PrimaryMediaType:     "application/x-qcow2",
+	})
+	require.NoError(t, err)
+	_, err = catalog.PublishVersion(ctx, "release-missing-cas", missingVersion.Version)
+	assertProblemStatus(t, err, http.StatusPreconditionFailed)
+
+	_, mismatchVersion := createDraftRelease(ctx, t, catalog, "release-size-mismatch", "v1.0.0")
+	_, err = catalog.AddArtifact(ctx, "release-size-mismatch", mismatchVersion.Version, imgsrv.AddArtifactRequest{
+		OperatingSystem:      "linux",
+		Architecture:         "x86_64",
+		Format:               imgsrv.ArtifactFormatQCOW2,
+		PrimaryBlobDigest:    verifiedBlob.Digest,
+		PrimaryBlobSizeBytes: verifiedBlob.SizeBytes + 1,
+		PrimaryMediaType:     "application/x-qcow2",
+	})
+	require.NoError(t, err)
+	_, err = catalog.PublishVersion(ctx, "release-size-mismatch", mismatchVersion.Version)
+	assertProblemStatus(t, err, http.StatusPreconditionFailed)
+}
+
+type catalogBlob struct {
+	Digest    imgsrv.Digest
+	SizeBytes int64
+}
+
+func uploadBlobToCAS(
+	ctx context.Context,
+	t testing.TB,
+	env *harness.Env,
+	client *imgsrv.Client,
+	payload []byte,
+) catalogBlob {
+	t.Helper()
+
+	expectedDigest := imgsrv.Digest(digestFor(payload))
+	uploadsClient := client.Uploads()
+	begin, err := uploadsClient.BeginUpload(ctx, imgsrv.BeginUploadRequest{
+		ExpectedDigest:    expectedDigest,
+		ExpectedSizeBytes: int64(len(payload)),
+	})
+	require.NoError(t, err)
+
+	part, err := uploadsClient.PutUploadPart(ctx, begin.ID.String(), 1, bytes.NewReader(payload), int64(len(payload)))
+	require.NoError(t, err)
+
+	_, err = uploadsClient.CompleteUpload(ctx, begin.ID.String(), imgsrv.CompleteUploadRequest{
+		Parts: []imgsrv.CompleteUploadPart{{
+			Number:    part.PartNumber,
+			ETag:      part.ETag,
+			SizeBytes: part.SizeBytes,
+		}},
+	})
+	require.NoError(t, err)
+
+	digest, err := uploads.ParseDigest(expectedDigest.String())
+	require.NoError(t, err)
+	casService := cas.NewService(cas.ServiceConfig{
+		Store:   env.Store().CAS(),
+		Objects: env.ObjectStore(),
+	})
+	promotion, err := promote.New(promote.Config{
+		Uploads: env.Store().Uploads(),
+		CAS:     casService,
+	}).RunOnce(ctx, "release-flow")
+	require.NoError(t, err)
+	assert.True(t, promotion.Worked)
+
+	ready, err := uploadsClient.GetUpload(ctx, begin.ID.String())
+	require.NoError(t, err)
+	assert.Equal(t, imgsrv.UploadStateReady, ready.State)
+
+	blob, err := env.Store().CAS().GetBlob(ctx, cas.GetBlobParams{Digest: digest})
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(payload)), blob.SizeBytes)
+
+	return catalogBlob{
+		Digest:    expectedDigest,
+		SizeBytes: int64(len(payload)),
+	}
+}
+
+func createDraftRelease(
+	ctx context.Context,
+	t testing.TB,
+	catalog imgsrv.CatalogClient,
+	imageName string,
+	version string,
+) (imgsrv.Image, imgsrv.ImageVersion) {
+	t.Helper()
+
+	image, err := catalog.CreateImage(ctx, imgsrv.CreateImageRequest{Name: imageName})
+	require.NoError(t, err)
+
+	draft, err := catalog.CreateDraftVersion(ctx, image.Name, imgsrv.CreateDraftVersionRequest{Version: version})
+	require.NoError(t, err)
+
+	return image, draft
+}
+
+func artifactRequest(blob catalogBlob) imgsrv.AddArtifactRequest {
+	return artifactRequestForArchitecture("x86_64", blob)
+}
+
+func artifactRequestForArchitecture(architecture string, blob catalogBlob) imgsrv.AddArtifactRequest {
+	return imgsrv.AddArtifactRequest{
+		OperatingSystem:      "linux",
+		Architecture:         architecture,
+		Format:               imgsrv.ArtifactFormatQCOW2,
+		PrimaryBlobDigest:    blob.Digest,
+		PrimaryBlobSizeBytes: blob.SizeBytes,
+		PrimaryMediaType:     "application/x-qcow2",
+	}
+}
+
+func attachmentRequest(name string, blob catalogBlob) imgsrv.AddAttachmentRequest {
+	return imgsrv.AddAttachmentRequest{
+		Name:          name,
+		MediaType:     "text/plain",
+		BlobDigest:    blob.Digest,
+		BlobSizeBytes: blob.SizeBytes,
+	}
+}
+
+func assertManifest(
+	t testing.TB,
+	manifest imgsrv.Manifest,
+	imageName string,
+	state imgsrv.ImageVersionState,
+	primaryBlob catalogBlob,
+	attachmentBlob catalogBlob,
+) {
+	t.Helper()
+
+	assert.Equal(t, imageName, manifest.Image.Name)
+	assert.Equal(t, state, manifest.Version.State)
+	require.Len(t, manifest.Artifacts, 1)
+	artifact := manifest.Artifacts[0].Artifact
+	assert.Equal(t, primaryBlob.Digest, artifact.PrimaryBlobDigest)
+	assert.Equal(t, primaryBlob.SizeBytes, artifact.PrimaryBlobSizeBytes)
+	require.Len(t, manifest.Artifacts[0].Attachments, 1)
+	attachment := manifest.Artifacts[0].Attachments[0]
+	assert.Equal(t, attachmentBlob.Digest, attachment.BlobDigest)
+	assert.Equal(t, attachmentBlob.SizeBytes, attachment.BlobSizeBytes)
+}
+
+func assertProblemStatus(t testing.TB, err error, status int) {
+	t.Helper()
+
+	var problem *imgsrv.ProblemError
+	require.ErrorAs(t, err, &problem)
+	assert.Equal(t, status, problem.HTTPStatus)
+}

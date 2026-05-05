@@ -6,6 +6,9 @@ package client
 // Code that needs a mockable dependency should prefer narrow operation-group
 // interfaces such as UploadsClient instead of depending on Client directly.
 type Client struct {
+	// catalog holds the HTTP-backed catalog operation group.
+	catalog *HTTPCatalogClient
+
 	// uploads holds the HTTP-backed upload operation group.
 	uploads *HTTPUploadsClient
 }
@@ -18,8 +21,18 @@ func New(options Options) (*Client, error) {
 	}
 
 	return &Client{
+		catalog: newHTTPCatalogClient(transport),
 		uploads: newHTTPUploadsClient(transport),
 	}, nil
+}
+
+// Catalog returns image catalog API operations.
+func (client *Client) Catalog() CatalogClient {
+	if client == nil {
+		return nil
+	}
+
+	return client.catalog
 }
 
 // Uploads returns upload API operations.

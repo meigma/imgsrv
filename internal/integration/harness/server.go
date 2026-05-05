@@ -15,6 +15,7 @@ import (
 
 	"github.com/meigma/imgsrv/internal/app"
 	"github.com/meigma/imgsrv/internal/cas"
+	"github.com/meigma/imgsrv/internal/catalog"
 	"github.com/meigma/imgsrv/internal/jobs"
 	"github.com/meigma/imgsrv/internal/jobs/promote"
 	"github.com/meigma/imgsrv/internal/objectstore"
@@ -79,6 +80,9 @@ func startServer(
 		Uploads: uploads.NewService(uploads.ServiceConfig{
 			Store:   store.Uploads(),
 			Objects: objects,
+		}),
+		Catalog: catalog.NewService(catalog.ServiceConfig{
+			Store: store.Catalog(),
 		}),
 		BackgroundJobs: backgroundJobs(options, store, objects),
 	})
