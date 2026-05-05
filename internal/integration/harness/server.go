@@ -14,15 +14,23 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/meigma/imgsrv/internal/app"
+	"github.com/meigma/imgsrv/internal/cas"
+	"github.com/meigma/imgsrv/internal/jobs"
+	"github.com/meigma/imgsrv/internal/jobs/promote"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/store/postgres"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
 
 const (
-	serverStartupTimeout  = 5 * time.Second
-	serverShutdownTimeout = 5 * time.Second
-	serverReadyInterval   = 10 * time.Millisecond
+	serverStartupTimeout        = 5 * time.Second
+	serverShutdownTimeout       = 5 * time.Second
+	serverReadyInterval         = 10 * time.Millisecond
+	casPromotionWorkerNodeName  = "imgsrv-integration"
+	casPromotionWorkerRunID     = "test"
+	casPromotionWorkerName      = "cas-promotion"
+	casPromotionPollInterval    = 10 * time.Millisecond
+	casPromotionErrorBackoffMax = 100 * time.Millisecond
 )
 
 func startServer(
@@ -46,6 +54,7 @@ func startServer(
 			Store:   store.Uploads(),
 			Objects: objects,
 		}),
+		BackgroundJobs: backgroundJobs(options, store, objects),
 	})
 	require.NoError(t, err)
 
@@ -105,4 +114,34 @@ func waitForServer(ctx context.Context, t testing.TB, baseURL string, errCh <-ch
 		case <-ticker.C:
 		}
 	}
+}
+
+func backgroundJobs(
+	options options,
+	store *postgres.Store,
+	objects objectstore.Store,
+) []app.BackgroundJob {
+	if !options.casPromotion {
+		return nil
+	}
+
+	casService := cas.NewService(cas.ServiceConfig{
+		Store:   store.CAS(),
+		Objects: objects,
+	})
+
+	return []app.BackgroundJob{jobs.New(jobs.Config{
+		Handler: promote.New(promote.Config{
+			Uploads: store.Uploads(),
+			CAS:     casService,
+		}),
+		WorkerID: jobs.Identity{
+			NodeName: casPromotionWorkerNodeName,
+			RunID:    casPromotionWorkerRunID,
+		}.WorkerID(casPromotionWorkerName),
+		Interval:            casPromotionPollInterval,
+		ErrorBackoffInitial: casPromotionPollInterval,
+		ErrorBackoffMax:     casPromotionErrorBackoffMax,
+		Logger:              options.logger.With("component", casPromotionWorkerName),
+	})}
 }

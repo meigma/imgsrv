@@ -26,7 +26,17 @@ type Option func(*options)
 // WithLogger sets the logger used by the in-process imgsrv server.
 func WithLogger(logger *slog.Logger) Option {
 	return func(options *options) {
+		if logger == nil {
+			return
+		}
 		options.logger = logger
+	}
+}
+
+// WithCASPromotion starts the real in-process CAS promotion worker.
+func WithCASPromotion() Option {
+	return func(options *options) {
+		options.casPromotion = true
 	}
 }
 
@@ -95,7 +105,8 @@ func (env *Env) S3Config() s3.Config {
 }
 
 type options struct {
-	logger *slog.Logger
+	logger       *slog.Logger
+	casPromotion bool
 }
 
 func newOptions(opts ...Option) options {
