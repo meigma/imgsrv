@@ -20,6 +20,7 @@ fileGroups:
     - 'cmd/**/*.go'
     - 'internal/**/*.go'
     - 'internal/**/*.sql'
+    - 'test/**/*.go'
     - 'go.mod'
     - 'go.sum'
   lintConfig:
@@ -69,6 +70,7 @@ tasks:
       - '-count=1'
       - '-tags=integration'
       - './internal/integration/...'
+      - './test/...'
     toolchains: ['go']
     inputs:
       - '@group(go)'
