@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/meigma/imgsrv/internal/cas"
+	"github.com/meigma/imgsrv/internal/catalog"
 	"github.com/meigma/imgsrv/internal/httpapi"
 	"github.com/meigma/imgsrv/internal/jobs"
 	"github.com/meigma/imgsrv/internal/jobs/promote"
@@ -35,6 +36,9 @@ type Dependencies struct {
 
 	// Uploads coordinates client-facing upload writes.
 	Uploads httpapi.UploadService
+
+	// Catalog coordinates client-facing image catalog operations.
+	Catalog httpapi.CatalogService
 
 	// BackgroundJobs run process-local background work until shutdown.
 	BackgroundJobs []BackgroundJob
@@ -99,6 +103,7 @@ func Run(ctx context.Context, cfg Config) error {
 	server, err := NewServer(cfg, Dependencies{
 		Logger:         logger,
 		Uploads:        uploadDependency.service,
+		Catalog:        newCatalogService(store),
 		BackgroundJobs: backgroundJobs,
 	})
 	if err != nil {
@@ -142,6 +147,7 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 		Telemetry: telemetryProviders,
 		Readiness: deps.Readiness,
 		Uploads:   deps.Uploads,
+		Catalog:   deps.Catalog,
 		UploadTTL: cfg.UploadTTL,
 	})
 
@@ -165,6 +171,17 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 	}
 
 	return server, nil
+}
+
+// newCatalogService builds the catalog service from the shared Postgres store.
+func newCatalogService(store *postgres.Store) httpapi.CatalogService {
+	if store == nil {
+		return nil
+	}
+
+	return catalog.NewService(catalog.ServiceConfig{
+		Store: store.Catalog(),
+	})
 }
 
 // uploadServiceDependency bundles the upload service and the underlying object store it writes to.

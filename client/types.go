@@ -8,6 +8,36 @@ func (digest Digest) String() string {
 	return string(digest)
 }
 
+// ArtifactID identifies a release artifact.
+type ArtifactID string
+
+// String returns the artifact ID string.
+func (id ArtifactID) String() string {
+	return string(id)
+}
+
+// ArtifactFormat is a supported primary artifact format.
+type ArtifactFormat string
+
+const (
+	// ArtifactFormatRaw is a raw disk image artifact.
+	ArtifactFormatRaw ArtifactFormat = "raw"
+
+	// ArtifactFormatQCOW2 is a qcow2 disk image artifact.
+	ArtifactFormatQCOW2 ArtifactFormat = "qcow2"
+)
+
+// ImageVersionState is the lifecycle state for an image version.
+type ImageVersionState string
+
+const (
+	// ImageVersionStateDraft means a version manifest can still be edited.
+	ImageVersionStateDraft ImageVersionState = "draft"
+
+	// ImageVersionStatePublished means a version manifest is immutable.
+	ImageVersionStatePublished ImageVersionState = "published"
+)
+
 // UploadID identifies an upload session.
 type UploadID string
 

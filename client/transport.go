@@ -94,10 +94,8 @@ func parseBaseURL(raw string) (*url.URL, error) {
 // to do for transport, status checking, and response decoding.
 func (transport *transport) doJSON(
 	ctx context.Context,
-	method string,
 	path string,
 	requestBody any,
-	headers http.Header,
 	wantStatus int,
 	responseBody any,
 ) error {
@@ -105,12 +103,19 @@ func (transport *transport) doJSON(
 	if err != nil {
 		return fmt.Errorf("encode imgsrv request: %w", err)
 	}
-	if headers == nil {
-		headers = make(http.Header)
-	}
+	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 
-	return transport.do(ctx, method, path, bytes.NewReader(body), int64(len(body)), headers, wantStatus, responseBody)
+	return transport.do(
+		ctx,
+		http.MethodPost,
+		path,
+		bytes.NewReader(body),
+		int64(len(body)),
+		headers,
+		wantStatus,
+		responseBody,
+	)
 }
 
 // do issues a single HTTP request, returns a typed error when the response

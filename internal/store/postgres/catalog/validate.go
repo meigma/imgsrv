@@ -59,6 +59,12 @@ func validateAddArtifactParams(params domain.AddArtifactParams) error {
 
 // validateAddAttachmentParams validates the inputs to Store.AddAttachment.
 func validateAddAttachmentParams(params domain.AddAttachmentParams) error {
+	if err := validateCreateDraftVersionParams(domain.CreateDraftVersionParams{
+		ImageName: params.ImageName,
+		Version:   params.Version,
+	}); err != nil {
+		return err
+	}
 	if params.ArtifactID == uuid.Nil {
 		return fmt.Errorf("%w: artifact id is required", domain.ErrInvalid)
 	}
@@ -99,6 +105,11 @@ func validateGetAliasParams(params domain.GetAliasParams) error {
 	}
 
 	return domain.ValidateAlias(params.Alias)
+}
+
+// validateGetVersionManifestParams validates inputs to Store.GetVersionManifest.
+func validateGetVersionManifestParams(params domain.GetVersionManifestParams) error {
+	return validateCreateDraftVersionParams(domain.CreateDraftVersionParams(params))
 }
 
 // validateResolveManifestParams validates the inputs to Store.ResolveManifest.

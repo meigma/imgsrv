@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -48,7 +49,34 @@ func (store *Store) GetAlias(ctx context.Context, params domain.GetAliasParams) 
 	return alias, nil
 }
 
-// ResolveManifest resolves the published manifest for an exact image version.
+// GetVersionManifest resolves the manifest for an exact draft or published image version.
+func (store *Store) GetVersionManifest(
+	ctx context.Context,
+	params domain.GetVersionManifestParams,
+) (domain.Manifest, error) {
+	if err := validateGetVersionManifestParams(params); err != nil {
+		return domain.Manifest{}, err
+	}
+
+	db, err := store.catalogDB()
+	if err != nil {
+		return domain.Manifest{}, err
+	}
+
+	manifest, err := resolveVersionManifestHeader(ctx, db, params)
+	if err != nil {
+		return domain.Manifest{}, mapCatalogError(err)
+	}
+
+	manifest.Artifacts, err = resolveManifestArtifacts(ctx, db, manifest.Version.ID)
+	if err != nil {
+		return domain.Manifest{}, mapCatalogError(err)
+	}
+
+	return manifest, nil
+}
+
+// ResolveManifest resolves the published manifest for an exact image version or alias.
 func (store *Store) ResolveManifest(
 	ctx context.Context,
 	params domain.ResolveManifestParams,
@@ -62,7 +90,7 @@ func (store *Store) ResolveManifest(
 		return domain.Manifest{}, err
 	}
 
-	manifest, err := resolveManifestHeader(ctx, db, params)
+	manifest, err := resolvePublishedManifestHeader(ctx, db, params)
 	if err != nil {
 		return domain.Manifest{}, mapCatalogError(err)
 	}
@@ -75,9 +103,65 @@ func (store *Store) ResolveManifest(
 	return manifest, nil
 }
 
-// resolveManifestHeader loads the image and published version that form the
+// resolveVersionManifestHeader loads the image and exact version that form the
 // manifest header for the requested image and version.
-func resolveManifestHeader(
+func resolveVersionManifestHeader(
+	ctx context.Context,
+	db queryer,
+	params domain.GetVersionManifestParams,
+) (domain.Manifest, error) {
+	row := db.QueryRow(
+		ctx,
+		`SELECT images.id,
+			images.name,
+			images.display_name,
+			images.description,
+			images.created_at,
+			images.updated_at,
+			image_versions.id,
+			image_versions.image_id,
+			image_versions.version,
+			image_versions.state,
+			image_versions.published_at,
+			image_versions.created_at,
+			image_versions.updated_at
+		FROM images
+		INNER JOIN image_versions ON image_versions.image_id = images.id
+		WHERE images.name = $1
+			AND image_versions.version = $2`,
+		params.ImageName,
+		params.Version,
+	)
+
+	image, version, err := scanImageAndVersion(row)
+	if err != nil {
+		return domain.Manifest{}, err
+	}
+
+	return domain.Manifest{Image: image, Version: version}, nil
+}
+
+// resolvePublishedManifestHeader loads the image and published version that form the
+// manifest header for the requested image and version.
+func resolvePublishedManifestHeader(
+	ctx context.Context,
+	db queryer,
+	params domain.ResolveManifestParams,
+) (domain.Manifest, error) {
+	manifest, err := resolveExactPublishedManifestHeader(ctx, db, params)
+	if err == nil {
+		return manifest, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return domain.Manifest{}, err
+	}
+
+	return resolveAliasPublishedManifestHeader(ctx, db, params)
+}
+
+// resolveExactPublishedManifestHeader loads the exact published version
+// manifest header for the requested image and version.
+func resolveExactPublishedManifestHeader(
 	ctx context.Context,
 	db queryer,
 	params domain.ResolveManifestParams,
@@ -101,6 +185,47 @@ func resolveManifestHeader(
 		INNER JOIN image_versions ON image_versions.image_id = images.id
 		WHERE images.name = $1
 			AND image_versions.version = $2
+			AND image_versions.state = 'published'`,
+		params.ImageName,
+		params.Version,
+	)
+
+	image, version, err := scanImageAndVersion(row)
+	if err != nil {
+		return domain.Manifest{}, err
+	}
+
+	return domain.Manifest{Image: image, Version: version}, nil
+}
+
+// resolveAliasPublishedManifestHeader loads the published version manifest
+// header targeted by an alias on the requested image.
+func resolveAliasPublishedManifestHeader(
+	ctx context.Context,
+	db queryer,
+	params domain.ResolveManifestParams,
+) (domain.Manifest, error) {
+	row := db.QueryRow(
+		ctx,
+		`SELECT images.id,
+			images.name,
+			images.display_name,
+			images.description,
+			images.created_at,
+			images.updated_at,
+			image_versions.id,
+			image_versions.image_id,
+			image_versions.version,
+			image_versions.state,
+			image_versions.published_at,
+			image_versions.created_at,
+			image_versions.updated_at
+		FROM images
+		INNER JOIN aliases ON aliases.image_id = images.id
+		INNER JOIN image_versions ON image_versions.id = aliases.version_id
+		WHERE images.name = $1
+			AND aliases.alias = $2
+			AND image_versions.image_id = images.id
 			AND image_versions.state = 'published'`,
 		params.ImageName,
 		params.Version,
