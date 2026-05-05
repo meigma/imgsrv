@@ -61,12 +61,25 @@ tasks:
     options:
       cache: false
 
+  test-integration:
+    command: 'go'
+    args:
+      - 'test'
+      - '-tags=integration'
+      - './internal/integration/...'
+    toolchains: ['go']
+    inputs:
+      - '@group(go)'
+    options:
+      cache: false
+
   check:
     deps:
       - 'root:format'
       - 'root:lint'
       - 'root:build'
       - 'root:test'
+      - 'root:test-integration'
     options:
       cache: false
       runInCI: true
