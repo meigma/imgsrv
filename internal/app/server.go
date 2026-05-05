@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/meigma/imgsrv/internal/httpapi"
+	"github.com/meigma/imgsrv/internal/objectstore/s3"
 	"github.com/meigma/imgsrv/internal/store/postgres"
 	"github.com/meigma/imgsrv/internal/telemetry"
+	"github.com/meigma/imgsrv/internal/uploads"
 )
 
 const defaultReadHeaderTimeout = 5 * time.Second
@@ -25,6 +27,9 @@ type Dependencies struct {
 
 	// Readiness reports whether the service can accept operational traffic.
 	Readiness httpapi.ReadinessChecker
+
+	// Uploads coordinates client-facing upload writes.
+	Uploads httpapi.UploadService
 }
 
 // Server owns the HTTP server runtime.
@@ -54,7 +59,18 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}
 
-	server, err := NewServer(cfg, Dependencies{Logger: logger})
+	uploadDependency, err := newUploadService(cfg, store)
+	if err != nil {
+		if store != nil {
+			return joinError(err, store.Close())
+		}
+		return err
+	}
+
+	server, err := NewServer(cfg, Dependencies{
+		Logger:  logger,
+		Uploads: uploadDependency.service,
+	})
 	if err != nil {
 		if store != nil {
 			return joinError(err, store.Close())
@@ -95,6 +111,8 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 		Logger:    logger.With("component", "httpapi"),
 		Telemetry: telemetryProviders,
 		Readiness: deps.Readiness,
+		Uploads:   deps.Uploads,
+		UploadTTL: cfg.UploadTTL,
 	})
 
 	server := &Server{
@@ -116,6 +134,38 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 	}
 
 	return server, nil
+}
+
+type uploadServiceDependency struct {
+	service httpapi.UploadService
+}
+
+func newUploadService(cfg Config, store *postgres.Store) (uploadServiceDependency, error) {
+	if !cfg.hasS3Config() {
+		return uploadServiceDependency{}, nil
+	}
+	if store == nil {
+		return uploadServiceDependency{}, errors.New("postgres url is required when s3 upload storage is configured")
+	}
+
+	objects, err := s3.New(s3.Config{
+		Endpoint:        cfg.S3Endpoint,
+		Bucket:          cfg.S3Bucket,
+		AccessKeyID:     cfg.S3AccessKeyID,
+		SecretAccessKey: cfg.S3SecretAccessKey,
+		SessionToken:    cfg.S3SessionToken,
+		Region:          cfg.S3Region,
+		UseTLS:          cfg.S3UseTLS,
+		PathStyle:       cfg.S3PathStyle,
+	})
+	if err != nil {
+		return uploadServiceDependency{}, fmt.Errorf("open s3 object store: %w", err)
+	}
+
+	return uploadServiceDependency{service: uploads.NewService(uploads.ServiceConfig{
+		Store:   store.Uploads(),
+		Objects: objects,
+	})}, nil
 }
 
 // Run listens on the configured address and serves HTTP until the context ends.

@@ -158,3 +158,22 @@ func TestNewServerRejectsInvalidMetricsPath(t *testing.T) {
 	assert.Contains(t, err.Error(), "must start with /")
 	assert.Nil(t, server)
 }
+
+func TestConfigWithDefaultsSetsUploadTTL(t *testing.T) {
+	got := (Config{}).withDefaults()
+
+	assert.Equal(t, 24*time.Hour, got.UploadTTL)
+}
+
+func TestNewUploadServiceRequiresPostgresWhenS3Configured(t *testing.T) {
+	got, err := newUploadService(Config{
+		S3Endpoint:        "garage.local:3900",
+		S3Bucket:          "imgsrv",
+		S3AccessKeyID:     "access",
+		S3SecretAccessKey: "secret",
+	}, nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "postgres url")
+	assert.Nil(t, got.service)
+}
