@@ -1,0 +1,270 @@
+openapi: 3.1.0
+info:
+  title: imgsrv API
+  version: v1
+  description: Initial contract for the implemented imgsrv upload API.
+servers:
+  - url: /
+paths:
+  /v1/uploads:
+    post:
+      operationId: beginUpload
+      summary: Begin an upload session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BeginUploadRequest'
+      responses:
+        '201':
+          description: Upload session created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSession'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/uploads/{upload_id}:
+    get:
+      operationId: getUpload
+      summary: Get upload session status.
+      parameters:
+        - $ref: '#/components/parameters/UploadID'
+      responses:
+        '200':
+          description: Current upload session state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSession'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/uploads/{upload_id}/parts/{part_number}:
+    put:
+      operationId: putUploadPart
+      summary: Upload or replace one multipart upload part.
+      parameters:
+        - $ref: '#/components/parameters/UploadID'
+        - name: part_number
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Upload part accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadPart'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/uploads/{upload_id}/complete:
+    post:
+      operationId: completeUpload
+      summary: Complete an upload session.
+      parameters:
+        - $ref: '#/components/parameters/UploadID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteUploadRequest'
+      responses:
+        '200':
+          description: Upload session completed or already terminally advanced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSession'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+components:
+  parameters:
+    UploadID:
+      name: upload_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/UploadID'
+  responses:
+    Problem:
+      description: RFC 9457 problem details.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Digest:
+      type: string
+      pattern: '^sha256:[0-9a-f]{64}$'
+      examples:
+        - sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    UploadID:
+      type: string
+      format: uuid
+    UploadState:
+      type: string
+      enum:
+        - created
+        - uploading
+        - completed
+        - ingesting
+        - ready
+        - failed
+        - aborted
+    BeginUploadRequest:
+      type: object
+      required:
+        - expected_digest
+        - expected_size_bytes
+      properties:
+        expected_digest:
+          $ref: '#/components/schemas/Digest'
+        expected_size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        media_type_hint:
+          type: string
+          minLength: 1
+        filename_hint:
+          type: string
+          minLength: 1
+      additionalProperties: false
+    CompleteUploadRequest:
+      type: object
+      required:
+        - parts
+      properties:
+        parts:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CompleteUploadPart'
+      additionalProperties: false
+    CompleteUploadPart:
+      type: object
+      required:
+        - number
+        - etag
+        - size_bytes
+      properties:
+        number:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        etag:
+          type: string
+          minLength: 1
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    UploadSession:
+      type: object
+      required:
+        - id
+        - expected_digest
+        - expected_size_bytes
+        - state
+        - expires_at
+      properties:
+        id:
+          $ref: '#/components/schemas/UploadID'
+        expected_digest:
+          $ref: '#/components/schemas/Digest'
+        expected_size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        state:
+          $ref: '#/components/schemas/UploadState'
+        expires_at:
+          type: string
+          format: date-time
+        media_type_hint:
+          type: string
+          minLength: 1
+        filename_hint:
+          type: string
+          minLength: 1
+      additionalProperties: false
+    UploadPart:
+      type: object
+      required:
+        - upload_id
+        - part_number
+        - etag
+        - size_bytes
+      properties:
+        upload_id:
+          $ref: '#/components/schemas/UploadID'
+        part_number:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        etag:
+          type: string
+          minLength: 1
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
+    Problem:
+      type: object
+      description: >
+        RFC 9457 problem details. The current API emits about:blank for all
+        problem types; stable imgsrv-specific type URIs will be added only when
+        clients need machine-readable branching beyond the HTTP status code.
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          default: about:blank
+          description: >
+            RFC 9457 problem type. Clients should currently classify errors by
+            HTTP status and must not parse detail.
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+      additionalProperties: true

@@ -7,15 +7,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"io"
-	"net/http"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	imgsrv "github.com/meigma/imgsrv/client"
 	"github.com/meigma/imgsrv/internal/integration/harness"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/uploads"
@@ -25,38 +24,46 @@ func TestUploadFlowStagesCompletedObject(t *testing.T) {
 	env := harness.Start(t)
 	ctx := t.Context()
 	payload := []byte("imgsrv integration upload payload")
-	expectedDigest := digestFor(payload)
+	expectedDigest := imgsrv.Digest(digestFor(payload))
+	client := newClient(t, env)
+	uploadsClient := client.Uploads()
+	mediaType := "application/octet-stream"
+	filename := "image.qcow2"
 
-	begin := postJSON[uploadSessionResponse](ctx, t, env, "/v1/uploads", beginUploadRequest{
+	begin, err := uploadsClient.BeginUpload(ctx, imgsrv.BeginUploadRequest{
 		ExpectedDigest:    expectedDigest,
 		ExpectedSizeBytes: int64(len(payload)),
-		MediaTypeHint:     "application/octet-stream",
-		FilenameHint:      "image.qcow2",
-	}, http.StatusCreated)
+		MediaTypeHint:     &mediaType,
+		FilenameHint:      &filename,
+	})
+	require.NoError(t, err)
 	assert.Equal(t, expectedDigest, begin.ExpectedDigest)
 	assert.Equal(t, int64(len(payload)), begin.ExpectedSizeBytes)
-	assert.Equal(t, string(uploads.SessionStateCreated), begin.State)
+	assert.Equal(t, imgsrv.UploadStateCreated, begin.State)
 
-	uploadID := parseUploadID(t, begin.ID)
-	part := putUploadPart(ctx, t, env, uploadID, payload)
+	uploadID := parseUploadID(t, begin.ID.String())
+	part, err := uploadsClient.PutUploadPart(ctx, begin.ID.String(), 1, bytes.NewReader(payload), int64(len(payload)))
+	require.NoError(t, err)
 	assert.Equal(t, begin.ID, part.UploadID)
 	assert.Equal(t, 1, part.PartNumber)
 	assert.NotEmpty(t, part.ETag)
 	assert.Equal(t, int64(len(payload)), part.SizeBytes)
 
-	complete := postJSON[uploadSessionResponse](ctx, t, env, "/v1/uploads/"+begin.ID+"/complete", completeUploadRequest{
-		Parts: []completeUploadPartRequest{{
+	complete, err := uploadsClient.CompleteUpload(ctx, begin.ID.String(), imgsrv.CompleteUploadRequest{
+		Parts: []imgsrv.CompleteUploadPart{{
 			Number:    part.PartNumber,
 			ETag:      part.ETag,
 			SizeBytes: part.SizeBytes,
 		}},
-	}, http.StatusOK)
+	})
+	require.NoError(t, err)
 	assert.Equal(t, begin.ID, complete.ID)
-	assert.Equal(t, string(uploads.SessionStateCompleted), complete.State)
+	assert.Equal(t, imgsrv.UploadStateCompleted, complete.State)
 
-	status := getJSON[uploadSessionResponse](ctx, t, env, "/v1/uploads/"+begin.ID, http.StatusOK)
+	status, err := uploadsClient.GetUpload(ctx, begin.ID.String())
+	require.NoError(t, err)
 	assert.Equal(t, begin.ID, status.ID)
-	assert.Equal(t, string(uploads.SessionStateCompleted), status.State)
+	assert.Equal(t, imgsrv.UploadStateCompleted, status.State)
 
 	staged := readObject(ctx, t, env, uploads.StagingKey(uploadID))
 	assert.Equal(t, payload, staged.Body)
@@ -77,108 +84,22 @@ func TestUploadFlowStagesCompletedObject(t *testing.T) {
 	}
 }
 
-type beginUploadRequest struct {
-	ExpectedDigest    string `json:"expected_digest"`
-	ExpectedSizeBytes int64  `json:"expected_size_bytes"`
-	MediaTypeHint     string `json:"media_type_hint,omitempty"`
-	FilenameHint      string `json:"filename_hint,omitempty"`
-}
-
-type completeUploadRequest struct {
-	Parts []completeUploadPartRequest `json:"parts"`
-}
-
-type completeUploadPartRequest struct {
-	Number    int    `json:"number"`
-	ETag      string `json:"etag"`
-	SizeBytes int64  `json:"size_bytes"`
-}
-
-type uploadSessionResponse struct {
-	ID                string `json:"id"`
-	ExpectedDigest    string `json:"expected_digest"`
-	ExpectedSizeBytes int64  `json:"expected_size_bytes"`
-	State             string `json:"state"`
-}
-
-type uploadPartResponse struct {
-	UploadID   string `json:"upload_id"`
-	PartNumber int    `json:"part_number"`
-	ETag       string `json:"etag"`
-	SizeBytes  int64  `json:"size_bytes"`
-}
-
 type stagedObject struct {
 	Body      []byte
 	SizeBytes int64
 }
 
-func postJSON[T any](
-	ctx context.Context,
-	t *testing.T,
-	env *harness.Env,
-	path string,
-	requestBody any,
-	wantStatus int,
-) T {
+func newClient(t *testing.T, env *harness.Env) *imgsrv.Client {
 	t.Helper()
 
-	body, err := json.Marshal(requestBody)
+	client, err := imgsrv.New(imgsrv.Options{
+		BaseURL:    env.BaseURL(),
+		HTTPClient: env.HTTPClient(),
+		UserAgent:  "imgsrv-integration-test",
+	})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, env.URL(path), bytes.NewReader(body))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-
-	return doJSON[T](t, env, req, wantStatus)
-}
-
-func getJSON[T any](ctx context.Context, t *testing.T, env *harness.Env, path string, wantStatus int) T {
-	t.Helper()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, env.URL(path), nil)
-	require.NoError(t, err)
-
-	return doJSON[T](t, env, req, wantStatus)
-}
-
-func doJSON[T any](t *testing.T, env *harness.Env, req *http.Request, wantStatus int) T {
-	t.Helper()
-
-	resp, err := env.HTTPClient().Do(req)
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, resp.Body.Close())
-	}()
-
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.Equal(t, wantStatus, resp.StatusCode, "response body: %s", string(body))
-
-	var decoded T
-	require.NoError(t, json.Unmarshal(body, &decoded))
-
-	return decoded
-}
-
-func putUploadPart(
-	ctx context.Context,
-	t *testing.T,
-	env *harness.Env,
-	uploadID uuid.UUID,
-	body []byte,
-) uploadPartResponse {
-	t.Helper()
-
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPut,
-		env.URL("/v1/uploads/"+uploadID.String()+"/parts/1"),
-		bytes.NewReader(body),
-	)
-	require.NoError(t, err)
-
-	return doJSON[uploadPartResponse](t, env, req, http.StatusOK)
+	return client
 }
 
 func readObject(ctx context.Context, t *testing.T, env *harness.Env, key string) stagedObject {

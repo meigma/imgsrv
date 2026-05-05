@@ -16,6 +16,7 @@ workspace:
 
 fileGroups:
   go:
+    - 'client/**/*.go'
     - 'cmd/**/*.go'
     - 'internal/**/*.go'
     - 'internal/**/*.sql'

@@ -375,6 +375,7 @@ func assertProblem(t *testing.T, rec *httptest.ResponseRecorder, status int, det
 	assert.Equal(t, http.StatusText(status), got.Title)
 	assert.Equal(t, status, got.Status)
 	assert.Contains(t, got.Detail, detailContains)
+	assert.Empty(t, got.Instance)
 }
 
 func uploadIDFixture() uuid.UUID {
