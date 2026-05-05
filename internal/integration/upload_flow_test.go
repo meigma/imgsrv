@@ -58,11 +58,23 @@ func TestUploadFlowStagesCompletedObject(t *testing.T) {
 	assert.Equal(t, begin.ID, status.ID)
 	assert.Equal(t, string(uploads.SessionStateCompleted), status.State)
 
-	// This intentionally stops at completed staging. CAS worker and promotion wiring
-	// are not part of the current integration flow.
 	staged := readObject(ctx, t, env, uploads.StagingKey(uploadID))
 	assert.Equal(t, payload, staged.Body)
 	assert.Equal(t, int64(len(payload)), staged.SizeBytes)
+
+	// This intentionally stops at the queued ingest handoff. Claiming proves
+	// completion enqueued durable CAS work, but worker and promotion wiring are
+	// not part of the current integration flow.
+	job, err := env.Store().Uploads().ClaimIngestJob(ctx, uploads.ClaimIngestJobParams{
+		WorkerID: "integration-test",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uploadID, job.UploadID)
+	assert.Equal(t, uploads.IngestJobStateRunning, job.State)
+	assert.Equal(t, 1, job.AttemptCount)
+	if assert.NotNil(t, job.LockedBy) {
+		assert.Equal(t, "integration-test", *job.LockedBy)
+	}
 }
 
 type beginUploadRequest struct {
