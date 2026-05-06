@@ -30,6 +30,7 @@ packages:
       Store:
   github.com/meigma/imgsrv/internal/httpapi:
     interfaces:
+      BlobService:
       CatalogService:
       UploadService:
   github.com/meigma/imgsrv/internal/objectstore:

@@ -20,6 +20,9 @@ type ServiceConfig struct {
 	// Objects writes staged upload bytes to object storage.
 	Objects objectstore.Store
 
+	// TrustedBlobs resolves verified CAS blobs for upload short-circuit decisions.
+	TrustedBlobs TrustedBlobLookup
+
 	// Now returns the current time for generated upload state. Nil selects time.Now.
 	Now func() time.Time
 }
@@ -31,6 +34,9 @@ type Service struct {
 
 	// objects writes staged upload bytes to object storage.
 	objects objectstore.Store
+
+	// trustedBlobs resolves verified CAS blobs for upload short-circuit decisions.
+	trustedBlobs TrustedBlobLookup
 
 	// now returns the current time for generated upload state.
 	now func() time.Time
@@ -44,9 +50,10 @@ func NewService(config ServiceConfig) *Service {
 	}
 
 	return &Service{
-		store:   config.Store,
-		objects: config.Objects,
-		now:     now,
+		store:        config.Store,
+		objects:      config.Objects,
+		trustedBlobs: config.TrustedBlobs,
+		now:          now,
 	}
 }
 
@@ -120,26 +127,34 @@ type GetUploadParams struct {
 }
 
 // BeginUpload starts durable upload state and backing multipart staging storage.
-func (service *Service) BeginUpload(ctx context.Context, params BeginUploadParams) (Session, error) {
+func (service *Service) BeginUpload(ctx context.Context, params BeginUploadParams) (BeginUploadResult, error) {
 	store, objects, depErr := service.dependencies()
 	if depErr != nil {
-		return Session{}, depErr
+		return BeginUploadResult{}, depErr
 	}
 	if validationErr := validateBeginUploadParams(params, service.now()); validationErr != nil {
-		return Session{}, validationErr
+		return BeginUploadResult{}, validationErr
 	}
 
 	id := params.ID
 	if id == uuid.Nil {
 		id = uuid.New()
 	}
+	readySession, skipped, err := service.beginReadyUpload(ctx, store, id, params)
+	if err != nil {
+		return BeginUploadResult{}, err
+	}
+	if skipped {
+		return BeginUploadResult{Session: readySession, Created: false}, nil
+	}
+
 	stagingKey := StagingKey(id)
 
 	upload, err := objects.CreateMultipartUpload(ctx, objectstore.CreateMultipartUploadParams{
 		Key: stagingKey,
 	})
 	if err != nil {
-		return Session{}, err
+		return BeginUploadResult{}, err
 	}
 
 	session, err := store.CreateSession(ctx, CreateSessionParams{
@@ -157,13 +172,13 @@ func (service *Service) BeginUpload(ctx context.Context, params BeginUploadParam
 			UploadID: upload.UploadID,
 		})
 		if abortErr != nil {
-			return Session{}, errors.Join(err, fmt.Errorf("abort staged multipart upload: %w", abortErr))
+			return BeginUploadResult{}, errors.Join(err, fmt.Errorf("abort staged multipart upload: %w", abortErr))
 		}
 
-		return Session{}, err
+		return BeginUploadResult{}, err
 	}
 
-	return session, nil
+	return BeginUploadResult{Session: session, Created: true}, nil
 }
 
 // PutUploadPart stores or replaces one upload part in staging storage.
@@ -312,6 +327,50 @@ func (service *Service) dependencies() (Store, objectstore.Store, error) {
 	}
 
 	return service.store, service.objects, nil
+}
+
+// beginReadyUpload returns a terminal ready session when params identify a trusted blob that
+// already exists in CAS. It reports skipped false when normal multipart creation should proceed.
+func (service *Service) beginReadyUpload(
+	ctx context.Context,
+	store Store,
+	id uuid.UUID,
+	params BeginUploadParams,
+) (Session, bool, error) {
+	if service.trustedBlobs == nil {
+		return Session{}, false, nil
+	}
+
+	blob, err := service.trustedBlobs.GetTrustedBlob(ctx, GetTrustedBlobParams{Digest: params.ExpectedDigest})
+	switch {
+	case err == nil:
+	case errors.Is(err, ErrNotFound):
+		return Session{}, false, nil
+	default:
+		return Session{}, false, err
+	}
+	if blob.SizeBytes != params.ExpectedSizeBytes {
+		return Session{}, false, fmt.Errorf(
+			"%w: trusted blob size is %d bytes, expected %d bytes",
+			ErrFailedPrecondition,
+			blob.SizeBytes,
+			params.ExpectedSizeBytes,
+		)
+	}
+
+	session, err := store.CreateReadySession(ctx, CreateReadySessionParams{
+		ID:                id,
+		ExpectedDigest:    params.ExpectedDigest,
+		ExpectedSizeBytes: params.ExpectedSizeBytes,
+		MediaTypeHint:     params.MediaTypeHint,
+		FilenameHint:      params.FilenameHint,
+		ExpiresAt:         params.ExpiresAt,
+	})
+	if err != nil {
+		return Session{}, false, err
+	}
+
+	return session, true, nil
 }
 
 // validateBeginUploadParams validates the inputs for BeginUpload against the current time.

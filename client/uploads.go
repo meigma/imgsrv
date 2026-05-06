@@ -114,7 +114,14 @@ func newHTTPUploadsClient(transport *transport) *HTTPUploadsClient {
 // BeginUpload starts a new upload session.
 func (client *HTTPUploadsClient) BeginUpload(ctx context.Context, request BeginUploadRequest) (UploadSession, error) {
 	var session UploadSession
-	err := client.transport.doJSON(ctx, "/v1/uploads", request, http.StatusCreated, &session)
+	err := client.transport.doJSONStatuses(
+		ctx,
+		"/v1/uploads",
+		request,
+		&session,
+		http.StatusOK,
+		http.StatusCreated,
+	)
 
 	return session, err
 }
@@ -130,7 +137,7 @@ func (client *HTTPUploadsClient) PutUploadPart(
 	var part UploadPart
 	path := "/v1/uploads/" + url.PathEscape(uploadID) + "/parts/" + strconv.Itoa(partNumber)
 	headers := http.Header{"Content-Type": []string{"application/octet-stream"}}
-	err := client.transport.do(ctx, http.MethodPut, path, body, sizeBytes, headers, http.StatusOK, &part)
+	err := client.transport.do(ctx, http.MethodPut, path, body, sizeBytes, headers, &part)
 
 	return part, err
 }
@@ -152,7 +159,7 @@ func (client *HTTPUploadsClient) CompleteUpload(
 func (client *HTTPUploadsClient) AbortUpload(ctx context.Context, uploadID string) (UploadSession, error) {
 	var session UploadSession
 	path := "/v1/uploads/" + url.PathEscape(uploadID) + "/abort"
-	err := client.transport.do(ctx, http.MethodPost, path, nil, 0, nil, http.StatusOK, &session)
+	err := client.transport.do(ctx, http.MethodPost, path, nil, 0, nil, &session)
 
 	return session, err
 }
@@ -161,7 +168,7 @@ func (client *HTTPUploadsClient) AbortUpload(ctx context.Context, uploadID strin
 func (client *HTTPUploadsClient) GetUpload(ctx context.Context, uploadID string) (UploadSession, error) {
 	var session UploadSession
 	path := "/v1/uploads/" + url.PathEscape(uploadID)
-	err := client.transport.do(ctx, http.MethodGet, path, nil, 0, nil, http.StatusOK, &session)
+	err := client.transport.do(ctx, http.MethodGet, path, nil, 0, nil, &session)
 
 	return session, err
 }

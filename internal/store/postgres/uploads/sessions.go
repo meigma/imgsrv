@@ -53,6 +53,54 @@ func (store *Store) CreateSession(ctx context.Context, params domain.CreateSessi
 	return session, nil
 }
 
+// CreateReadySession creates a terminal ready upload session for a trusted CAS blob.
+func (store *Store) CreateReadySession(
+	ctx context.Context,
+	params domain.CreateReadySessionParams,
+) (domain.Session, error) {
+	if err := validateCreateReadySessionParams(params); err != nil {
+		return domain.Session{}, err
+	}
+
+	db, err := store.uploadDB()
+	if err != nil {
+		return domain.Session{}, err
+	}
+
+	session, err := scanSession(db.QueryRow(
+		ctx,
+		`INSERT INTO upload_sessions (
+			id,
+			expected_digest,
+			expected_size_bytes,
+			state,
+			storage_upload_id,
+			staging_key,
+			media_type_hint,
+			filename_hint,
+			completed_at,
+			ready_at,
+			expires_at,
+			ready_blob_digest
+		)
+		VALUES ($1, $2, $3, 'ready', $4, $5, $6, $7, now(), now(), $8, $2)
+		RETURNING `+sessionColumns,
+		params.ID,
+		params.ExpectedDigest,
+		params.ExpectedSizeBytes,
+		readyStorageUploadID(params.ID),
+		domain.StagingKey(params.ID),
+		params.MediaTypeHint,
+		params.FilenameHint,
+		params.ExpiresAt,
+	))
+	if err != nil {
+		return domain.Session{}, mapUploadError(err)
+	}
+
+	return session, nil
+}
+
 // GetSession looks up durable upload state.
 func (store *Store) GetSession(ctx context.Context, params domain.GetSessionParams) (domain.Session, error) {
 	if err := validateGetSessionParams(params); err != nil {
@@ -300,4 +348,9 @@ func queueIngestJob(ctx context.Context, tx pgx.Tx, session domain.Session) (dom
 	}
 
 	return session, nil
+}
+
+// readyStorageUploadID returns the synthetic backing upload identifier stored on skipped ready sessions.
+func readyStorageUploadID(id uuid.UUID) string {
+	return "ready:" + id.String()
 }

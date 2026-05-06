@@ -50,6 +50,10 @@ func newServiceTestContext(t *testing.T) *serviceTestContext {
 
 	store := casmocks.NewMockStore(t)
 	objects := objectmocks.NewMockStore(t)
+	objects.EXPECT().
+		DeleteObject(mock.Anything, mock.Anything).
+		Return(objectstore.ErrNotFound).
+		Maybe()
 
 	return &serviceTestContext{
 		store:   store,
@@ -86,6 +90,15 @@ func TestServiceCommitStagedUploadVerifiesCopiesAndSucceeds(t *testing.T) {
 			StorageKey: storageKey,
 		}).
 		Return(wantJob, nil)
+	tc.objects.EXPECT().
+		DeleteObject(
+			mock.MatchedBy(func(ctx context.Context) bool {
+				_, ok := ctx.Deadline()
+				return ok
+			}),
+			objectstore.DeleteObjectParams{Key: params.StagingKey},
+		).
+		Return(objectstore.ErrNotFound)
 
 	got, err := tc.service.CommitStagedUpload(context.Background(), params)
 

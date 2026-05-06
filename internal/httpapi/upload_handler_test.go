@@ -37,7 +37,7 @@ func TestBeginUploadCreatesSession(t *testing.T) {
 				*params.FilenameHint == filename &&
 				params.ExpiresAt.Equal(nowFixture().Add(time.Hour))
 		})).
-		Return(wantSession, nil)
+		Return(uploads.BeginUploadResult{Session: wantSession, Created: true}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/uploads", strings.NewReader(`{
 		"expected_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -62,6 +62,29 @@ func TestBeginUploadCreatesSession(t *testing.T) {
 	assert.Equal(t, mediaType, *got.MediaTypeHint)
 	require.NotNil(t, got.FilenameHint)
 	assert.Equal(t, filename, *got.FilenameHint)
+}
+
+func TestBeginUploadReturnsSkippedReadySessionAsOK(t *testing.T) {
+	tc := newUploadHandlerTestContext(t)
+	wantSession := uploadSessionFixture(uploads.SessionStateReady)
+
+	tc.uploads.EXPECT().
+		BeginUpload(mock.Anything, mock.Anything).
+		Return(uploads.BeginUploadResult{Session: wantSession, Created: false}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/uploads", strings.NewReader(`{
+		"expected_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"expected_size_bytes": 12
+	}`))
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got uploadSessionResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, uploadIDFixture().String(), got.ID)
+	assert.Equal(t, uploads.SessionStateReady, got.State)
 }
 
 func TestPutUploadPartStreamsRawBody(t *testing.T) {
@@ -327,7 +350,7 @@ func TestUploadHandlersMapDomainErrors(t *testing.T) {
 			tc := newUploadHandlerTestContext(t)
 			tc.uploads.EXPECT().
 				BeginUpload(mock.Anything, mock.Anything).
-				Return(uploads.Session{}, tt.err)
+				Return(uploads.BeginUploadResult{}, tt.err)
 			req := httptest.NewRequest(http.MethodPost, "/v1/uploads", strings.NewReader(`{
 				"expected_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 				"expected_size_bytes": 12

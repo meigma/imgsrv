@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
+	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/telemetry"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
@@ -31,6 +33,9 @@ type Dependencies struct {
 
 	// Catalog coordinates client-facing image catalog operations. Nil leaves catalog routes unavailable.
 	Catalog CatalogService
+
+	// Blobs coordinates client-facing raw CAS blob reads. Nil leaves blob routes unavailable.
+	Blobs BlobService
 
 	// Now returns the current time for upload HTTP policy. Nil selects time.Now.
 	Now func() time.Time
@@ -56,7 +61,7 @@ func (f ReadinessFunc) CheckReady(ctx context.Context) error {
 // UploadService coordinates upload operations for HTTP callers.
 type UploadService interface {
 	// BeginUpload starts a new upload session.
-	BeginUpload(context.Context, uploads.BeginUploadParams) (uploads.Session, error)
+	BeginUpload(context.Context, uploads.BeginUploadParams) (uploads.BeginUploadResult, error)
 
 	// PutUploadPart stores or replaces one upload part.
 	PutUploadPart(context.Context, uploads.PutUploadPartParams) (uploads.Part, error)
@@ -95,12 +100,22 @@ type CatalogService interface {
 	ResolveManifest(context.Context, catalog.ResolveManifestParams) (catalog.Manifest, error)
 }
 
+// BlobService coordinates raw CAS blob reads for HTTP callers.
+type BlobService interface {
+	// GetBlob returns trusted CAS blob metadata by digest.
+	GetBlob(context.Context, cas.GetBlobParams) (cas.Blob, error)
+
+	// OpenBlob opens a trusted CAS blob, optionally constrained to one byte range.
+	OpenBlob(context.Context, cas.OpenBlobParams) (objectstore.ObjectReader, error)
+}
+
 // api carries the configured HTTP adapter state shared across handlers.
 type api struct {
 	logger    *slog.Logger
 	readiness ReadinessChecker
 	uploads   UploadService
 	catalog   CatalogService
+	blobs     BlobService
 	now       func() time.Time
 	uploadTTL time.Duration
 }
@@ -131,6 +146,7 @@ func New(deps Dependencies) http.Handler {
 		readiness: readiness,
 		uploads:   deps.Uploads,
 		catalog:   deps.Catalog,
+		blobs:     deps.Blobs,
 		now:       now,
 		uploadTTL: uploadTTL,
 	}
@@ -143,6 +159,7 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("PUT /v1/uploads/{upload_id}/parts/{part_number}", api.putUploadPart)
 	mux.HandleFunc("POST /v1/uploads/{upload_id}/complete", api.completeUpload)
 	mux.HandleFunc("POST /v1/uploads/{upload_id}/abort", api.abortUpload)
+	mux.HandleFunc("GET /v1/blobs/{digest}", api.getBlob)
 	mux.HandleFunc("POST /v1/images", api.createImage)
 	mux.HandleFunc("POST /v1/images/{name}/versions", api.createDraftVersion)
 	mux.HandleFunc("GET /v1/images/{name}/versions/{version}", api.getVersionManifest)

@@ -46,6 +46,9 @@ type Store interface {
 	// CreateSession creates durable upload state for a backing multipart upload.
 	CreateSession(context.Context, CreateSessionParams) (Session, error)
 
+	// CreateReadySession creates a terminal ready upload session without staging or ingest.
+	CreateReadySession(context.Context, CreateReadySessionParams) (Session, error)
+
 	// GetSession returns durable upload state by upload ID.
 	GetSession(context.Context, GetSessionParams) (Session, error)
 
@@ -66,6 +69,12 @@ type Store interface {
 
 	// FailIngestJob records a failed CAS ingest outcome.
 	FailIngestJob(context.Context, FailIngestJobParams) (IngestJob, error)
+}
+
+// TrustedBlobLookup resolves verified CAS blobs by digest for upload short-circuit decisions.
+type TrustedBlobLookup interface {
+	// GetTrustedBlob returns trusted CAS blob metadata by digest.
+	GetTrustedBlob(context.Context, GetTrustedBlobParams) (TrustedBlob, error)
 }
 
 // StagingKey returns the object-storage key for a staged upload session.
@@ -190,6 +199,18 @@ type Session struct {
 	UpdatedAt time.Time
 }
 
+// TrustedBlob is trusted CAS blob metadata used by the upload service.
+type TrustedBlob struct {
+	// Digest identifies the verified CAS blob.
+	Digest Digest
+
+	// SizeBytes is the verified CAS blob size.
+	SizeBytes int64
+
+	// MediaType is optional verified media-type context.
+	MediaType *string
+}
+
 // Part records one accepted multipart upload part.
 type Part struct {
 	// UploadID identifies the parent upload session.
@@ -277,10 +298,37 @@ type CreateSessionParams struct {
 	ExpiresAt time.Time
 }
 
+// CreateReadySessionParams creates a terminal ready upload session for a trusted blob.
+type CreateReadySessionParams struct {
+	// ID is the caller-owned upload session identity.
+	ID uuid.UUID
+
+	// ExpectedDigest is the digest already trusted in CAS.
+	ExpectedDigest Digest
+
+	// ExpectedSizeBytes is the declared size of the trusted CAS blob.
+	ExpectedSizeBytes int64
+
+	// MediaTypeHint is optional operator-provided content-type context.
+	MediaTypeHint *string
+
+	// FilenameHint is optional operator-provided filename context.
+	FilenameHint *string
+
+	// ExpiresAt is when unfinished upload state would be eligible for cleanup.
+	ExpiresAt time.Time
+}
+
 // GetSessionParams looks up durable upload state.
 type GetSessionParams struct {
 	// ID identifies the upload session.
 	ID uuid.UUID
+}
+
+// GetTrustedBlobParams looks up a trusted CAS blob by digest.
+type GetTrustedBlobParams struct {
+	// Digest identifies the trusted CAS blob.
+	Digest Digest
 }
 
 // PutPartParams records or replaces an upload part.
@@ -341,6 +389,15 @@ type FailIngestJobParams struct {
 
 	// FailureMessage describes why ingest failed.
 	FailureMessage string
+}
+
+// BeginUploadResult describes the outcome of a begin-upload request.
+type BeginUploadResult struct {
+	// Session is the durable upload session to return to the caller.
+	Session Session
+
+	// Created reports whether the service created fresh multipart upload state.
+	Created bool
 }
 
 // ValidateDigest validates a digest value.

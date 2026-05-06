@@ -142,6 +142,9 @@ func newTestContext(t *testing.T) *testContext {
 
 	uploadStore := uploadmocks.NewMockStore(t)
 	objectStore := objectmocks.NewMockStore(t)
+	objectStore.On("DeleteObject", mock.Anything, mock.Anything).
+		Return(objectstore.ErrNotFound).
+		Maybe()
 	casStore := casmocks.NewMockStore(t)
 	casService := cas.NewService(cas.ServiceConfig{
 		Store:   casStore,
