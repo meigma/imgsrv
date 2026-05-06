@@ -132,7 +132,12 @@ func TestUploadFlowSkipsTrustedDigestAndLeavesNoQueuedJob(t *testing.T) {
 	assert.Equal(t, blob.Digest, skippedByClient.ExpectedDigest)
 	assert.Equal(t, blob.SizeBytes, skippedByClient.ExpectedSizeBytes)
 
-	body := bytes.NewBufferString(`{"expected_digest":"` + blob.Digest.String() + `","expected_size_bytes":` + strconv.FormatInt(blob.SizeBytes, 10) + `}`)
+	body := bytes.NewBufferString(
+		`{"expected_digest":"` + blob.Digest.String() + `","expected_size_bytes":` + strconv.FormatInt(
+			blob.SizeBytes,
+			10,
+		) + `}`,
+	)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, env.URL("/v1/uploads"), body)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -189,7 +194,20 @@ func TestBlobRouteSupportsHeadAndRanges(t *testing.T) {
 	rangeBody, err := io.ReadAll(rangeResp.Body)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusPartialContent, rangeResp.StatusCode)
-	assert.Equal(t, "bytes "+strconv.FormatInt(blob.SizeBytes-4, 10)+"-"+strconv.FormatInt(blob.SizeBytes-1, 10)+"/"+strconv.FormatInt(blob.SizeBytes, 10), rangeResp.Header.Get("Content-Range"))
+	assert.Equal(
+		t,
+		"bytes "+strconv.FormatInt(
+			blob.SizeBytes-4,
+			10,
+		)+"-"+strconv.FormatInt(
+			blob.SizeBytes-1,
+			10,
+		)+"/"+strconv.FormatInt(
+			blob.SizeBytes,
+			10,
+		),
+		rangeResp.Header.Get("Content-Range"),
+	)
 	assert.Equal(t, string(payload[len(payload)-4:]), string(rangeBody))
 
 	suffixRange, err := imgsrv.BlobRangeSuffix(4)
