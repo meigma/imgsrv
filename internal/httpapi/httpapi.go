@@ -81,14 +81,29 @@ type CatalogService interface {
 	// CreateImage creates an operator-defined image namespace.
 	CreateImage(context.Context, catalog.CreateImageParams) (catalog.Image, error)
 
+	// ListImages returns image namespaces with published versions in stable order.
+	ListImages(context.Context, catalog.ListImagesParams) ([]catalog.Image, error)
+
+	// GetImage returns one image namespace by name when it has a published version.
+	GetImage(context.Context, catalog.GetImageParams) (catalog.Image, error)
+
 	// CreateDraftVersion creates a mutable draft version for an image.
 	CreateDraftVersion(context.Context, catalog.CreateDraftVersionParams) (catalog.Version, error)
+
+	// ListVersions returns published versions for one image in stable order.
+	ListVersions(context.Context, catalog.ListVersionsParams) ([]catalog.Version, error)
 
 	// AddArtifact adds a primary artifact on a draft version.
 	AddArtifact(context.Context, catalog.AddArtifactParams) (catalog.Artifact, error)
 
 	// AddAttachment adds a secondary attachment on a draft version.
 	AddAttachment(context.Context, catalog.AddAttachmentParams) (catalog.Attachment, error)
+
+	// DeleteArtifact removes a primary artifact from a draft version.
+	DeleteArtifact(context.Context, catalog.DeleteArtifactParams) error
+
+	// DeleteAttachment removes an attachment from a draft artifact.
+	DeleteAttachment(context.Context, catalog.DeleteAttachmentParams) error
 
 	// PublishVersion marks a draft version immutable and publishable.
 	PublishVersion(context.Context, catalog.PublishVersionParams) (catalog.Version, error)
@@ -173,12 +188,20 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("POST /v1/uploads/{upload_id}/abort", api.abortUpload)
 	mux.HandleFunc("GET /v1/blobs/{digest}", api.getBlob)
 	mux.HandleFunc("POST /v1/images", api.createImage)
+	mux.HandleFunc("GET /v1/images", api.listImages)
+	mux.HandleFunc("GET /v1/images/{name}", api.getImage)
 	mux.HandleFunc("POST /v1/images/{name}/versions", api.createDraftVersion)
+	mux.HandleFunc("GET /v1/images/{name}/versions", api.listVersions)
 	mux.HandleFunc("GET /v1/images/{name}/versions/{version}", api.getVersionManifest)
 	mux.HandleFunc("POST /v1/images/{name}/versions/{version}/artifacts", api.addArtifact)
+	mux.HandleFunc("DELETE /v1/images/{name}/versions/{version}/artifacts/{artifact_id}", api.deleteArtifact)
 	mux.HandleFunc(
 		"POST /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments",
 		api.addAttachment,
+	)
+	mux.HandleFunc(
+		"DELETE /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments/{attachment_id}",
+		api.deleteAttachment,
 	)
 	mux.HandleFunc("POST /v1/images/{name}/versions/{version}/publish", api.publishVersion)
 	mux.HandleFunc("PUT /v1/images/{name}/aliases/{alias}", api.putAlias)

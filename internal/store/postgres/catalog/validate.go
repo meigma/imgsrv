@@ -20,6 +20,16 @@ func validateCreateImageParams(params domain.CreateImageParams) error {
 	return validateOptionalText("description", params.Description)
 }
 
+// validateListImagesParams validates the inputs to Store.ListImages.
+func validateListImagesParams(domain.ListImagesParams) error {
+	return nil
+}
+
+// validateGetImageParams validates the inputs to Store.GetImage.
+func validateGetImageParams(params domain.GetImageParams) error {
+	return domain.ValidateImageName(params.Name)
+}
+
 // validateCreateDraftVersionParams validates the inputs to
 // Store.CreateDraftVersion.
 func validateCreateDraftVersionParams(params domain.CreateDraftVersionParams) error {
@@ -28,6 +38,11 @@ func validateCreateDraftVersionParams(params domain.CreateDraftVersionParams) er
 	}
 
 	return domain.ValidateVersion(params.Version)
+}
+
+// validateListVersionsParams validates the inputs to Store.ListVersions.
+func validateListVersionsParams(params domain.ListVersionsParams) error {
+	return domain.ValidateImageName(params.ImageName)
 }
 
 // validateAddArtifactParams validates the inputs to Store.AddArtifact.
@@ -79,6 +94,37 @@ func validateAddAttachmentParams(params domain.AddAttachmentParams) error {
 	}
 
 	return domain.ValidateNonNegativeSize("attachment blob size", params.BlobSizeBytes)
+}
+
+// validateDeleteArtifactParams validates the inputs to Store.DeleteArtifact.
+func validateDeleteArtifactParams(params domain.DeleteArtifactParams) error {
+	if err := validateCreateDraftVersionParams(domain.CreateDraftVersionParams{
+		ImageName: params.ImageName,
+		Version:   params.Version,
+	}); err != nil {
+		return err
+	}
+	if params.ArtifactID == uuid.Nil {
+		return fmt.Errorf("%w: artifact id is required", domain.ErrInvalid)
+	}
+
+	return nil
+}
+
+// validateDeleteAttachmentParams validates the inputs to Store.DeleteAttachment.
+func validateDeleteAttachmentParams(params domain.DeleteAttachmentParams) error {
+	if err := validateDeleteArtifactParams(domain.DeleteArtifactParams{
+		ImageName:  params.ImageName,
+		Version:    params.Version,
+		ArtifactID: params.ArtifactID,
+	}); err != nil {
+		return err
+	}
+	if params.AttachmentID == uuid.Nil {
+		return fmt.Errorf("%w: attachment id is required", domain.ErrInvalid)
+	}
+
+	return nil
 }
 
 // validatePublishVersionParams validates the inputs to Store.PublishVersion.

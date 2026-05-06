@@ -32,6 +32,26 @@ func (service *Service) CreateImage(ctx context.Context, params CreateImageParam
 	return store.CreateImage(ctx, params)
 }
 
+// ListImages returns image namespaces with published versions in stable order.
+func (service *Service) ListImages(ctx context.Context, params ListImagesParams) ([]Image, error) {
+	store, err := service.dependencies()
+	if err != nil {
+		return nil, err
+	}
+
+	return store.ListImages(ctx, params)
+}
+
+// GetImage returns one image namespace by name when it has a published version.
+func (service *Service) GetImage(ctx context.Context, params GetImageParams) (Image, error) {
+	store, err := service.dependencies()
+	if err != nil {
+		return Image{}, err
+	}
+
+	return store.GetImage(ctx, params)
+}
+
 // CreateDraftVersion creates a mutable draft version for an image.
 func (service *Service) CreateDraftVersion(
 	ctx context.Context,
@@ -43,6 +63,16 @@ func (service *Service) CreateDraftVersion(
 	}
 
 	return store.CreateDraftVersion(ctx, params)
+}
+
+// ListVersions returns published versions for one image in stable order.
+func (service *Service) ListVersions(ctx context.Context, params ListVersionsParams) ([]Version, error) {
+	store, err := service.dependencies()
+	if err != nil {
+		return nil, err
+	}
+
+	return store.ListVersions(ctx, params)
 }
 
 // AddArtifact adds a primary artifact on a draft version.
@@ -63,6 +93,26 @@ func (service *Service) AddAttachment(ctx context.Context, params AddAttachmentP
 	}
 
 	return store.AddAttachment(ctx, params)
+}
+
+// DeleteArtifact removes a primary artifact from a draft version.
+func (service *Service) DeleteArtifact(ctx context.Context, params DeleteArtifactParams) error {
+	store, err := service.dependencies()
+	if err != nil {
+		return err
+	}
+
+	return store.DeleteArtifact(ctx, params)
+}
+
+// DeleteAttachment removes an attachment from a draft artifact.
+func (service *Service) DeleteAttachment(ctx context.Context, params DeleteAttachmentParams) error {
+	store, err := service.dependencies()
+	if err != nil {
+		return err
+	}
+
+	return store.DeleteAttachment(ctx, params)
 }
 
 // PublishVersion marks a draft version immutable and publishable.

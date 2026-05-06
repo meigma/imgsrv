@@ -208,110 +208,7 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	ctx := context.Background()
 	displayName := "Debian 12"
 	description := "Base image"
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/images", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodPost)
-		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-
-		var got CreateImageRequest
-		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
-			return
-		}
-		assert.Equal(t, "debian", got.Name)
-		if assert.NotNil(t, got.DisplayName) {
-			assert.Equal(t, displayName, *got.DisplayName)
-		}
-		if assert.NotNil(t, got.Description) {
-			assert.Equal(t, description, *got.Description)
-		}
-
-		writeJSON(t, w, http.StatusCreated, imageFixture())
-	})
-	mux.HandleFunc("/api/v1/images/debian/versions", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodPost)
-		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-
-		var got CreateDraftVersionRequest
-		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
-			return
-		}
-		assert.Equal(t, "v1.0.0", got.Version)
-
-		writeJSON(t, w, http.StatusCreated, versionFixture(ImageVersionStateDraft))
-	})
-	mux.HandleFunc("/api/v1/images/debian/versions/v1.0.0", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodGet)
-		writeJSON(t, w, http.StatusOK, manifestFixture(ImageVersionStateDraft))
-	})
-	mux.HandleFunc("/api/v1/images/debian/versions/v1.0.0/artifacts", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodPost)
-		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-
-		var got AddArtifactRequest
-		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
-			return
-		}
-		assert.Equal(t, "linux", got.OperatingSystem)
-		assert.Equal(t, "x86_64", got.Architecture)
-		assert.Equal(t, ArtifactFormatQCOW2, got.Format)
-		assert.Equal(t, testDigest, got.PrimaryBlobDigest)
-		assert.Equal(t, int64(12), got.PrimaryBlobSizeBytes)
-		assert.Equal(t, "application/x-qcow2", got.PrimaryMediaType)
-
-		writeJSON(t, w, http.StatusCreated, artifactFixture())
-	})
-	mux.HandleFunc(
-		"/api/v1/images/debian/versions/v1.0.0/artifacts/"+testArtifactID+"/attachments",
-		func(w http.ResponseWriter, r *http.Request) {
-			assertRequestBasics(t, r, http.MethodPost)
-			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-
-			var got AddAttachmentRequest
-			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
-				return
-			}
-			assert.Equal(t, "rootfs.sha256", got.Name)
-			assert.Equal(t, "text/plain", got.MediaType)
-			assert.Equal(t, testDigest, got.BlobDigest)
-			assert.Equal(t, int64(64), got.BlobSizeBytes)
-
-			writeJSON(t, w, http.StatusCreated, attachmentFixture())
-		},
-	)
-	mux.HandleFunc("/api/v1/images/debian/versions/v1.0.0/publish", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodPost)
-		assert.Zero(t, r.ContentLength)
-		writeJSON(t, w, http.StatusOK, versionFixture(ImageVersionStatePublished))
-	})
-	mux.HandleFunc("/api/v1/images/debian/aliases", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodGet)
-		writeJSON(t, w, http.StatusOK, aliasListResponse{Aliases: []Alias{aliasFixture()}})
-	})
-	mux.HandleFunc("/api/v1/images/debian/aliases/latest", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, r.Method)
-
-		switch r.Method {
-		case http.MethodPut:
-			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-			var got PutAliasRequest
-			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
-				return
-			}
-			assert.Equal(t, "v1.0.0", got.Version)
-			writeJSON(t, w, http.StatusOK, aliasFixture())
-		case http.MethodGet:
-			writeJSON(t, w, http.StatusOK, aliasFixture())
-		case http.MethodDelete:
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Fatalf("unexpected alias method %s", r.Method)
-		}
-	})
-	mux.HandleFunc("/api/v1/images/debian/refs/latest", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodGet)
-		writeJSON(t, w, http.StatusOK, manifestFixture(ImageVersionStatePublished))
-	})
-	server := httptest.NewServer(mux)
+	server := newCatalogFlowServer(t, displayName, description)
 	t.Cleanup(server.Close)
 
 	client, err := New(Options{
@@ -331,9 +228,23 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, testImageID, image.ID)
 
+	images, err := catalog.ListImages(ctx)
+	require.NoError(t, err)
+	require.Len(t, images, 1)
+	assert.Equal(t, image.ID, images[0].ID)
+
+	gotImage, err := catalog.GetImage(ctx, image.Name)
+	require.NoError(t, err)
+	assert.Equal(t, image.ID, gotImage.ID)
+
 	version, err := catalog.CreateDraftVersion(ctx, image.Name, CreateDraftVersionRequest{Version: "v1.0.0"})
 	require.NoError(t, err)
 	assert.Equal(t, ImageVersionStateDraft, version.State)
+
+	versions, err := catalog.ListVersions(ctx, image.Name)
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+	assert.Equal(t, version.ID, versions[0].ID)
 
 	artifact, err := catalog.AddArtifact(ctx, image.Name, version.Version, AddArtifactRequest{
 		OperatingSystem:      "linux",
@@ -360,6 +271,9 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.Equal(t, testAttachmentID, attachment.ID)
+
+	require.NoError(t, catalog.DeleteAttachment(ctx, image.Name, version.Version, artifact.ID.String(), attachment.ID))
+	require.NoError(t, catalog.DeleteArtifact(ctx, image.Name, version.Version, artifact.ID.String()))
 
 	manifest, err := catalog.GetVersionManifest(ctx, image.Name, version.Version)
 	require.NoError(t, err)
@@ -389,6 +303,169 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	assert.Equal(t, ImageVersionStatePublished, resolved.Version.State)
 
 	require.NoError(t, catalog.DeleteAlias(ctx, image.Name, alias.Alias))
+}
+
+func newCatalogFlowServer(t *testing.T, displayName string, description string) *httptest.Server {
+	t.Helper()
+
+	mux := http.NewServeMux()
+	registerCatalogImageHandlers(t, mux, displayName, description)
+	registerCatalogVersionHandlers(t, mux)
+	registerCatalogArtifactHandlers(t, mux)
+	registerCatalogAliasHandlers(t, mux)
+
+	return httptest.NewServer(mux)
+}
+
+func registerCatalogImageHandlers(
+	t *testing.T,
+	mux *http.ServeMux,
+	displayName string,
+	description string,
+) {
+	t.Helper()
+
+	mux.HandleFunc("/api/v1/images", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, r.Method)
+
+		switch r.Method {
+		case http.MethodPost:
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			var got CreateImageRequest
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+				return
+			}
+			assert.Equal(t, "debian", got.Name)
+			if assert.NotNil(t, got.DisplayName) {
+				assert.Equal(t, displayName, *got.DisplayName)
+			}
+			if assert.NotNil(t, got.Description) {
+				assert.Equal(t, description, *got.Description)
+			}
+			writeJSON(t, w, http.StatusCreated, imageFixture())
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, imageListResponse{Images: []Image{imageFixture()}})
+		default:
+			t.Fatalf("unexpected images method %s", r.Method)
+		}
+	})
+	mux.HandleFunc("/api/v1/images/debian", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodGet)
+		writeJSON(t, w, http.StatusOK, imageFixture())
+	})
+}
+
+func registerCatalogVersionHandlers(t *testing.T, mux *http.ServeMux) {
+	t.Helper()
+
+	mux.HandleFunc("/api/v1/images/debian/versions", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, r.Method)
+
+		switch r.Method {
+		case http.MethodPost:
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			var got CreateDraftVersionRequest
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+				return
+			}
+			assert.Equal(t, "v1.0.0", got.Version)
+			writeJSON(t, w, http.StatusCreated, versionFixture(ImageVersionStateDraft))
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, versionListResponse{
+				Versions: []ImageVersion{versionFixture(ImageVersionStateDraft)},
+			})
+		default:
+			t.Fatalf("unexpected versions method %s", r.Method)
+		}
+	})
+	mux.HandleFunc("/api/v1/images/debian/versions/v1.0.0", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodGet)
+		writeJSON(t, w, http.StatusOK, manifestFixture(ImageVersionStateDraft))
+	})
+	mux.HandleFunc("/api/v1/images/debian/versions/v1.0.0/publish", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodPost)
+		assert.Zero(t, r.ContentLength)
+		writeJSON(t, w, http.StatusOK, versionFixture(ImageVersionStatePublished))
+	})
+	mux.HandleFunc("/api/v1/images/debian/refs/latest", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodGet)
+		writeJSON(t, w, http.StatusOK, manifestFixture(ImageVersionStatePublished))
+	})
+}
+
+func registerCatalogArtifactHandlers(t *testing.T, mux *http.ServeMux) {
+	t.Helper()
+
+	artifactPath := "/api/v1/images/debian/versions/v1.0.0/artifacts/" + testArtifactID
+	mux.HandleFunc("/api/v1/images/debian/versions/v1.0.0/artifacts", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodPost)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		var got AddArtifactRequest
+		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+			return
+		}
+		assert.Equal(t, "linux", got.OperatingSystem)
+		assert.Equal(t, "x86_64", got.Architecture)
+		assert.Equal(t, ArtifactFormatQCOW2, got.Format)
+		assert.Equal(t, testDigest, got.PrimaryBlobDigest)
+		assert.Equal(t, int64(12), got.PrimaryBlobSizeBytes)
+		assert.Equal(t, "application/x-qcow2", got.PrimaryMediaType)
+
+		writeJSON(t, w, http.StatusCreated, artifactFixture())
+	})
+	mux.HandleFunc(artifactPath, func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodDelete)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc(artifactPath+"/attachments", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodPost)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		var got AddAttachmentRequest
+		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+			return
+		}
+		assert.Equal(t, "rootfs.sha256", got.Name)
+		assert.Equal(t, "text/plain", got.MediaType)
+		assert.Equal(t, testDigest, got.BlobDigest)
+		assert.Equal(t, int64(64), got.BlobSizeBytes)
+
+		writeJSON(t, w, http.StatusCreated, attachmentFixture())
+	})
+	mux.HandleFunc(artifactPath+"/attachments/"+testAttachmentID, func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodDelete)
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
+
+func registerCatalogAliasHandlers(t *testing.T, mux *http.ServeMux) {
+	t.Helper()
+
+	mux.HandleFunc("/api/v1/images/debian/aliases", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodGet)
+		writeJSON(t, w, http.StatusOK, aliasListResponse{Aliases: []Alias{aliasFixture()}})
+	})
+	mux.HandleFunc("/api/v1/images/debian/aliases/latest", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, r.Method)
+
+		switch r.Method {
+		case http.MethodPut:
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			var got PutAliasRequest
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+				return
+			}
+			assert.Equal(t, "v1.0.0", got.Version)
+			writeJSON(t, w, http.StatusOK, aliasFixture())
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, aliasFixture())
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected alias method %s", r.Method)
+		}
+	})
 }
 
 func TestClientBlobFlowBuildsRequests(t *testing.T) {

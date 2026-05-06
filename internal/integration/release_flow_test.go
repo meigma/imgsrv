@@ -132,6 +132,99 @@ func TestReleaseFlowManagesAliases(t *testing.T) {
 	assert.Equal(t, first.Version, exact.Version.Version)
 }
 
+func TestReleaseFlowBrowsesAndDeletesDraftCatalog(t *testing.T) {
+	env := harness.Start(t)
+	ctx := t.Context()
+	client := newClient(t, env)
+	catalog := client.Catalog()
+	primaryBlob := uploadBlobToCAS(ctx, t, env, client, []byte("imgsrv browse delete primary artifact"))
+	attachmentBlob := uploadBlobToCAS(ctx, t, env, client, []byte("imgsrv browse delete attachment"))
+
+	firstImage, err := catalog.CreateImage(ctx, imgsrv.CreateImageRequest{Name: "release-browse-a"})
+	require.NoError(t, err)
+	_, err = catalog.CreateImage(ctx, imgsrv.CreateImageRequest{Name: "release-browse-b"})
+	require.NoError(t, err)
+
+	images, err := catalog.ListImages(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, images)
+
+	_, err = catalog.GetImage(ctx, firstImage.Name)
+	assertProblemStatus(t, err, http.StatusNotFound)
+
+	firstVersion, err := catalog.CreateDraftVersion(ctx, firstImage.Name, imgsrv.CreateDraftVersionRequest{
+		Version: "v1.0.0",
+	})
+	require.NoError(t, err)
+	_, err = catalog.CreateDraftVersion(ctx, firstImage.Name, imgsrv.CreateDraftVersionRequest{
+		Version: "v1.1.0",
+	})
+	require.NoError(t, err)
+
+	_, err = catalog.ListVersions(ctx, firstImage.Name)
+	assertProblemStatus(t, err, http.StatusNotFound)
+
+	artifact, err := catalog.AddArtifact(ctx, firstImage.Name, firstVersion.Version, artifactRequest(primaryBlob))
+	require.NoError(t, err)
+	attachment, err := catalog.AddAttachment(
+		ctx,
+		firstImage.Name,
+		firstVersion.Version,
+		artifact.ID.String(),
+		attachmentRequest("rootfs.sha256", attachmentBlob),
+	)
+	require.NoError(t, err)
+
+	_, err = catalog.CreateImage(ctx, imgsrv.CreateImageRequest{Name: "release-browse-foreign"})
+	require.NoError(t, err)
+	err = catalog.DeleteArtifact(ctx, "release-browse-foreign", firstVersion.Version, artifact.ID.String())
+	assertProblemStatus(t, err, http.StatusNotFound)
+
+	require.NoError(t, catalog.DeleteAttachment(
+		ctx,
+		firstImage.Name,
+		firstVersion.Version,
+		artifact.ID.String(),
+		attachment.ID,
+	))
+	manifest, err := catalog.GetVersionManifest(ctx, firstImage.Name, firstVersion.Version)
+	require.NoError(t, err)
+	require.Len(t, manifest.Artifacts, 1)
+	assert.Empty(t, manifest.Artifacts[0].Attachments)
+
+	require.NoError(t, catalog.DeleteArtifact(ctx, firstImage.Name, firstVersion.Version, artifact.ID.String()))
+	manifest, err = catalog.GetVersionManifest(ctx, firstImage.Name, firstVersion.Version)
+	require.NoError(t, err)
+	assert.Empty(t, manifest.Artifacts)
+
+	publishedVersion := createPublishedVersion(ctx, t, catalog, firstImage.Name, "v1.2.0", primaryBlob)
+	images, err = catalog.ListImages(ctx)
+	require.NoError(t, err)
+	require.Len(t, images, 1)
+	assert.Equal(t, firstImage.ID, images[0].ID)
+
+	gotImage, err := catalog.GetImage(ctx, firstImage.Name)
+	require.NoError(t, err)
+	assert.Equal(t, firstImage.ID, gotImage.ID)
+
+	versions, err := catalog.ListVersions(ctx, firstImage.Name)
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+	assert.Equal(t, publishedVersion.Version, versions[0].Version)
+	assert.Equal(t, imgsrv.ImageVersionStatePublished, versions[0].State)
+
+	publishedManifest, err := catalog.GetVersionManifest(ctx, firstImage.Name, publishedVersion.Version)
+	require.NoError(t, err)
+	require.Len(t, publishedManifest.Artifacts, 1)
+	err = catalog.DeleteArtifact(
+		ctx,
+		firstImage.Name,
+		publishedVersion.Version,
+		publishedManifest.Artifacts[0].Artifact.ID.String(),
+	)
+	assertProblemStatus(t, err, http.StatusPreconditionFailed)
+}
+
 func TestReleaseFlowRejectsInvalidDraftWrites(t *testing.T) {
 	env := harness.Start(t)
 	ctx := t.Context()

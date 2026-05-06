@@ -314,6 +314,20 @@ paths:
         '503':
           $ref: '#/components/responses/Problem'
   /v1/images:
+    get:
+      operationId: listImages
+      summary: List image namespaces with published versions.
+      responses:
+        '200':
+          description: Public image namespaces in stable order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageList'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
     post:
       operationId: createImage
       summary: Create an image namespace.
@@ -338,7 +352,48 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /v1/images/{name}:
+    get:
+      operationId: getImage
+      summary: Get one image namespace with a published version.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+      responses:
+        '200':
+          description: Public image namespace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Image'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /v1/images/{name}/versions:
+    get:
+      operationId: listVersions
+      summary: List published versions for an image.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+      responses:
+        '200':
+          description: Published image versions in stable order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionList'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
     post:
       operationId: createDraftVersion
       summary: Create a draft image version.
@@ -421,6 +476,27 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /v1/images/{name}/versions/{version}/artifacts/{artifact_id}:
+    delete:
+      operationId: deleteArtifact
+      summary: Delete a primary artifact from a draft version.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+        - $ref: '#/components/parameters/ImageVersion'
+        - $ref: '#/components/parameters/ArtifactID'
+      responses:
+        '204':
+          description: Artifact declaration deleted.
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments:
     post:
       operationId: addAttachment
@@ -447,6 +523,28 @@ paths:
         '404':
           $ref: '#/components/responses/Problem'
         '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments/{attachment_id}:
+    delete:
+      operationId: deleteAttachment
+      summary: Delete an attachment from a draft artifact.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+        - $ref: '#/components/parameters/ImageVersion'
+        - $ref: '#/components/parameters/ArtifactID'
+        - $ref: '#/components/parameters/AttachmentID'
+      responses:
+        '204':
+          description: Attachment declaration deleted.
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
           $ref: '#/components/responses/Problem'
         '412':
           $ref: '#/components/responses/Problem'
@@ -637,6 +735,12 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/ArtifactID'
+    AttachmentID:
+      name: attachment_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/AttachmentID'
   responses:
     Problem:
       description: RFC 9457 problem details.
@@ -654,6 +758,9 @@ components:
       type: string
       format: uuid
     ArtifactID:
+      type: string
+      format: uuid
+    AttachmentID:
       type: string
       format: uuid
     UploadState:
@@ -881,6 +988,17 @@ components:
           type: string
           format: date-time
       additionalProperties: false
+    ImageList:
+      type: object
+      description: Image namespaces that have at least one published version.
+      required:
+        - images
+      properties:
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/Image'
+      additionalProperties: false
     ImageVersion:
       type: object
       required:
@@ -911,6 +1029,17 @@ components:
         updated_at:
           type: string
           format: date-time
+      additionalProperties: false
+    VersionList:
+      type: object
+      description: Published image versions for one public image namespace.
+      required:
+        - versions
+      properties:
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImageVersion'
       additionalProperties: false
     Artifact:
       type: object

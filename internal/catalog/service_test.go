@@ -95,6 +95,43 @@ func TestServiceDelegatesManifestReads(t *testing.T) {
 	assert.Equal(t, wantManifest, gotAlias)
 }
 
+func TestServiceDelegatesCatalogBrowseOperations(t *testing.T) {
+	store := mocks.NewMockStore(t)
+	service := catalog.NewService(catalog.ServiceConfig{Store: store})
+	wantImage := catalog.Image{
+		ID:   uuid.MustParse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+		Name: "debian",
+	}
+	wantVersion := catalog.Version{
+		ID:      uuid.MustParse("bbbbbbbb-cccc-dddd-eeee-ffffffffffff"),
+		ImageID: wantImage.ID,
+		Version: "v1.0.0",
+		State:   catalog.VersionStateDraft,
+	}
+
+	store.EXPECT().
+		ListImages(context.Background(), catalog.ListImagesParams{}).
+		Return([]catalog.Image{wantImage}, nil)
+	store.EXPECT().
+		GetImage(context.Background(), catalog.GetImageParams{Name: "debian"}).
+		Return(wantImage, nil)
+	store.EXPECT().
+		ListVersions(context.Background(), catalog.ListVersionsParams{ImageName: "debian"}).
+		Return([]catalog.Version{wantVersion}, nil)
+
+	images, err := service.ListImages(context.Background(), catalog.ListImagesParams{})
+	require.NoError(t, err)
+	assert.Equal(t, []catalog.Image{wantImage}, images)
+
+	image, err := service.GetImage(context.Background(), catalog.GetImageParams{Name: "debian"})
+	require.NoError(t, err)
+	assert.Equal(t, wantImage, image)
+
+	versions, err := service.ListVersions(context.Background(), catalog.ListVersionsParams{ImageName: "debian"})
+	require.NoError(t, err)
+	assert.Equal(t, []catalog.Version{wantVersion}, versions)
+}
+
 func TestServiceDelegatesAliasOperations(t *testing.T) {
 	store := mocks.NewMockStore(t)
 	service := catalog.NewService(catalog.ServiceConfig{Store: store})
@@ -151,6 +188,44 @@ func TestServiceDelegatesAliasOperations(t *testing.T) {
 	err = service.DeleteAlias(context.Background(), catalog.DeleteAliasParams{
 		ImageName: "debian",
 		Alias:     "latest",
+	})
+	require.NoError(t, err)
+}
+
+func TestServiceDelegatesDraftDeletes(t *testing.T) {
+	store := mocks.NewMockStore(t)
+	service := catalog.NewService(catalog.ServiceConfig{Store: store})
+	artifactID := uuid.MustParse("cccccccc-dddd-eeee-ffff-000000000000")
+	attachmentID := uuid.MustParse("dddddddd-eeee-ffff-0000-111111111111")
+
+	store.EXPECT().
+		DeleteArtifact(context.Background(), catalog.DeleteArtifactParams{
+			ImageName:  "debian",
+			Version:    "v1.0.0",
+			ArtifactID: artifactID,
+		}).
+		Return(nil)
+	store.EXPECT().
+		DeleteAttachment(context.Background(), catalog.DeleteAttachmentParams{
+			ImageName:    "debian",
+			Version:      "v1.0.0",
+			ArtifactID:   artifactID,
+			AttachmentID: attachmentID,
+		}).
+		Return(nil)
+
+	err := service.DeleteArtifact(context.Background(), catalog.DeleteArtifactParams{
+		ImageName:  "debian",
+		Version:    "v1.0.0",
+		ArtifactID: artifactID,
+	})
+	require.NoError(t, err)
+
+	err = service.DeleteAttachment(context.Background(), catalog.DeleteAttachmentParams{
+		ImageName:    "debian",
+		Version:      "v1.0.0",
+		ArtifactID:   artifactID,
+		AttachmentID: attachmentID,
 	})
 	require.NoError(t, err)
 }
