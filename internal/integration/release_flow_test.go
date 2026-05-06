@@ -7,6 +7,8 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -120,6 +122,14 @@ func TestReleaseFlowPublishesDraft(t *testing.T) {
 	assert.Equal(t, primaryBlob.Digest, artifactDownload.Metadata.Digest)
 	assert.Equal(t, primaryBlob.SizeBytes, artifactDownload.Metadata.SizeBytes)
 	assert.Equal(t, "application/x-qcow2", artifactDownload.Metadata.ContentType)
+	assertCatalogDownloadHead(
+		ctx,
+		t,
+		env,
+		catalogArtifactDownloadPath(image.Name, version.Version, artifact.ID.String()),
+		primaryBlob,
+		"application/x-qcow2",
+	)
 
 	suffixRange, err := imgsrv.BlobRangeSuffix(4)
 	require.NoError(t, err)
@@ -139,6 +149,14 @@ func TestReleaseFlowPublishesDraft(t *testing.T) {
 	assert.Equal(t, attachmentBlob.Digest, attachmentDownload.Metadata.Digest)
 	assert.Equal(t, attachmentBlob.SizeBytes, attachmentDownload.Metadata.SizeBytes)
 	assert.Equal(t, "text/plain", attachmentDownload.Metadata.ContentType)
+	assertCatalogDownloadHead(
+		ctx,
+		t,
+		env,
+		catalogAttachmentDownloadPath(image.Name, version.Version, artifact.ID.String(), attachment.ID),
+		attachmentBlob,
+		"text/plain",
+	)
 }
 
 func TestReleaseFlowManagesAliases(t *testing.T) {
@@ -153,6 +171,11 @@ func TestReleaseFlowManagesAliases(t *testing.T) {
 
 	first := createPublishedVersion(ctx, t, catalog, image.Name, "v1.0.0", primaryBlob)
 	second := createPublishedVersion(ctx, t, catalog, image.Name, "v1.1.0", primaryBlob)
+
+	exactRef, err := catalog.ResolveManifest(ctx, image.Name, first.Version)
+	require.NoError(t, err)
+	assert.Equal(t, first.Version, exactRef.Version.Version)
+	assert.Equal(t, imgsrv.ImageVersionStatePublished, exactRef.Version.State)
 
 	alias, err := catalog.PutAlias(
 		ctx,
@@ -652,6 +675,51 @@ func attachmentRequest(name string, blob catalogBlob) imgsrv.AddAttachmentReques
 		BlobDigest:    blob.Digest,
 		BlobSizeBytes: blob.SizeBytes,
 	}
+}
+
+func catalogArtifactDownloadPath(imageName string, version string, artifactID string) string {
+	return "/v1/images/" + url.PathEscape(imageName) +
+		"/versions/" + url.PathEscape(version) +
+		"/artifacts/" + url.PathEscape(artifactID) +
+		"/download"
+}
+
+func catalogAttachmentDownloadPath(
+	imageName string,
+	version string,
+	artifactID string,
+	attachmentID string,
+) string {
+	return "/v1/images/" + url.PathEscape(imageName) +
+		"/versions/" + url.PathEscape(version) +
+		"/artifacts/" + url.PathEscape(artifactID) +
+		"/attachments/" + url.PathEscape(attachmentID) +
+		"/download"
+}
+
+func assertCatalogDownloadHead(
+	ctx context.Context,
+	t testing.TB,
+	env *harness.Env,
+	path string,
+	blob catalogBlob,
+	contentType string,
+) {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, env.URL(path), nil)
+	require.NoError(t, err)
+	resp, err := env.HTTPClient().Do(req)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "bytes", resp.Header.Get("Accept-Ranges"))
+	assert.Equal(t, strconv.FormatInt(blob.SizeBytes, 10), resp.Header.Get("Content-Length"))
+	assert.Equal(t, contentType, resp.Header.Get("Content-Type"))
+	assert.NotEmpty(t, resp.Header.Get("ETag"))
 }
 
 func assertManifest(
