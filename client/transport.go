@@ -112,6 +112,31 @@ func (transport *transport) doJSONStatuses(
 	responseBody any,
 	wantStatuses ...int,
 ) error {
+	return transport.doJSONMethodStatuses(ctx, http.MethodPost, path, requestBody, responseBody, wantStatuses...)
+}
+
+// doJSONMethod issues a JSON request with method and requires wantStatus.
+func (transport *transport) doJSONMethod(
+	ctx context.Context,
+	method string,
+	path string,
+	requestBody any,
+	wantStatus int,
+	responseBody any,
+) error {
+	return transport.doJSONMethodStatuses(ctx, method, path, requestBody, responseBody, wantStatus)
+}
+
+// doJSONMethodStatuses marshals requestBody as JSON, sets the JSON content type, and delegates
+// to doResponse for transport, status checking, and response decoding.
+func (transport *transport) doJSONMethodStatuses(
+	ctx context.Context,
+	method string,
+	path string,
+	requestBody any,
+	responseBody any,
+	wantStatuses ...int,
+) error {
 	body, err := json.Marshal(requestBody)
 	if err != nil {
 		return fmt.Errorf("encode imgsrv request: %w", err)
@@ -121,7 +146,7 @@ func (transport *transport) doJSONStatuses(
 
 	resp, err := transport.doResponse(
 		ctx,
-		http.MethodPost,
+		method,
 		path,
 		bytes.NewReader(body),
 		int64(len(body)),

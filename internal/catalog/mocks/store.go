@@ -302,6 +302,63 @@ func (_c *MockStore_CreateImage_Call) RunAndReturn(run func(context1 context.Con
 	return _c
 }
 
+// DeleteAlias provides a mock function for the type MockStore
+func (_mock *MockStore) DeleteAlias(context1 context.Context, deleteAliasParams catalog.DeleteAliasParams) error {
+	ret := _mock.Called(context1, deleteAliasParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteAlias")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.DeleteAliasParams) error); ok {
+		r0 = returnFunc(context1, deleteAliasParams)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockStore_DeleteAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteAlias'
+type MockStore_DeleteAlias_Call struct {
+	*mock.Call
+}
+
+// DeleteAlias is a helper method to define mock.On call
+//   - context1 context.Context
+//   - deleteAliasParams catalog.DeleteAliasParams
+func (_e *MockStore_Expecter) DeleteAlias(context1 interface{}, deleteAliasParams interface{}) *MockStore_DeleteAlias_Call {
+	return &MockStore_DeleteAlias_Call{Call: _e.mock.On("DeleteAlias", context1, deleteAliasParams)}
+}
+
+func (_c *MockStore_DeleteAlias_Call) Run(run func(context1 context.Context, deleteAliasParams catalog.DeleteAliasParams)) *MockStore_DeleteAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.DeleteAliasParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.DeleteAliasParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_DeleteAlias_Call) Return(err error) *MockStore_DeleteAlias_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockStore_DeleteAlias_Call) RunAndReturn(run func(context1 context.Context, deleteAliasParams catalog.DeleteAliasParams) error) *MockStore_DeleteAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetAlias provides a mock function for the type MockStore
 func (_mock *MockStore) GetAlias(context1 context.Context, getAliasParams catalog.GetAliasParams) (catalog.Alias, error) {
 	ret := _mock.Called(context1, getAliasParams)
@@ -430,6 +487,74 @@ func (_c *MockStore_GetVersionManifest_Call) Return(manifest catalog.Manifest, e
 }
 
 func (_c *MockStore_GetVersionManifest_Call) RunAndReturn(run func(context1 context.Context, getVersionManifestParams catalog.GetVersionManifestParams) (catalog.Manifest, error)) *MockStore_GetVersionManifest_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListAliases provides a mock function for the type MockStore
+func (_mock *MockStore) ListAliases(context1 context.Context, listAliasesParams catalog.ListAliasesParams) ([]catalog.Alias, error) {
+	ret := _mock.Called(context1, listAliasesParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListAliases")
+	}
+
+	var r0 []catalog.Alias
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListAliasesParams) ([]catalog.Alias, error)); ok {
+		return returnFunc(context1, listAliasesParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListAliasesParams) []catalog.Alias); ok {
+		r0 = returnFunc(context1, listAliasesParams)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]catalog.Alias)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.ListAliasesParams) error); ok {
+		r1 = returnFunc(context1, listAliasesParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockStore_ListAliases_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAliases'
+type MockStore_ListAliases_Call struct {
+	*mock.Call
+}
+
+// ListAliases is a helper method to define mock.On call
+//   - context1 context.Context
+//   - listAliasesParams catalog.ListAliasesParams
+func (_e *MockStore_Expecter) ListAliases(context1 interface{}, listAliasesParams interface{}) *MockStore_ListAliases_Call {
+	return &MockStore_ListAliases_Call{Call: _e.mock.On("ListAliases", context1, listAliasesParams)}
+}
+
+func (_c *MockStore_ListAliases_Call) Run(run func(context1 context.Context, listAliasesParams catalog.ListAliasesParams)) *MockStore_ListAliases_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.ListAliasesParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.ListAliasesParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_ListAliases_Call) Return(aliass []catalog.Alias, err error) *MockStore_ListAliases_Call {
+	_c.Call.Return(aliass, err)
+	return _c
+}
+
+func (_c *MockStore_ListAliases_Call) RunAndReturn(run func(context1 context.Context, listAliasesParams catalog.ListAliasesParams) ([]catalog.Alias, error)) *MockStore_ListAliases_Call {
 	_c.Call.Return(run)
 	return _c
 }

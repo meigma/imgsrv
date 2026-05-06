@@ -112,6 +112,30 @@ func TestGetVersionManifestReturnsManifest(t *testing.T) {
 	assert.Equal(t, catalogAttachmentIDFixture().String(), got.Artifacts[0].Attachments[0].ID)
 }
 
+func TestResolveManifestReturnsPublishedManifestForRef(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+	wantManifest := catalogManifestFixture(catalog.VersionStatePublished)
+
+	tc.catalog.EXPECT().
+		ResolveManifest(mock.Anything, catalog.ResolveManifestParams{
+			ImageName: "debian",
+			Version:   "latest",
+		}).
+		Return(wantManifest, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/images/debian/refs/latest", nil)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got manifestResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, "debian", got.Image.Name)
+	assert.Equal(t, "v1.0.0", got.Version.Version)
+	assert.Equal(t, catalog.VersionStatePublished, got.Version.State)
+}
+
 func TestAddArtifactCreatesPrimaryArtifact(t *testing.T) {
 	tc := newCatalogHandlerTestContext(t)
 	wantArtifact := catalogArtifactFixture()
@@ -213,6 +237,96 @@ func TestPublishVersionPublishesDraft(t *testing.T) {
 	assert.Equal(t, catalogPublishedAtFixture().Format(time.RFC3339Nano), *got.PublishedAt)
 }
 
+func TestPutAliasCreatesOrMovesAlias(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+	wantAlias := catalogAliasFixture()
+
+	tc.catalog.EXPECT().
+		PutAlias(mock.Anything, catalog.PutAliasParams{
+			ImageName: "debian",
+			Alias:     "latest",
+			Version:   "v1.0.0",
+		}).
+		Return(wantAlias, nil)
+
+	req := httptest.NewRequest(http.MethodPut, "/v1/images/debian/aliases/latest", strings.NewReader(`{
+		"version": "v1.0.0"
+	}`))
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got aliasResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, catalogAliasIDFixture().String(), got.ID)
+	assert.Equal(t, catalogImageIDFixture().String(), got.ImageID)
+	assert.Equal(t, "latest", got.Alias)
+	assert.Equal(t, catalogVersionIDFixture().String(), got.VersionID)
+	assert.Equal(t, "v1.0.0", got.Version)
+}
+
+func TestListAliasesReturnsAliases(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+
+	tc.catalog.EXPECT().
+		ListAliases(mock.Anything, catalog.ListAliasesParams{ImageName: "debian"}).
+		Return([]catalog.Alias{catalogAliasFixture()}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/images/debian/aliases", nil)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got aliasListResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Len(t, got.Aliases, 1)
+	assert.Equal(t, "latest", got.Aliases[0].Alias)
+	assert.Equal(t, "v1.0.0", got.Aliases[0].Version)
+}
+
+func TestGetAliasReturnsAlias(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+
+	tc.catalog.EXPECT().
+		GetAlias(mock.Anything, catalog.GetAliasParams{
+			ImageName: "debian",
+			Alias:     "latest",
+		}).
+		Return(catalogAliasFixture(), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/images/debian/aliases/latest", nil)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got aliasResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, "latest", got.Alias)
+	assert.Equal(t, "v1.0.0", got.Version)
+}
+
+func TestDeleteAliasDeletesAlias(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+
+	tc.catalog.EXPECT().
+		DeleteAlias(mock.Anything, catalog.DeleteAliasParams{
+			ImageName: "debian",
+			Alias:     "latest",
+		}).
+		Return(nil)
+
+	req := httptest.NewRequest(http.MethodDelete, "/v1/images/debian/aliases/latest", nil)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Empty(t, rec.Body.String())
+}
+
 func TestCatalogHandlersRejectInvalidRequests(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -234,6 +348,13 @@ func TestCatalogHandlersRejectInvalidRequests(t *testing.T) {
 			path:   "/v1/images/debian/versions/v1.0.0/artifacts",
 			body:   `{"primary_blob_digest":"bad"}`,
 			want:   "digest must match",
+		},
+		{
+			name:   "put alias rejects malformed JSON",
+			method: http.MethodPut,
+			path:   "/v1/images/debian/aliases/latest",
+			body:   "{",
+			want:   "invalid JSON request body",
 		},
 		{
 			name:   "add attachment rejects invalid artifact id",
@@ -307,6 +428,7 @@ func TestCatalogHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 		{name: "create image", method: http.MethodPost, path: "/v1/images", body: `{}`},
 		{name: "create version", method: http.MethodPost, path: "/v1/images/debian/versions", body: `{}`},
 		{name: "get manifest", method: http.MethodGet, path: "/v1/images/debian/versions/v1.0.0"},
+		{name: "resolve manifest", method: http.MethodGet, path: "/v1/images/debian/refs/latest"},
 		{
 			name:   "add artifact",
 			method: http.MethodPost,
@@ -321,6 +443,10 @@ func TestCatalogHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 			body: `{}`,
 		},
 		{name: "publish", method: http.MethodPost, path: "/v1/images/debian/versions/v1.0.0/publish"},
+		{name: "put alias", method: http.MethodPut, path: "/v1/images/debian/aliases/latest", body: `{}`},
+		{name: "list aliases", method: http.MethodGet, path: "/v1/images/debian/aliases"},
+		{name: "get alias", method: http.MethodGet, path: "/v1/images/debian/aliases/latest"},
+		{name: "delete alias", method: http.MethodDelete, path: "/v1/images/debian/aliases/latest"},
 	}
 
 	for _, tt := range tests {
@@ -408,6 +534,18 @@ func catalogAttachmentFixture() catalog.Attachment {
 	}
 }
 
+func catalogAliasFixture() catalog.Alias {
+	return catalog.Alias{
+		ID:        catalogAliasIDFixture(),
+		ImageID:   catalogImageIDFixture(),
+		Alias:     "latest",
+		VersionID: catalogVersionIDFixture(),
+		Version:   "v1.0.0",
+		CreatedAt: catalogCreatedAtFixture(),
+		UpdatedAt: catalogUpdatedAtFixture(),
+	}
+}
+
 func catalogManifestFixture(state catalog.VersionState) catalog.Manifest {
 	return catalog.Manifest{
 		Image:   catalogImageFixture(),
@@ -433,6 +571,10 @@ func catalogArtifactIDFixture() uuid.UUID {
 
 func catalogAttachmentIDFixture() uuid.UUID {
 	return uuid.MustParse("dddddddd-eeee-ffff-0000-111111111111")
+}
+
+func catalogAliasIDFixture() uuid.UUID {
+	return uuid.MustParse("eeeeeeee-ffff-0000-1111-222222222222")
 }
 
 func catalogDigestFixture() catalog.Digest {

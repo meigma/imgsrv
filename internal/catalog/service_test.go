@@ -95,6 +95,66 @@ func TestServiceDelegatesManifestReads(t *testing.T) {
 	assert.Equal(t, wantManifest, gotAlias)
 }
 
+func TestServiceDelegatesAliasOperations(t *testing.T) {
+	store := mocks.NewMockStore(t)
+	service := catalog.NewService(catalog.ServiceConfig{Store: store})
+	wantAlias := catalog.Alias{
+		ID:        uuid.MustParse("eeeeeeee-ffff-0000-1111-222222222222"),
+		ImageID:   uuid.MustParse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+		Alias:     "latest",
+		VersionID: uuid.MustParse("bbbbbbbb-cccc-dddd-eeee-ffffffffffff"),
+		Version:   "v1.0.0",
+	}
+
+	store.EXPECT().
+		PutAlias(context.Background(), catalog.PutAliasParams{
+			ImageName: "debian",
+			Alias:     "latest",
+			Version:   "v1.0.0",
+		}).
+		Return(wantAlias, nil)
+	store.EXPECT().
+		ListAliases(context.Background(), catalog.ListAliasesParams{ImageName: "debian"}).
+		Return([]catalog.Alias{wantAlias}, nil)
+	store.EXPECT().
+		GetAlias(context.Background(), catalog.GetAliasParams{
+			ImageName: "debian",
+			Alias:     "latest",
+		}).
+		Return(wantAlias, nil)
+	store.EXPECT().
+		DeleteAlias(context.Background(), catalog.DeleteAliasParams{
+			ImageName: "debian",
+			Alias:     "latest",
+		}).
+		Return(nil)
+
+	put, err := service.PutAlias(context.Background(), catalog.PutAliasParams{
+		ImageName: "debian",
+		Alias:     "latest",
+		Version:   "v1.0.0",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, wantAlias, put)
+
+	list, err := service.ListAliases(context.Background(), catalog.ListAliasesParams{ImageName: "debian"})
+	require.NoError(t, err)
+	assert.Equal(t, []catalog.Alias{wantAlias}, list)
+
+	get, err := service.GetAlias(context.Background(), catalog.GetAliasParams{
+		ImageName: "debian",
+		Alias:     "latest",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, wantAlias, get)
+
+	err = service.DeleteAlias(context.Background(), catalog.DeleteAliasParams{
+		ImageName: "debian",
+		Alias:     "latest",
+	})
+	require.NoError(t, err)
+}
+
 func TestServiceRequiresStore(t *testing.T) {
 	_, err := catalog.NewService(catalog.ServiceConfig{}).CreateImage(
 		context.Background(),

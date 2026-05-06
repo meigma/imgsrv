@@ -53,8 +53,14 @@ type Store interface {
 	// PutAlias creates or moves an alias to a published version.
 	PutAlias(context.Context, PutAliasParams) (Alias, error)
 
+	// ListAliases returns aliases for one image in stable order.
+	ListAliases(context.Context, ListAliasesParams) ([]Alias, error)
+
 	// GetAlias returns an alias by image and alias name.
 	GetAlias(context.Context, GetAliasParams) (Alias, error)
+
+	// DeleteAlias removes an image alias.
+	DeleteAlias(context.Context, DeleteAliasParams) error
 
 	// GetVersionManifest resolves an exact draft or published image version manifest.
 	GetVersionManifest(context.Context, GetVersionManifestParams) (Manifest, error)
@@ -221,6 +227,9 @@ type Alias struct {
 	// VersionID identifies the published target version.
 	VersionID uuid.UUID
 
+	// Version is the published target version string.
+	Version string
+
 	// CreatedAt is when the alias was first created.
 	CreatedAt time.Time
 
@@ -342,6 +351,12 @@ type PutAliasParams struct {
 	Version string
 }
 
+// ListAliasesParams lists aliases for an image.
+type ListAliasesParams struct {
+	// ImageName identifies the image that owns the aliases.
+	ImageName string
+}
+
 // GetAliasParams looks up an image alias.
 type GetAliasParams struct {
 	// ImageName identifies the image that owns the alias.
@@ -350,6 +365,9 @@ type GetAliasParams struct {
 	// Alias is the mutable pointer name.
 	Alias string
 }
+
+// DeleteAliasParams removes an image alias.
+type DeleteAliasParams GetAliasParams
 
 // GetVersionManifestParams resolves an exact draft or published manifest.
 type GetVersionManifestParams struct {

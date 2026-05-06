@@ -17,6 +17,7 @@ import (
 const (
 	testArtifactID   = "33333333-4444-5555-6666-777777777777"
 	testAttachmentID = "44444444-5555-6666-7777-888888888888"
+	testAliasID      = "66666666-7777-8888-9999-aaaaaaaaaaaa"
 	testDigest       = Digest("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 	testImageID      = "22222222-3333-4444-5555-666666666666"
 	testUploadID     = "11111111-2222-3333-4444-555555555555"
@@ -282,6 +283,34 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 		assert.Zero(t, r.ContentLength)
 		writeJSON(t, w, http.StatusOK, versionFixture(ImageVersionStatePublished))
 	})
+	mux.HandleFunc("/api/v1/images/debian/aliases", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodGet)
+		writeJSON(t, w, http.StatusOK, aliasListResponse{Aliases: []Alias{aliasFixture()}})
+	})
+	mux.HandleFunc("/api/v1/images/debian/aliases/latest", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, r.Method)
+
+		switch r.Method {
+		case http.MethodPut:
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			var got PutAliasRequest
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+				return
+			}
+			assert.Equal(t, "v1.0.0", got.Version)
+			writeJSON(t, w, http.StatusOK, aliasFixture())
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, aliasFixture())
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected alias method %s", r.Method)
+		}
+	})
+	mux.HandleFunc("/api/v1/images/debian/refs/latest", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodGet)
+		writeJSON(t, w, http.StatusOK, manifestFixture(ImageVersionStatePublished))
+	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
@@ -340,6 +369,26 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	published, err := catalog.PublishVersion(ctx, image.Name, version.Version)
 	require.NoError(t, err)
 	assert.Equal(t, ImageVersionStatePublished, published.State)
+
+	alias, err := catalog.PutAlias(ctx, image.Name, "latest", PutAliasRequest{Version: version.Version})
+	require.NoError(t, err)
+	assert.Equal(t, "latest", alias.Alias)
+	assert.Equal(t, version.Version, alias.Version)
+
+	aliases, err := catalog.ListAliases(ctx, image.Name)
+	require.NoError(t, err)
+	require.Len(t, aliases, 1)
+	assert.Equal(t, alias.ID, aliases[0].ID)
+
+	gotAlias, err := catalog.GetAlias(ctx, image.Name, alias.Alias)
+	require.NoError(t, err)
+	assert.Equal(t, alias.ID, gotAlias.ID)
+
+	resolved, err := catalog.ResolveManifest(ctx, image.Name, alias.Alias)
+	require.NoError(t, err)
+	assert.Equal(t, ImageVersionStatePublished, resolved.Version.State)
+
+	require.NoError(t, catalog.DeleteAlias(ctx, image.Name, alias.Alias))
 }
 
 func TestClientBlobFlowBuildsRequests(t *testing.T) {
@@ -600,6 +649,18 @@ func attachmentFixture() Attachment {
 		BlobSizeBytes: 64,
 		CreatedAt:     "2026-05-05T12:00:00Z",
 		UpdatedAt:     "2026-05-05T12:00:00Z",
+	}
+}
+
+func aliasFixture() Alias {
+	return Alias{
+		ID:        testAliasID,
+		ImageID:   testImageID,
+		Alias:     "latest",
+		VersionID: testVersionID,
+		Version:   "v1.0.0",
+		CreatedAt: "2026-05-05T12:00:00Z",
+		UpdatedAt: "2026-05-05T12:00:00Z",
 	}
 }
 

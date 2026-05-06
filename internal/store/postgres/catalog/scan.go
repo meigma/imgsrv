@@ -151,6 +151,7 @@ func scanAlias(row rowScanner) (domain.Alias, error) {
 		&alias.ImageID,
 		&alias.Alias,
 		&alias.VersionID,
+		&alias.Version,
 		&alias.CreatedAt,
 		&alias.UpdatedAt,
 	)

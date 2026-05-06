@@ -478,6 +478,117 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /v1/images/{name}/aliases:
+    get:
+      operationId: listAliases
+      summary: List image aliases.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+      responses:
+        '200':
+          description: Image aliases in stable order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AliasList'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/images/{name}/aliases/{alias}:
+    put:
+      operationId: putAlias
+      summary: Create or move an image alias to a published version.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+        - $ref: '#/components/parameters/AliasName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutAliasRequest'
+      responses:
+        '200':
+          description: Image alias created or moved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alias'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    get:
+      operationId: getAlias
+      summary: Get one image alias.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+        - $ref: '#/components/parameters/AliasName'
+      responses:
+        '200':
+          description: Image alias.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alias'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteAlias
+      summary: Delete one image alias.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+        - $ref: '#/components/parameters/AliasName'
+      responses:
+        '204':
+          description: Image alias deleted.
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/images/{name}/refs/{ref}:
+    get:
+      operationId: resolveManifest
+      summary: Resolve a published manifest by exact version or alias.
+      parameters:
+        - $ref: '#/components/parameters/ImageName'
+        - $ref: '#/components/parameters/ImageRef'
+      responses:
+        '200':
+          description: Published image version manifest.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Manifest'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
 components:
   parameters:
     UploadID:
@@ -501,6 +612,20 @@ components:
         pattern: '^[a-z0-9][a-z0-9._-]{0,127}$'
     ImageVersion:
       name: version
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$'
+    AliasName:
+      name: alias
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+    ImageRef:
+      name: ref
       in: path
       required: true
       schema:
@@ -665,6 +790,15 @@ components:
           type: string
       additionalProperties: false
     CreateDraftVersionRequest:
+      type: object
+      required:
+        - version
+      properties:
+        version:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$'
+      additionalProperties: false
+    PutAliasRequest:
       type: object
       required:
         - version
@@ -856,6 +990,49 @@ components:
         updated_at:
           type: string
           format: date-time
+      additionalProperties: false
+    Alias:
+      type: object
+      required:
+        - id
+        - image_id
+        - alias
+        - version_id
+        - version
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        image_id:
+          type: string
+          format: uuid
+        alias:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+        version_id:
+          type: string
+          format: uuid
+        version:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AliasList:
+      type: object
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alias'
       additionalProperties: false
     Manifest:
       type: object

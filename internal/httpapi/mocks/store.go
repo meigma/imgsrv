@@ -662,6 +662,129 @@ func (_c *MockCatalogService_CreateImage_Call) RunAndReturn(run func(context1 co
 	return _c
 }
 
+// DeleteAlias provides a mock function for the type MockCatalogService
+func (_mock *MockCatalogService) DeleteAlias(context1 context.Context, deleteAliasParams catalog.DeleteAliasParams) error {
+	ret := _mock.Called(context1, deleteAliasParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteAlias")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.DeleteAliasParams) error); ok {
+		r0 = returnFunc(context1, deleteAliasParams)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockCatalogService_DeleteAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteAlias'
+type MockCatalogService_DeleteAlias_Call struct {
+	*mock.Call
+}
+
+// DeleteAlias is a helper method to define mock.On call
+//   - context1 context.Context
+//   - deleteAliasParams catalog.DeleteAliasParams
+func (_e *MockCatalogService_Expecter) DeleteAlias(context1 interface{}, deleteAliasParams interface{}) *MockCatalogService_DeleteAlias_Call {
+	return &MockCatalogService_DeleteAlias_Call{Call: _e.mock.On("DeleteAlias", context1, deleteAliasParams)}
+}
+
+func (_c *MockCatalogService_DeleteAlias_Call) Run(run func(context1 context.Context, deleteAliasParams catalog.DeleteAliasParams)) *MockCatalogService_DeleteAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.DeleteAliasParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.DeleteAliasParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCatalogService_DeleteAlias_Call) Return(err error) *MockCatalogService_DeleteAlias_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockCatalogService_DeleteAlias_Call) RunAndReturn(run func(context1 context.Context, deleteAliasParams catalog.DeleteAliasParams) error) *MockCatalogService_DeleteAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetAlias provides a mock function for the type MockCatalogService
+func (_mock *MockCatalogService) GetAlias(context1 context.Context, getAliasParams catalog.GetAliasParams) (catalog.Alias, error) {
+	ret := _mock.Called(context1, getAliasParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAlias")
+	}
+
+	var r0 catalog.Alias
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.GetAliasParams) (catalog.Alias, error)); ok {
+		return returnFunc(context1, getAliasParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.GetAliasParams) catalog.Alias); ok {
+		r0 = returnFunc(context1, getAliasParams)
+	} else {
+		r0 = ret.Get(0).(catalog.Alias)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.GetAliasParams) error); ok {
+		r1 = returnFunc(context1, getAliasParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockCatalogService_GetAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAlias'
+type MockCatalogService_GetAlias_Call struct {
+	*mock.Call
+}
+
+// GetAlias is a helper method to define mock.On call
+//   - context1 context.Context
+//   - getAliasParams catalog.GetAliasParams
+func (_e *MockCatalogService_Expecter) GetAlias(context1 interface{}, getAliasParams interface{}) *MockCatalogService_GetAlias_Call {
+	return &MockCatalogService_GetAlias_Call{Call: _e.mock.On("GetAlias", context1, getAliasParams)}
+}
+
+func (_c *MockCatalogService_GetAlias_Call) Run(run func(context1 context.Context, getAliasParams catalog.GetAliasParams)) *MockCatalogService_GetAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.GetAliasParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.GetAliasParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCatalogService_GetAlias_Call) Return(alias catalog.Alias, err error) *MockCatalogService_GetAlias_Call {
+	_c.Call.Return(alias, err)
+	return _c
+}
+
+func (_c *MockCatalogService_GetAlias_Call) RunAndReturn(run func(context1 context.Context, getAliasParams catalog.GetAliasParams) (catalog.Alias, error)) *MockCatalogService_GetAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetVersionManifest provides a mock function for the type MockCatalogService
 func (_mock *MockCatalogService) GetVersionManifest(context1 context.Context, getVersionManifestParams catalog.GetVersionManifestParams) (catalog.Manifest, error) {
 	ret := _mock.Called(context1, getVersionManifestParams)
@@ -728,6 +851,74 @@ func (_c *MockCatalogService_GetVersionManifest_Call) RunAndReturn(run func(cont
 	return _c
 }
 
+// ListAliases provides a mock function for the type MockCatalogService
+func (_mock *MockCatalogService) ListAliases(context1 context.Context, listAliasesParams catalog.ListAliasesParams) ([]catalog.Alias, error) {
+	ret := _mock.Called(context1, listAliasesParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListAliases")
+	}
+
+	var r0 []catalog.Alias
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListAliasesParams) ([]catalog.Alias, error)); ok {
+		return returnFunc(context1, listAliasesParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListAliasesParams) []catalog.Alias); ok {
+		r0 = returnFunc(context1, listAliasesParams)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]catalog.Alias)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.ListAliasesParams) error); ok {
+		r1 = returnFunc(context1, listAliasesParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockCatalogService_ListAliases_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAliases'
+type MockCatalogService_ListAliases_Call struct {
+	*mock.Call
+}
+
+// ListAliases is a helper method to define mock.On call
+//   - context1 context.Context
+//   - listAliasesParams catalog.ListAliasesParams
+func (_e *MockCatalogService_Expecter) ListAliases(context1 interface{}, listAliasesParams interface{}) *MockCatalogService_ListAliases_Call {
+	return &MockCatalogService_ListAliases_Call{Call: _e.mock.On("ListAliases", context1, listAliasesParams)}
+}
+
+func (_c *MockCatalogService_ListAliases_Call) Run(run func(context1 context.Context, listAliasesParams catalog.ListAliasesParams)) *MockCatalogService_ListAliases_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.ListAliasesParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.ListAliasesParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCatalogService_ListAliases_Call) Return(aliass []catalog.Alias, err error) *MockCatalogService_ListAliases_Call {
+	_c.Call.Return(aliass, err)
+	return _c
+}
+
+func (_c *MockCatalogService_ListAliases_Call) RunAndReturn(run func(context1 context.Context, listAliasesParams catalog.ListAliasesParams) ([]catalog.Alias, error)) *MockCatalogService_ListAliases_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PublishVersion provides a mock function for the type MockCatalogService
 func (_mock *MockCatalogService) PublishVersion(context1 context.Context, publishVersionParams catalog.PublishVersionParams) (catalog.Version, error) {
 	ret := _mock.Called(context1, publishVersionParams)
@@ -790,6 +981,72 @@ func (_c *MockCatalogService_PublishVersion_Call) Return(version catalog.Version
 }
 
 func (_c *MockCatalogService_PublishVersion_Call) RunAndReturn(run func(context1 context.Context, publishVersionParams catalog.PublishVersionParams) (catalog.Version, error)) *MockCatalogService_PublishVersion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PutAlias provides a mock function for the type MockCatalogService
+func (_mock *MockCatalogService) PutAlias(context1 context.Context, putAliasParams catalog.PutAliasParams) (catalog.Alias, error) {
+	ret := _mock.Called(context1, putAliasParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PutAlias")
+	}
+
+	var r0 catalog.Alias
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.PutAliasParams) (catalog.Alias, error)); ok {
+		return returnFunc(context1, putAliasParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.PutAliasParams) catalog.Alias); ok {
+		r0 = returnFunc(context1, putAliasParams)
+	} else {
+		r0 = ret.Get(0).(catalog.Alias)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.PutAliasParams) error); ok {
+		r1 = returnFunc(context1, putAliasParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockCatalogService_PutAlias_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PutAlias'
+type MockCatalogService_PutAlias_Call struct {
+	*mock.Call
+}
+
+// PutAlias is a helper method to define mock.On call
+//   - context1 context.Context
+//   - putAliasParams catalog.PutAliasParams
+func (_e *MockCatalogService_Expecter) PutAlias(context1 interface{}, putAliasParams interface{}) *MockCatalogService_PutAlias_Call {
+	return &MockCatalogService_PutAlias_Call{Call: _e.mock.On("PutAlias", context1, putAliasParams)}
+}
+
+func (_c *MockCatalogService_PutAlias_Call) Run(run func(context1 context.Context, putAliasParams catalog.PutAliasParams)) *MockCatalogService_PutAlias_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.PutAliasParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.PutAliasParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCatalogService_PutAlias_Call) Return(alias catalog.Alias, err error) *MockCatalogService_PutAlias_Call {
+	_c.Call.Return(alias, err)
+	return _c
+}
+
+func (_c *MockCatalogService_PutAlias_Call) RunAndReturn(run func(context1 context.Context, putAliasParams catalog.PutAliasParams) (catalog.Alias, error)) *MockCatalogService_PutAlias_Call {
 	_c.Call.Return(run)
 	return _c
 }
