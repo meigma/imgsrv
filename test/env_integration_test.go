@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"testing"
 	"time"
 
@@ -48,6 +49,33 @@ func TestEnvWithCASPromotionPromotesUpload(t *testing.T) {
 
 	assert.Equal(t, completed.ID, ready.ID)
 	assert.Equal(t, imgsrv.UploadStateReady, ready.State)
+}
+
+func TestEnvWithCASPromotionReadsBlobThroughPublicClient(t *testing.T) {
+	env := imgsrvtest.Start(t, imgsrvtest.WithCASPromotion())
+	client := env.Client(t)
+	ctx := t.Context()
+	payload := []byte("public imgsrv blob download payload")
+
+	blob := uploadReadyBlob(ctx, t, client, payload)
+	head, err := client.Blobs().HeadBlob(ctx, blob.Digest)
+	require.NoError(t, err)
+	assert.Equal(t, blob.Digest, head.Digest)
+	assert.Equal(t, blob.SizeBytes, head.SizeBytes)
+	assert.Equal(t, "bytes", head.AcceptRanges)
+
+	suffixRange, err := imgsrv.BlobRangeSuffix(4)
+	require.NoError(t, err)
+	open, err := client.Blobs().OpenBlob(ctx, blob.Digest, imgsrv.OpenBlobOptions{Range: &suffixRange})
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, open.Body.Close())
+	}()
+
+	body, err := io.ReadAll(open.Body)
+	require.NoError(t, err)
+	assert.Equal(t, string(payload[len(payload)-4:]), string(body))
+	assert.Equal(t, blob.SizeBytes, open.Metadata.SizeBytes)
 }
 
 func TestEnvWithCASPromotionPublishesReleaseFlow(t *testing.T) {

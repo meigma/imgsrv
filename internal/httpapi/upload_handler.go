@@ -110,7 +110,7 @@ func (a *api) beginUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := service.BeginUpload(r.Context(), uploads.BeginUploadParams{
+	result, err := service.BeginUpload(r.Context(), uploads.BeginUploadParams{
 		ExpectedDigest:    digest,
 		ExpectedSizeBytes: request.ExpectedSizeBytes,
 		MediaTypeHint:     request.MediaTypeHint,
@@ -122,7 +122,12 @@ func (a *api) beginUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, newUploadSessionResponse(session))
+	status := http.StatusCreated
+	if !result.Created {
+		status = http.StatusOK
+	}
+
+	writeJSON(w, status, newUploadSessionResponse(result.Session))
 }
 
 // putUploadPart handles PUT /v1/uploads/{upload_id}/parts/{part_number} and stores or replaces one part.

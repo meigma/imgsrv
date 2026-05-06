@@ -7,8 +7,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -100,6 +103,9 @@ func TestUploadFlowStagesCompletedObject(t *testing.T) {
 	assert.Equal(t, payload, casObject.Body)
 	assert.Equal(t, int64(len(payload)), casObject.SizeBytes)
 
+	_, err = env.ObjectStore().OpenObject(ctx, objectstore.OpenObjectParams{Key: uploads.StagingKey(uploadID)})
+	require.ErrorIs(t, err, objectstore.ErrNotFound)
+
 	reader, err := casService.OpenBlob(ctx, cas.OpenBlobParams{Digest: digest})
 	require.NoError(t, err)
 	defer func() {
@@ -108,6 +114,95 @@ func TestUploadFlowStagesCompletedObject(t *testing.T) {
 	opened, err := io.ReadAll(reader.Body)
 	require.NoError(t, err)
 	assert.Equal(t, payload, opened)
+}
+
+func TestUploadFlowSkipsTrustedDigestAndLeavesNoQueuedJob(t *testing.T) {
+	env := harness.Start(t)
+	ctx := t.Context()
+	client := newClient(t, env)
+	payload := []byte("imgsrv integration trusted digest payload")
+	blob := uploadBlobToCAS(ctx, t, env, client, payload)
+
+	skippedByClient, err := client.Uploads().BeginUpload(ctx, imgsrv.BeginUploadRequest{
+		ExpectedDigest:    blob.Digest,
+		ExpectedSizeBytes: blob.SizeBytes,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, imgsrv.UploadStateReady, skippedByClient.State)
+	assert.Equal(t, blob.Digest, skippedByClient.ExpectedDigest)
+	assert.Equal(t, blob.SizeBytes, skippedByClient.ExpectedSizeBytes)
+
+	body := bytes.NewBufferString(`{"expected_digest":"` + blob.Digest.String() + `","expected_size_bytes":` + strconv.FormatInt(blob.SizeBytes, 10) + `}`)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, env.URL("/v1/uploads"), body)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := env.HTTPClient().Do(req)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var skipped imgsrv.UploadSession
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&skipped))
+	assert.Equal(t, imgsrv.UploadStateReady, skipped.State)
+	assert.Equal(t, blob.Digest, skipped.ExpectedDigest)
+	assert.Equal(t, blob.SizeBytes, skipped.ExpectedSizeBytes)
+
+	status, err := client.Uploads().GetUpload(ctx, skippedByClient.ID.String())
+	require.NoError(t, err)
+	assert.Equal(t, skippedByClient.ID, status.ID)
+	assert.Equal(t, imgsrv.UploadStateReady, status.State)
+
+	_, err = env.Store().Uploads().ClaimIngestJob(ctx, uploads.ClaimIngestJobParams{WorkerID: "skip-check"})
+	require.ErrorIs(t, err, uploads.ErrNotFound)
+}
+
+func TestBlobRouteSupportsHeadAndRanges(t *testing.T) {
+	env := harness.Start(t)
+	ctx := t.Context()
+	client := newClient(t, env)
+	payload := []byte("imgsrv integration ranged blob payload")
+	blob := uploadBlobToCAS(ctx, t, env, client, payload)
+	blobURL := env.URL("/v1/blobs/" + url.PathEscape(blob.Digest.String()))
+
+	headReq, err := http.NewRequestWithContext(ctx, http.MethodHead, blobURL, nil)
+	require.NoError(t, err)
+	headResp, err := env.HTTPClient().Do(headReq)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, headResp.Body.Close())
+	}()
+	assert.Equal(t, http.StatusOK, headResp.StatusCode)
+	assert.Equal(t, "bytes", headResp.Header.Get("Accept-Ranges"))
+	assert.Equal(t, strconv.FormatInt(blob.SizeBytes, 10), headResp.Header.Get("Content-Length"))
+
+	rangeReq, err := http.NewRequestWithContext(ctx, http.MethodGet, blobURL, nil)
+	require.NoError(t, err)
+	rangeReq.Header.Set("Range", "bytes=-4")
+	rangeResp, err := env.HTTPClient().Do(rangeReq)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, rangeResp.Body.Close())
+	}()
+	rangeBody, err := io.ReadAll(rangeResp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusPartialContent, rangeResp.StatusCode)
+	assert.Equal(t, "bytes "+strconv.FormatInt(blob.SizeBytes-4, 10)+"-"+strconv.FormatInt(blob.SizeBytes-1, 10)+"/"+strconv.FormatInt(blob.SizeBytes, 10), rangeResp.Header.Get("Content-Range"))
+	assert.Equal(t, string(payload[len(payload)-4:]), string(rangeBody))
+
+	suffixRange, err := imgsrv.BlobRangeSuffix(4)
+	require.NoError(t, err)
+	open, err := client.Blobs().OpenBlob(ctx, blob.Digest, imgsrv.OpenBlobOptions{Range: &suffixRange})
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, open.Body.Close())
+	}()
+	openedBody, err := io.ReadAll(open.Body)
+	require.NoError(t, err)
+	assert.Equal(t, string(payload[len(payload)-4:]), string(openedBody))
+	assert.Equal(t, blob.SizeBytes, open.Metadata.SizeBytes)
 }
 
 func TestUploadFlowAbortsMutableUpload(t *testing.T) {

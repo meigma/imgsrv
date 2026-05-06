@@ -40,6 +40,9 @@ type Dependencies struct {
 	// Catalog coordinates client-facing image catalog operations.
 	Catalog httpapi.CatalogService
 
+	// Blobs coordinates client-facing raw CAS blob reads.
+	Blobs httpapi.BlobService
+
 	// BackgroundJobs run process-local background work until shutdown.
 	BackgroundJobs []BackgroundJob
 }
@@ -104,6 +107,7 @@ func Run(ctx context.Context, cfg Config) error {
 		Logger:         logger,
 		Uploads:        uploadDependency.service,
 		Catalog:        newCatalogService(store),
+		Blobs:          uploadDependency.blobs,
 		BackgroundJobs: backgroundJobs,
 	})
 	if err != nil {
@@ -148,6 +152,7 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 		Readiness: deps.Readiness,
 		Uploads:   deps.Uploads,
 		Catalog:   deps.Catalog,
+		Blobs:     deps.Blobs,
 		UploadTTL: cfg.UploadTTL,
 	})
 
@@ -187,6 +192,7 @@ func newCatalogService(store *postgres.Store) httpapi.CatalogService {
 // uploadServiceDependency bundles the upload service and the underlying object store it writes to.
 type uploadServiceDependency struct {
 	service httpapi.UploadService
+	blobs   httpapi.BlobService
 	objects objectstore.Store
 }
 
@@ -216,11 +222,40 @@ func newUploadService(cfg Config, store *postgres.Store) (uploadServiceDependenc
 
 	return uploadServiceDependency{
 		service: uploads.NewService(uploads.ServiceConfig{
-			Store:   store.Uploads(),
-			Objects: objects,
+			Store:        store.Uploads(),
+			Objects:      objects,
+			TrustedBlobs: trustedBlobLookup(store),
 		}),
+		blobs:   newCASService(store, objects),
 		objects: objects,
 	}, nil
+}
+
+// trustedBlobLookup returns the configured upload trusted-blob lookup when the shared upload
+// store implements it.
+func trustedBlobLookup(store *postgres.Store) uploads.TrustedBlobLookup {
+	if store == nil {
+		return nil
+	}
+
+	lookup, ok := store.Uploads().(uploads.TrustedBlobLookup)
+	if !ok {
+		return nil
+	}
+
+	return lookup
+}
+
+// newCASService builds the CAS blob service when both durable state and object storage are configured.
+func newCASService(store *postgres.Store, objects objectstore.Store) *cas.Service {
+	if store == nil || objects == nil {
+		return nil
+	}
+
+	return cas.NewService(cas.ServiceConfig{
+		Store:   store.CAS(),
+		Objects: objects,
+	})
 }
 
 // Run listens on the configured address and serves HTTP until the context ends.
@@ -402,10 +437,7 @@ func newCASPromotionJobs(
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 
-	casService := cas.NewService(cas.ServiceConfig{
-		Store:   store.CAS(),
-		Objects: objects,
-	})
+	casService := newCASService(store, objects)
 
 	return []BackgroundJob{jobs.New(jobs.Config{
 		Handler: promote.New(promote.Config{

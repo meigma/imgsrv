@@ -42,6 +42,15 @@ type serviceTestContext struct {
 	service *uploads.Service
 }
 
+type trustedBlobLookupFunc func(context.Context, uploads.GetTrustedBlobParams) (uploads.TrustedBlob, error)
+
+func (f trustedBlobLookupFunc) GetTrustedBlob(
+	ctx context.Context,
+	params uploads.GetTrustedBlobParams,
+) (uploads.TrustedBlob, error) {
+	return f(ctx, params)
+}
+
 func newServiceTestContext(t *testing.T) *serviceTestContext {
 	t.Helper()
 
@@ -91,9 +100,10 @@ func TestServiceBeginUploadCreatesObjectstoreUploadThenSession(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.NotEqual(t, uuid.Nil, got.ID)
-	assert.Equal(t, uploads.StagingKey(got.ID), got.StagingKey)
-	assert.Equal(t, testStorageUploadID, got.StorageUploadID)
+	assert.True(t, got.Created)
+	assert.NotEqual(t, uuid.Nil, got.Session.ID)
+	assert.Equal(t, uploads.StagingKey(got.Session.ID), got.Session.StagingKey)
+	assert.Equal(t, testStorageUploadID, got.Session.StorageUploadID)
 }
 
 func TestServiceBeginUploadAbortsObjectstoreUploadWhenSessionCreateFails(t *testing.T) {
@@ -174,6 +184,76 @@ func TestServiceBeginUploadRejectsMissingDependencies(t *testing.T) {
 	require.Error(t, err)
 	require.NotErrorIs(t, err, uploads.ErrInvalid)
 	assert.Contains(t, err.Error(), "object store")
+	assert.Empty(t, got)
+}
+
+func TestServiceBeginUploadSkipsMultipartWhenTrustedBlobAlreadyExists(t *testing.T) {
+	tc := newServiceTestContext(t)
+	ctx := context.Background()
+	lookup := trustedBlobLookupFunc(
+		func(_ context.Context, params uploads.GetTrustedBlobParams) (uploads.TrustedBlob, error) {
+			assert.Equal(t, digestFixture(), params.Digest)
+			return uploads.TrustedBlob{
+				Digest:    params.Digest,
+				SizeBytes: 12,
+			}, nil
+		},
+	)
+	tc.service = uploads.NewService(uploads.ServiceConfig{
+		Store:        tc.store,
+		Objects:      tc.objects,
+		TrustedBlobs: lookup,
+		Now:          nowFixture,
+	})
+
+	tc.store.EXPECT().
+		CreateReadySession(mock.Anything, mock.MatchedBy(func(params uploads.CreateReadySessionParams) bool {
+			return params.ID != uuid.Nil &&
+				params.ExpectedDigest == digestFixture() &&
+				params.ExpectedSizeBytes == 12 &&
+				params.ExpiresAt.Equal(expiresFixture())
+		})).
+		RunAndReturn(func(_ context.Context, params uploads.CreateReadySessionParams) (uploads.Session, error) {
+			return uploadSession(params.ID, uploads.SessionStateReady, params.ExpectedSizeBytes), nil
+		})
+
+	got, err := tc.service.BeginUpload(ctx, uploads.BeginUploadParams{
+		ExpectedDigest:    digestFixture(),
+		ExpectedSizeBytes: 12,
+		ExpiresAt:         expiresFixture(),
+	})
+
+	require.NoError(t, err)
+	assert.False(t, got.Created)
+	assert.Equal(t, uploads.SessionStateReady, got.Session.State)
+}
+
+func TestServiceBeginUploadRejectsTrustedBlobSizeMismatch(t *testing.T) {
+	tc := newServiceTestContext(t)
+	ctx := context.Background()
+	lookup := trustedBlobLookupFunc(
+		func(_ context.Context, params uploads.GetTrustedBlobParams) (uploads.TrustedBlob, error) {
+			assert.Equal(t, digestFixture(), params.Digest)
+			return uploads.TrustedBlob{
+				Digest:    params.Digest,
+				SizeBytes: 10,
+			}, nil
+		},
+	)
+	tc.service = uploads.NewService(uploads.ServiceConfig{
+		Store:        tc.store,
+		Objects:      tc.objects,
+		TrustedBlobs: lookup,
+		Now:          nowFixture,
+	})
+
+	got, err := tc.service.BeginUpload(ctx, uploads.BeginUploadParams{
+		ExpectedDigest:    digestFixture(),
+		ExpectedSizeBytes: 12,
+		ExpiresAt:         expiresFixture(),
+	})
+
+	require.ErrorIs(t, err, uploads.ErrFailedPrecondition)
 	assert.Empty(t, got)
 }
 

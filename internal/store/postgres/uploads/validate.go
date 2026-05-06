@@ -36,9 +36,39 @@ func validateCreateSessionParams(params domain.CreateSessionParams) error {
 	return nil
 }
 
+// validateCreateReadySessionParams checks that params describe a well-formed
+// terminal ready upload session before it is persisted.
+func validateCreateReadySessionParams(params domain.CreateReadySessionParams) error {
+	if err := validateUploadID(params.ID); err != nil {
+		return err
+	}
+	if err := domain.ValidateDigest(params.ExpectedDigest); err != nil {
+		return err
+	}
+	if err := domain.ValidateNonNegativeSize("expected size", params.ExpectedSizeBytes); err != nil {
+		return err
+	}
+	if err := domain.ValidateOptionalText("media type hint", params.MediaTypeHint); err != nil {
+		return err
+	}
+	if err := domain.ValidateOptionalText("filename hint", params.FilenameHint); err != nil {
+		return err
+	}
+	if params.ExpiresAt.IsZero() {
+		return fmt.Errorf("%w: expires at is required", domain.ErrInvalid)
+	}
+
+	return nil
+}
+
 // validateGetSessionParams checks that params identify an upload session.
 func validateGetSessionParams(params domain.GetSessionParams) error {
 	return validateUploadID(params.ID)
+}
+
+// validateGetTrustedBlobParams checks that params identify a trusted CAS blob.
+func validateGetTrustedBlobParams(params domain.GetTrustedBlobParams) error {
+	return domain.ValidateDigest(params.Digest)
 }
 
 // validatePutPartParams checks that params describe a well-formed multipart

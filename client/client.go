@@ -6,6 +6,9 @@ package client
 // Code that needs a mockable dependency should prefer narrow operation-group
 // interfaces such as UploadsClient instead of depending on Client directly.
 type Client struct {
+	// blobs holds the HTTP-backed CAS blob operation group.
+	blobs *HTTPBlobsClient
+
 	// catalog holds the HTTP-backed catalog operation group.
 	catalog *HTTPCatalogClient
 
@@ -21,9 +24,19 @@ func New(options Options) (*Client, error) {
 	}
 
 	return &Client{
+		blobs:   newHTTPBlobsClient(transport),
 		catalog: newHTTPCatalogClient(transport),
 		uploads: newHTTPUploadsClient(transport),
 	}, nil
+}
+
+// Blobs returns raw CAS blob API operations.
+func (client *Client) Blobs() BlobsClient {
+	if client == nil {
+		return nil
+	}
+
+	return client.blobs
 }
 
 // Catalog returns image catalog API operations.

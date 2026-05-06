@@ -249,7 +249,7 @@ func (client *HTTPCatalogClient) GetVersionManifest(
 ) (Manifest, error) {
 	var manifest Manifest
 	path := versionPath(imageName, version)
-	err := client.transport.do(ctx, http.MethodGet, path, nil, 0, nil, http.StatusOK, &manifest)
+	err := client.transport.do(ctx, http.MethodGet, path, nil, 0, nil, &manifest)
 
 	return manifest, err
 }
@@ -291,7 +291,7 @@ func (client *HTTPCatalogClient) PublishVersion(
 ) (ImageVersion, error) {
 	var published ImageVersion
 	path := versionPath(imageName, version) + "/publish"
-	err := client.transport.do(ctx, http.MethodPost, path, nil, 0, nil, http.StatusOK, &published)
+	err := client.transport.do(ctx, http.MethodPost, path, nil, 0, nil, &published)
 
 	return published, err
 }

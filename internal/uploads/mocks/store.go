@@ -236,6 +236,72 @@ func (_c *MockStore_CompleteSession_Call) RunAndReturn(run func(context1 context
 	return _c
 }
 
+// CreateReadySession provides a mock function for the type MockStore
+func (_mock *MockStore) CreateReadySession(context1 context.Context, createReadySessionParams uploads.CreateReadySessionParams) (uploads.Session, error) {
+	ret := _mock.Called(context1, createReadySessionParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CreateReadySession")
+	}
+
+	var r0 uploads.Session
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uploads.CreateReadySessionParams) (uploads.Session, error)); ok {
+		return returnFunc(context1, createReadySessionParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uploads.CreateReadySessionParams) uploads.Session); ok {
+		r0 = returnFunc(context1, createReadySessionParams)
+	} else {
+		r0 = ret.Get(0).(uploads.Session)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uploads.CreateReadySessionParams) error); ok {
+		r1 = returnFunc(context1, createReadySessionParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockStore_CreateReadySession_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateReadySession'
+type MockStore_CreateReadySession_Call struct {
+	*mock.Call
+}
+
+// CreateReadySession is a helper method to define mock.On call
+//   - context1 context.Context
+//   - createReadySessionParams uploads.CreateReadySessionParams
+func (_e *MockStore_Expecter) CreateReadySession(context1 interface{}, createReadySessionParams interface{}) *MockStore_CreateReadySession_Call {
+	return &MockStore_CreateReadySession_Call{Call: _e.mock.On("CreateReadySession", context1, createReadySessionParams)}
+}
+
+func (_c *MockStore_CreateReadySession_Call) Run(run func(context1 context.Context, createReadySessionParams uploads.CreateReadySessionParams)) *MockStore_CreateReadySession_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uploads.CreateReadySessionParams
+		if args[1] != nil {
+			arg1 = args[1].(uploads.CreateReadySessionParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_CreateReadySession_Call) Return(session uploads.Session, err error) *MockStore_CreateReadySession_Call {
+	_c.Call.Return(session, err)
+	return _c
+}
+
+func (_c *MockStore_CreateReadySession_Call) RunAndReturn(run func(context1 context.Context, createReadySessionParams uploads.CreateReadySessionParams) (uploads.Session, error)) *MockStore_CreateReadySession_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateSession provides a mock function for the type MockStore
 func (_mock *MockStore) CreateSession(context1 context.Context, createSessionParams uploads.CreateSessionParams) (uploads.Session, error) {
 	ret := _mock.Called(context1, createSessionParams)

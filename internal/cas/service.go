@@ -20,6 +20,9 @@ import (
 // storageKeyPrefix is the object-store key prefix shared by every CAS blob.
 const storageKeyPrefix = "cas/sha256/"
 
+// stagingCleanupTimeout bounds best-effort deletion of staging objects after a terminal ingest outcome.
+const stagingCleanupTimeout = 5 * time.Second
+
 // Error identifies a category of CAS failure.
 type Error string
 
@@ -174,6 +177,19 @@ func StorageKey(digest uploads.Digest) string {
 	return storageKeyPrefix + raw[:2] + "/" + raw[2:4] + "/" + raw
 }
 
+// GetBlob returns trusted CAS blob metadata by digest.
+func (service *Service) GetBlob(ctx context.Context, params GetBlobParams) (Blob, error) {
+	store, _, depErr := service.dependencies()
+	if depErr != nil {
+		return Blob{}, depErr
+	}
+	if validationErr := params.Validate(); validationErr != nil {
+		return Blob{}, validationErr
+	}
+
+	return store.GetBlob(ctx, params)
+}
+
 // CommitStagedUpload verifies staged bytes and commits them into CAS.
 func (service *Service) CommitStagedUpload(
 	ctx context.Context,
@@ -190,7 +206,7 @@ func (service *Service) CommitStagedUpload(
 	reader, err := objects.OpenObject(ctx, objectstore.OpenObjectParams{Key: params.StagingKey})
 	if err != nil {
 		if errors.Is(err, objectstore.ErrNotFound) {
-			return failCommit(ctx, store, params.JobID, "staged object is missing", err)
+			return failCommit(ctx, store, objects, params.JobID, params.StagingKey, "staged object is missing", err)
 		}
 
 		return CommitStagedUploadResult{}, err
@@ -204,7 +220,9 @@ func (service *Service) CommitStagedUpload(
 		return failCommit(
 			ctx,
 			store,
+			objects,
 			params.JobID,
+			params.StagingKey,
 			fmt.Sprintf("staged object is %d bytes, expected %d bytes", verified.sizeBytes, params.ExpectedSizeBytes),
 			nil,
 		)
@@ -213,7 +231,9 @@ func (service *Service) CommitStagedUpload(
 		return failCommit(
 			ctx,
 			store,
+			objects,
 			params.JobID,
+			params.StagingKey,
 			fmt.Sprintf("staged object digest is %s, expected %s", verified.digest, params.ExpectedDigest),
 			nil,
 		)
@@ -229,13 +249,13 @@ func (service *Service) CommitStagedUpload(
 	})
 	if err != nil {
 		if errors.Is(err, ErrFailedPrecondition) {
-			return failCommit(ctx, store, params.JobID, failureMessage(err), nil)
+			return failCommit(ctx, store, objects, params.JobID, params.StagingKey, failureMessage(err), nil)
 		}
 
 		return CommitStagedUploadResult{}, err
 	}
 	if matchErr := requireCASObjectInfo(committed, storageKey, params.ExpectedSizeBytes); matchErr != nil {
-		return failCommit(ctx, store, params.JobID, failureMessage(matchErr), nil)
+		return failCommit(ctx, store, objects, params.JobID, params.StagingKey, failureMessage(matchErr), nil)
 	}
 
 	job, err := store.SucceedIngestJob(ctx, uploads.SucceedIngestJobParams{
@@ -248,6 +268,7 @@ func (service *Service) CommitStagedUpload(
 	if err != nil {
 		return CommitStagedUploadResult{}, err
 	}
+	cleanupStagingObject(context.WithoutCancel(ctx), objects, params.StagingKey)
 
 	return CommitStagedUploadResult{
 		Job:        job,
@@ -572,7 +593,9 @@ func requireOpenedBlobInfo(info objectstore.ObjectInfo, blob Blob) error {
 func failCommit(
 	ctx context.Context,
 	store Store,
+	objects objectstore.Store,
 	jobID uuid.UUID,
+	stagingKey string,
 	message string,
 	cause error,
 ) (CommitStagedUploadResult, error) {
@@ -588,6 +611,7 @@ func failCommit(
 	if err != nil {
 		return CommitStagedUploadResult{}, errors.Join(failureErr, fmt.Errorf("record failed CAS ingest: %w", err))
 	}
+	cleanupStagingObject(context.WithoutCancel(ctx), objects, stagingKey)
 
 	return CommitStagedUploadResult{}, failureErr
 }
@@ -609,4 +633,19 @@ func closeReaderAfterError(reader io.ReadCloser, err error) error {
 	}
 
 	return err
+}
+
+// cleanupStagingObject best-effort deletes one staged upload object after the ingest outcome
+// became terminal. Missing objects are ignored and cleanup failures are intentionally swallowed.
+func cleanupStagingObject(ctx context.Context, objects objectstore.Store, stagingKey string) {
+	if objects == nil || strings.TrimSpace(stagingKey) == "" {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stagingCleanupTimeout)
+	defer cancel()
+
+	if err := objects.DeleteObject(cleanupCtx, objectstore.DeleteObjectParams{Key: stagingKey}); err != nil &&
+		!errors.Is(err, objectstore.ErrNotFound) {
+		return
+	}
 }

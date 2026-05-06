@@ -17,6 +17,12 @@ paths:
             schema:
               $ref: '#/components/schemas/BeginUploadRequest'
       responses:
+        '200':
+          description: Trusted digest already exists; returned ready upload session was not newly created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSession'
         '201':
           description: Upload session created.
           content:
@@ -24,6 +30,184 @@ paths:
               schema:
                 $ref: '#/components/schemas/UploadSession'
         '400':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/blobs/{digest}:
+    get:
+      operationId: openBlob
+      summary: Read a trusted CAS blob.
+      parameters:
+        - $ref: '#/components/parameters/BlobDigest'
+        - name: Range
+          in: header
+          required: false
+          schema:
+            type: string
+          description: >
+            One supported byte range: `bytes=start-end`, `bytes=start-`, or
+            `bytes=-suffix_length`. Multi-range requests are rejected.
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: If-Modified-Since
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: If-Range
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Full blob body.
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+            Content-Type:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+            Last-Modified:
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Partial blob body for one satisfied range.
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+            Content-Range:
+              schema:
+                type: string
+            Content-Type:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+            Last-Modified:
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '304':
+          description: Cache validator matched current blob representation.
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+            Last-Modified:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '416':
+          description: Requested range was invalid, unsupported, or unsatisfiable.
+          headers:
+            Content-Range:
+              schema:
+                type: string
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    head:
+      operationId: headBlob
+      summary: Read trusted CAS blob metadata without a response body.
+      parameters:
+        - $ref: '#/components/parameters/BlobDigest'
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: If-Modified-Since
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Blob metadata.
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+            Content-Type:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+            Last-Modified:
+              schema:
+                type: string
+        '304':
+          description: Cache validator matched current blob representation.
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+            Last-Modified:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
@@ -302,6 +486,12 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/UploadID'
+    BlobDigest:
+      name: digest
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Digest'
     ImageName:
       name: name
       in: path

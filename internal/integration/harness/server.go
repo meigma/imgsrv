@@ -78,12 +78,14 @@ func startServer(
 	}, app.Dependencies{
 		Logger: options.logger,
 		Uploads: uploads.NewService(uploads.ServiceConfig{
-			Store:   store.Uploads(),
-			Objects: objects,
+			Store:        store.Uploads(),
+			Objects:      objects,
+			TrustedBlobs: trustedBlobLookup(store),
 		}),
 		Catalog: catalog.NewService(catalog.ServiceConfig{
 			Store: store.Catalog(),
 		}),
+		Blobs:          newCASService(store, objects),
 		BackgroundJobs: backgroundJobs(options, store, objects),
 	})
 	require.NoError(t, err)
@@ -160,10 +162,7 @@ func backgroundJobs(
 		return nil
 	}
 
-	casService := cas.NewService(cas.ServiceConfig{
-		Store:   store.CAS(),
-		Objects: objects,
-	})
+	casService := newCASService(store, objects)
 
 	return []app.BackgroundJob{jobs.New(jobs.Config{
 		Handler: promote.New(promote.Config{
@@ -179,4 +178,22 @@ func backgroundJobs(
 		ErrorBackoffMax:     casPromotionErrorBackoffMax,
 		Logger:              options.logger.With("component", casPromotionWorkerName),
 	})}
+}
+
+// trustedBlobLookup returns the upload trusted-blob lookup when the shared store implements it.
+func trustedBlobLookup(store *postgres.Store) uploads.TrustedBlobLookup {
+	lookup, ok := store.Uploads().(uploads.TrustedBlobLookup)
+	if !ok {
+		return nil
+	}
+
+	return lookup
+}
+
+// newCASService constructs the CAS service used by HTTP reads and promotion jobs.
+func newCASService(store *postgres.Store, objects objectstore.Store) *cas.Service {
+	return cas.NewService(cas.ServiceConfig{
+		Store:   store.CAS(),
+		Objects: objects,
+	})
 }

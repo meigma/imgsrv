@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -99,6 +100,18 @@ func (transport *transport) doJSON(
 	wantStatus int,
 	responseBody any,
 ) error {
+	return transport.doJSONStatuses(ctx, path, requestBody, responseBody, wantStatus)
+}
+
+// doJSONStatuses marshals requestBody as JSON, sets the JSON content type, and delegates
+// to doResponse for transport, status checking, and response decoding.
+func (transport *transport) doJSONStatuses(
+	ctx context.Context,
+	path string,
+	requestBody any,
+	responseBody any,
+	wantStatuses ...int,
+) error {
 	body, err := json.Marshal(requestBody)
 	if err != nil {
 		return fmt.Errorf("encode imgsrv request: %w", err)
@@ -106,51 +119,22 @@ func (transport *transport) doJSON(
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 
-	return transport.do(
+	resp, err := transport.doResponse(
 		ctx,
 		http.MethodPost,
 		path,
 		bytes.NewReader(body),
 		int64(len(body)),
 		headers,
-		wantStatus,
-		responseBody,
+		wantStatuses...,
 	)
-}
-
-// do issues a single HTTP request, returns a typed error when the response
-// status does not match wantStatus, and otherwise decodes the response body
-// into responseBody when one is provided.
-func (transport *transport) do(
-	ctx context.Context,
-	method string,
-	path string,
-	body io.Reader,
-	contentLength int64,
-	headers http.Header,
-	wantStatus int,
-	responseBody any,
-) error {
-	req, err := http.NewRequestWithContext(ctx, method, transport.endpoint(path), body)
 	if err != nil {
-		return fmt.Errorf("create imgsrv request: %w", err)
-	}
-	if body != nil {
-		req.ContentLength = contentLength
-	}
-	transport.prepareRequest(req, headers)
-
-	resp, err := transport.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("send imgsrv request: %w", err)
+		return err
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
-	if resp.StatusCode != wantStatus {
-		return decodeErrorResponse(resp)
-	}
 	if responseBody == nil {
 		return nil
 	}
@@ -159,6 +143,69 @@ func (transport *transport) do(
 	}
 
 	return nil
+}
+
+// do issues a single HTTP request, requires HTTP 200 OK, and decodes the
+// response body into responseBody when one is provided.
+func (transport *transport) do(
+	ctx context.Context,
+	method string,
+	path string,
+	body io.Reader,
+	contentLength int64,
+	headers http.Header,
+	responseBody any,
+) error {
+	resp, err := transport.doResponse(ctx, method, path, body, contentLength, headers, http.StatusOK)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if responseBody == nil {
+		return nil
+	}
+	if err := json.NewDecoder(resp.Body).Decode(responseBody); err != nil {
+		return fmt.Errorf("decode imgsrv response: %w", err)
+	}
+
+	return nil
+}
+
+// doResponse issues a single HTTP request and returns the live response when the status code
+// matches one of wantStatuses. Callers own the response body and must close it.
+func (transport *transport) doResponse(
+	ctx context.Context,
+	method string,
+	path string,
+	body io.Reader,
+	contentLength int64,
+	headers http.Header,
+	wantStatuses ...int,
+) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, transport.endpoint(path), body)
+	if err != nil {
+		return nil, fmt.Errorf("create imgsrv request: %w", err)
+	}
+	if body != nil {
+		req.ContentLength = contentLength
+	}
+	transport.prepareRequest(req, headers)
+
+	resp, err := transport.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send imgsrv request: %w", err)
+	}
+	if !matchesStatus(resp.StatusCode, wantStatuses...) {
+		defer func() {
+			_ = resp.Body.Close()
+		}()
+		return nil, decodeErrorResponse(resp)
+	}
+
+	return resp, nil
 }
 
 // endpoint joins the configured base URL with the operation path.
@@ -209,6 +256,11 @@ func decodeErrorResponse(resp *http.Response) error {
 		Status:     resp.Status,
 		Body:       body,
 	}
+}
+
+// matchesStatus reports whether got equals any wanted status code.
+func matchesStatus(got int, want ...int) bool {
+	return slices.Contains(want, got)
 }
 
 // responseIsProblemJSON reports whether the Content-Type identifies an RFC 9457

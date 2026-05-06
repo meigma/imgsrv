@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -177,6 +178,31 @@ func TestClientUploadFlowBuildsRequests(t *testing.T) {
 	assert.Equal(t, UploadStateCompleted, status.State)
 }
 
+func TestClientBeginUploadAcceptsReadyShortCircuitStatus(t *testing.T) {
+	ctx := context.Background()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/uploads", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodPost)
+		writeJSON(t, w, http.StatusOK, uploadSessionFixture(UploadStateReady))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	client, err := New(Options{
+		BaseURL:     server.URL + "/api/",
+		BearerToken: "test-token",
+		UserAgent:   "imgsrv-test-client",
+	})
+	require.NoError(t, err)
+
+	session, err := client.Uploads().BeginUpload(ctx, BeginUploadRequest{
+		ExpectedDigest:    testDigest,
+		ExpectedSizeBytes: 12,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, UploadStateReady, session.State)
+}
+
 func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	ctx := context.Background()
 	displayName := "Debian 12"
@@ -314,6 +340,112 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	published, err := catalog.PublishVersion(ctx, image.Name, version.Version)
 	require.NoError(t, err)
 	assert.Equal(t, ImageVersionStatePublished, published.State)
+}
+
+func TestClientBlobFlowBuildsRequests(t *testing.T) {
+	ctx := context.Background()
+	rangeFrom, err := BlobRangeFrom(3)
+	require.NoError(t, err)
+	suffixRange, err := BlobRangeSuffix(4)
+	require.NoError(t, err)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/blobs/"+url.PathEscape(testDigest.String()), func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "*/*", r.Header.Get("Accept"))
+		assert.Equal(t, "imgsrv-test-client", r.Header.Get("User-Agent"))
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+
+		switch {
+		case r.Method == http.MethodHead:
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Length", "10")
+			w.Header().Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
+			w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.Header.Get("Range") == "":
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Length", "10")
+			w.Header().Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
+			w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
+			_, writeErr := w.Write([]byte("0123456789"))
+			assert.NoError(t, writeErr)
+		case r.Method == http.MethodGet && r.Header.Get("Range") == "bytes=3-":
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Length", "7")
+			w.Header().Set("Content-Range", "bytes 3-9/10")
+			w.Header().Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
+			w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
+			w.WriteHeader(http.StatusPartialContent)
+			_, writeErr := w.Write([]byte("3456789"))
+			assert.NoError(t, writeErr)
+		case r.Method == http.MethodGet && r.Header.Get("Range") == "bytes=-4":
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Length", "4")
+			w.Header().Set("Content-Range", "bytes 6-9/10")
+			w.Header().Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
+			w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
+			w.WriteHeader(http.StatusPartialContent)
+			_, writeErr := w.Write([]byte("6789"))
+			assert.NoError(t, writeErr)
+		default:
+			t.Fatalf("unexpected blob request: method=%s range=%q", r.Method, r.Header.Get("Range"))
+		}
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	client, err := New(Options{
+		BaseURL:     server.URL + "/api/",
+		BearerToken: "test-token",
+		UserAgent:   "imgsrv-test-client",
+	})
+	require.NoError(t, err)
+	blobs := client.Blobs()
+	require.NotNil(t, blobs)
+
+	head, err := blobs.HeadBlob(ctx, testDigest)
+	require.NoError(t, err)
+	assert.Equal(t, testDigest, head.Digest)
+	assert.Equal(t, int64(10), head.SizeBytes)
+	assert.Equal(t, int64(10), head.ContentLength)
+	assert.Equal(t, "application/octet-stream", head.ContentType)
+	assert.Equal(t, "bytes", head.AcceptRanges)
+
+	full, err := blobs.OpenBlob(ctx, testDigest, OpenBlobOptions{})
+	require.NoError(t, err)
+	fullBody, err := io.ReadAll(full.Body)
+	require.NoError(t, err)
+	require.NoError(t, full.Body.Close())
+	assert.Equal(t, "0123456789", string(fullBody))
+	assert.Equal(t, int64(10), full.Metadata.SizeBytes)
+	assert.Equal(t, int64(10), full.Metadata.ContentLength)
+	assert.Empty(t, full.Metadata.ContentRange)
+
+	ranged, err := blobs.OpenBlob(ctx, testDigest, OpenBlobOptions{Range: &rangeFrom})
+	require.NoError(t, err)
+	rangedBody, err := io.ReadAll(ranged.Body)
+	require.NoError(t, err)
+	require.NoError(t, ranged.Body.Close())
+	assert.Equal(t, "3456789", string(rangedBody))
+	assert.Equal(t, int64(10), ranged.Metadata.SizeBytes)
+	assert.Equal(t, int64(7), ranged.Metadata.ContentLength)
+	assert.Equal(t, "bytes 3-9/10", ranged.Metadata.ContentRange)
+
+	suffix, err := blobs.OpenBlob(ctx, testDigest, OpenBlobOptions{Range: &suffixRange})
+	require.NoError(t, err)
+	suffixBody, err := io.ReadAll(suffix.Body)
+	require.NoError(t, err)
+	require.NoError(t, suffix.Body.Close())
+	assert.Equal(t, "6789", string(suffixBody))
+	assert.Equal(t, "bytes 6-9/10", suffix.Metadata.ContentRange)
 }
 
 func TestClientDecodesProblemError(t *testing.T) {
