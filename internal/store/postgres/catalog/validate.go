@@ -45,6 +45,42 @@ func validateListVersionsParams(params domain.ListVersionsParams) error {
 	return domain.ValidateImageName(params.ImageName)
 }
 
+// validateListPublishedArtifactsParams validates the inputs to Store.ListPublishedArtifacts.
+func validateListPublishedArtifactsParams(params domain.ListPublishedArtifactsParams) error {
+	return validateGetVersionManifestParams(domain.GetVersionManifestParams(params))
+}
+
+// validateGetPublishedArtifactParams validates the inputs to Store.GetPublishedArtifact.
+func validateGetPublishedArtifactParams(params domain.GetPublishedArtifactParams) error {
+	if err := validateListPublishedArtifactsParams(domain.ListPublishedArtifactsParams{
+		ImageName: params.ImageName,
+		Version:   params.Version,
+	}); err != nil {
+		return err
+	}
+	if params.ArtifactID == uuid.Nil {
+		return fmt.Errorf("%w: artifact id is required", domain.ErrInvalid)
+	}
+
+	return nil
+}
+
+// validateGetPublishedAttachmentParams validates the inputs to Store.GetPublishedAttachment.
+func validateGetPublishedAttachmentParams(params domain.GetPublishedAttachmentParams) error {
+	if err := validateGetPublishedArtifactParams(domain.GetPublishedArtifactParams{
+		ImageName:  params.ImageName,
+		Version:    params.Version,
+		ArtifactID: params.ArtifactID,
+	}); err != nil {
+		return err
+	}
+	if params.AttachmentID == uuid.Nil {
+		return fmt.Errorf("%w: attachment id is required", domain.ErrInvalid)
+	}
+
+	return nil
+}
+
 // validateAddArtifactParams validates the inputs to Store.AddArtifact.
 func validateAddArtifactParams(params domain.AddArtifactParams) error {
 	if err := validateCreateDraftVersionParams(domain.CreateDraftVersionParams{

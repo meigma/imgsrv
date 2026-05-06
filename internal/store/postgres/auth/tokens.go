@@ -6,6 +6,34 @@ import (
 	domain "github.com/meigma/imgsrv/internal/auth"
 )
 
+// CreateToken stores API-token metadata for a pre-generated raw token.
+func (store *Store) CreateToken(ctx context.Context, params domain.CreateTokenParams) (domain.Token, error) {
+	if err := validateCreateTokenParams(params); err != nil {
+		return domain.Token{}, err
+	}
+
+	db, err := store.authDB()
+	if err != nil {
+		return domain.Token{}, err
+	}
+
+	token, err := scanToken(db.QueryRow(
+		ctx,
+		`INSERT INTO api_tokens (id, name, token_prefix, token_hash)
+		VALUES ($1, $2, $3, $4)
+		RETURNING `+tokenColumns,
+		params.ID,
+		params.Name,
+		params.TokenPrefix,
+		params.TokenHash,
+	))
+	if err != nil {
+		return domain.Token{}, mapAuthError(err)
+	}
+
+	return token, nil
+}
+
 // LookupActiveToken looks up a non-revoked token by prefix and hash.
 func (store *Store) LookupActiveToken(
 	ctx context.Context,

@@ -206,6 +206,16 @@ func blobMetadataFromResponse(digest Digest, resp *http.Response) (BlobMetadata,
 	}, nil
 }
 
+// blobMetadataFromResponseETag reads blob metadata when the digest is only present in the ETag.
+func blobMetadataFromResponseETag(resp *http.Response) (BlobMetadata, error) {
+	digest := Digest(strings.Trim(resp.Header.Get("ETag"), `"`))
+	if strings.TrimSpace(digest.String()) == "" {
+		return BlobMetadata{}, errors.New("parse blob metadata: ETag is required")
+	}
+
+	return blobMetadataFromResponse(digest, resp)
+}
+
 // totalBlobSize returns the total blob size from one successful blob response.
 func totalBlobSize(resp *http.Response) (int64, error) {
 	if resp.StatusCode == http.StatusPartialContent {

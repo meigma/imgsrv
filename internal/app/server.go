@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/meigma/imgsrv/internal/auth"
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
 	"github.com/meigma/imgsrv/internal/httpapi"
@@ -33,6 +34,9 @@ type Dependencies struct {
 
 	// Readiness reports whether the service can accept operational traffic.
 	Readiness httpapi.ReadinessChecker
+
+	// Auth coordinates API-token authentication for write operations.
+	Auth httpapi.AuthService
 
 	// Uploads coordinates client-facing upload writes.
 	Uploads httpapi.UploadService
@@ -105,6 +109,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 	server, err := NewServer(cfg, Dependencies{
 		Logger:         logger,
+		Auth:           newAuthService(store),
 		Uploads:        uploadDependency.service,
 		Catalog:        newCatalogService(store),
 		Blobs:          uploadDependency.blobs,
@@ -150,6 +155,7 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 		Logger:    logger.With("component", "httpapi"),
 		Telemetry: telemetryProviders,
 		Readiness: deps.Readiness,
+		Auth:      deps.Auth,
 		Uploads:   deps.Uploads,
 		Catalog:   deps.Catalog,
 		Blobs:     deps.Blobs,
@@ -176,6 +182,17 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 	}
 
 	return server, nil
+}
+
+// newAuthService builds the auth service from the shared Postgres store.
+func newAuthService(store *postgres.Store) httpapi.AuthService {
+	if store == nil {
+		return nil
+	}
+
+	return auth.NewService(auth.ServiceConfig{
+		Store: store.Auth(),
+	})
 }
 
 // newCatalogService builds the catalog service from the shared Postgres store.

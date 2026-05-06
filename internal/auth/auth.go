@@ -3,6 +3,8 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -35,6 +37,9 @@ const (
 
 // Store persists API-token authentication state.
 type Store interface {
+	// CreateToken stores API-token metadata for a pre-generated raw token.
+	CreateToken(context.Context, CreateTokenParams) (Token, error)
+
 	// LookupActiveToken returns a non-revoked token matching the supplied prefix and hash.
 	LookupActiveToken(context.Context, LookupActiveTokenParams) (Token, error)
 
@@ -43,6 +48,21 @@ type Store interface {
 
 	// RevokeToken marks a token revoked.
 	RevokeToken(context.Context, RevokeTokenParams) (Token, error)
+}
+
+// CreateTokenParams creates an API token record from non-secret token metadata.
+type CreateTokenParams struct {
+	// ID is the stable token identity to persist.
+	ID uuid.UUID
+
+	// Name is the operator-facing token name.
+	Name string
+
+	// TokenPrefix is the non-secret token prefix used for lookup.
+	TokenPrefix string
+
+	// TokenHash is the derived hash of the full raw token.
+	TokenHash string
 }
 
 // Token is API-token metadata safe to return from auth persistence.
@@ -75,6 +95,12 @@ type LookupActiveTokenParams struct {
 	TokenHash string
 }
 
+// AuthenticateTokenParams authenticates a raw bearer token.
+type AuthenticateTokenParams struct {
+	// Token is the raw bearer token value after removing the Authorization scheme.
+	Token string
+}
+
 // MarkTokenUsedParams records successful token use.
 type MarkTokenUsedParams struct {
 	// ID identifies the token.
@@ -92,6 +118,41 @@ func ValidateTokenPrefix(prefix string) error {
 	pattern := `^[A-Za-z0-9_-]{6,64}$`
 	if !matches(pattern, prefix) {
 		return fmt.Errorf("%w: token prefix must match %s", ErrInvalid, pattern)
+	}
+
+	return nil
+}
+
+// ParseTokenPrefix returns the non-secret prefix from a raw API token.
+func ParseTokenPrefix(token string) (string, error) {
+	token = strings.TrimSpace(token)
+	prefix, secret, ok := strings.Cut(token, ".")
+	if !ok || strings.TrimSpace(secret) == "" {
+		return "", fmt.Errorf("%w: token must match <prefix>.<secret>", ErrInvalid)
+	}
+	if err := ValidateTokenPrefix(prefix); err != nil {
+		return "", err
+	}
+
+	return prefix, nil
+}
+
+// HashToken returns the sha256 digest of a full raw API token.
+func HashToken(token string) (string, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", fmt.Errorf("%w: token is required", ErrInvalid)
+	}
+	sum := sha256.Sum256([]byte(token))
+
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// ValidateTokenHash validates the stored hash representation of a raw API token.
+func ValidateTokenHash(hash string) error {
+	pattern := `^sha256:[0-9a-f]{64}$`
+	if !matches(pattern, hash) {
+		return fmt.Errorf("%w: token hash must match %s", ErrInvalid, pattern)
 	}
 
 	return nil

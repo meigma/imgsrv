@@ -39,7 +39,7 @@ func TestBeginUploadCreatesSession(t *testing.T) {
 		})).
 		Return(uploads.BeginUploadResult{Session: wantSession, Created: true}, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/uploads", strings.NewReader(`{
+	req := newHTTPAPIRequest(http.MethodPost, "/v1/uploads", strings.NewReader(`{
 		"expected_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		"expected_size_bytes": 12,
 		"media_type_hint": "application/octet-stream",
@@ -72,7 +72,7 @@ func TestBeginUploadReturnsSkippedReadySessionAsOK(t *testing.T) {
 		BeginUpload(mock.Anything, mock.Anything).
 		Return(uploads.BeginUploadResult{Session: wantSession, Created: false}, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/uploads", strings.NewReader(`{
+	req := newHTTPAPIRequest(http.MethodPost, "/v1/uploads", strings.NewReader(`{
 		"expected_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		"expected_size_bytes": 12
 	}`))
@@ -107,7 +107,7 @@ func TestPutUploadPartStreamsRawBody(t *testing.T) {
 			SizeBytes:  int64(len(body)),
 		}, nil)
 
-	req := httptest.NewRequest(
+	req := newHTTPAPIRequest(
 		http.MethodPut,
 		"/v1/uploads/"+uploadIDFixture().String()+"/parts/7",
 		strings.NewReader(body),
@@ -137,7 +137,7 @@ func TestGetUploadReturnsSession(t *testing.T) {
 		GetUpload(mock.Anything, uploads.GetUploadParams{UploadID: uploadIDFixture()}).
 		Return(wantSession, nil)
 
-	req := httptest.NewRequest(
+	req := newHTTPAPIRequest(
 		http.MethodGet,
 		"/v1/uploads/"+uploadIDFixture().String(),
 		nil,
@@ -175,7 +175,7 @@ func TestCompleteUploadSubmitsAcceptedPartList(t *testing.T) {
 		}).
 		Return(wantSession, nil)
 
-	req := httptest.NewRequest(
+	req := newHTTPAPIRequest(
 		http.MethodPost,
 		"/v1/uploads/"+uploadIDFixture().String()+"/complete",
 		strings.NewReader(
@@ -201,7 +201,7 @@ func TestAbortUploadReturnsAbortedSession(t *testing.T) {
 		AbortUpload(mock.Anything, uploads.AbortUploadParams{UploadID: uploadIDFixture()}).
 		Return(wantSession, nil)
 
-	req := httptest.NewRequest(
+	req := newHTTPAPIRequest(
 		http.MethodPost,
 		"/v1/uploads/"+uploadIDFixture().String()+"/abort",
 		nil,
@@ -288,7 +288,7 @@ func TestUploadHandlersRejectInvalidRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := newUploadHandlerTestContext(t)
-			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			req := newHTTPAPIRequest(tt.method, tt.path, strings.NewReader(tt.body))
 			if tt.prepare != nil {
 				tt.prepare(req)
 			}
@@ -321,7 +321,7 @@ func TestAbortUploadMapsDomainErrors(t *testing.T) {
 			tc.uploads.EXPECT().
 				AbortUpload(mock.Anything, uploads.AbortUploadParams{UploadID: uploadIDFixture()}).
 				Return(uploads.Session{}, tt.err)
-			req := httptest.NewRequest(http.MethodPost, "/v1/uploads/"+uploadIDFixture().String()+"/abort", nil)
+			req := newHTTPAPIRequest(http.MethodPost, "/v1/uploads/"+uploadIDFixture().String()+"/abort", nil)
 			rec := httptest.NewRecorder()
 
 			tc.handler.ServeHTTP(rec, req)
@@ -351,7 +351,7 @@ func TestUploadHandlersMapDomainErrors(t *testing.T) {
 			tc.uploads.EXPECT().
 				BeginUpload(mock.Anything, mock.Anything).
 				Return(uploads.BeginUploadResult{}, tt.err)
-			req := httptest.NewRequest(http.MethodPost, "/v1/uploads", strings.NewReader(`{
+			req := newHTTPAPIRequest(http.MethodPost, "/v1/uploads", strings.NewReader(`{
 				"expected_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 				"expected_size_bytes": 12
 			}`))
@@ -384,7 +384,7 @@ func TestGetUploadMapsDomainErrors(t *testing.T) {
 			tc.uploads.EXPECT().
 				GetUpload(mock.Anything, uploads.GetUploadParams{UploadID: uploadIDFixture()}).
 				Return(uploads.Session{}, tt.err)
-			req := httptest.NewRequest(http.MethodGet, "/v1/uploads/"+uploadIDFixture().String(), nil)
+			req := newHTTPAPIRequest(http.MethodGet, "/v1/uploads/"+uploadIDFixture().String(), nil)
 			rec := httptest.NewRecorder()
 
 			tc.handler.ServeHTTP(rec, req)
@@ -434,8 +434,10 @@ func TestUploadHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := New(Dependencies{})
-			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			handler := New(Dependencies{
+				Auth: newAcceptingAuthService(t),
+			})
+			req := newHTTPAPIRequest(tt.method, tt.path, strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -459,6 +461,7 @@ func newUploadHandlerTestContext(t *testing.T) *uploadHandlerTestContext {
 		uploads: uploadService,
 		handler: New(Dependencies{
 			Uploads:   uploadService,
+			Auth:      newAcceptingAuthService(t),
 			Now:       nowFixture,
 			UploadTTL: time.Hour,
 		}),

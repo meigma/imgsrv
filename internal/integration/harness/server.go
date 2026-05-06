@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/meigma/imgsrv/internal/app"
+	"github.com/meigma/imgsrv/internal/auth"
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
 	"github.com/meigma/imgsrv/internal/jobs"
@@ -77,6 +78,9 @@ func startServer(
 		ShutdownTimeout: serverShutdownTimeout,
 	}, app.Dependencies{
 		Logger: options.logger,
+		Auth: auth.NewService(auth.ServiceConfig{
+			Store: store.Auth(),
+		}),
 		Uploads: uploads.NewService(uploads.ServiceConfig{
 			Store:        store.Uploads(),
 			Objects:      objects,

@@ -163,6 +163,12 @@ type artifactResponse struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// artifactListResponse is the JSON wire shape for artifact lists.
+type artifactListResponse struct {
+	// Artifacts are primary artifacts in stable catalog order.
+	Artifacts []artifactResponse `json:"artifacts"`
+}
+
 // attachmentResponse is the JSON wire shape of an artifact attachment.
 type attachmentResponse struct {
 	// ID is the stable attachment identity.
@@ -378,6 +384,49 @@ func (a *api) resolveManifest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, newManifestResponse(manifest))
+}
+
+// listPublishedArtifacts handles GET /v1/images/{name}/versions/{version}/artifacts.
+func (a *api) listPublishedArtifacts(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.catalogService(w)
+	if !ok {
+		return
+	}
+
+	artifacts, err := service.ListPublishedArtifacts(r.Context(), catalog.ListPublishedArtifactsParams{
+		ImageName: r.PathValue("name"),
+		Version:   r.PathValue("version"),
+	})
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newArtifactListResponse(artifacts))
+}
+
+// getPublishedArtifact handles GET /v1/images/{name}/versions/{version}/artifacts/{artifact_id}.
+func (a *api) getPublishedArtifact(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.catalogService(w)
+	if !ok {
+		return
+	}
+	artifactID, ok := parseArtifactIDPath(w, r)
+	if !ok {
+		return
+	}
+
+	artifact, err := service.GetPublishedArtifact(r.Context(), catalog.GetPublishedArtifactParams{
+		ImageName:  r.PathValue("name"),
+		Version:    r.PathValue("version"),
+		ArtifactID: artifactID,
+	})
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newArtifactResponse(artifact))
 }
 
 // addArtifact handles POST /v1/images/{name}/versions/{version}/artifacts and adds a draft artifact.
@@ -704,6 +753,16 @@ func newArtifactResponse(artifact catalog.Artifact) artifactResponse {
 		CreatedAt:            formatCatalogTime(artifact.CreatedAt),
 		UpdatedAt:            formatCatalogTime(artifact.UpdatedAt),
 	}
+}
+
+// newArtifactListResponse projects release artifacts onto their JSON wire shape.
+func newArtifactListResponse(artifacts []catalog.Artifact) artifactListResponse {
+	items := make([]artifactResponse, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		items = append(items, newArtifactResponse(artifact))
+	}
+
+	return artifactListResponse{Artifacts: items}
 }
 
 // newAttachmentResponse projects an artifact attachment onto its JSON wire shape.

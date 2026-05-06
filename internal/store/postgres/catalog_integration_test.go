@@ -196,6 +196,115 @@ func TestCatalogDraftDeletesArePathScopedAndDraftOnly(t *testing.T) {
 	assert.ErrorIs(t, err, domain.ErrFailedPrecondition)
 }
 
+func TestCatalogPublishedArtifactReadsArePublishedAndPathScoped(t *testing.T) {
+	ctx := t.Context()
+	store := startCatalogIntegrationStore(t)
+	catalogStore := store.Catalog()
+
+	createImage(t, ctx, catalogStore, "published-artifacts")
+	createVersion(t, ctx, catalogStore, "published-artifacts", "v1.0.0")
+	createVersion(t, ctx, catalogStore, "published-artifacts", "draft-only")
+
+	primaryDigest := catalogDigest("5")
+	attachmentDigest := catalogDigest("6")
+	foreignPrimaryDigest := catalogDigest("7")
+	foreignAttachmentDigest := catalogDigest("8")
+	insertTrustedBlob(t, store, primaryDigest, 4096)
+	insertTrustedBlob(t, store, attachmentDigest, 256)
+	insertTrustedBlob(t, store, foreignPrimaryDigest, 2048)
+	insertTrustedBlob(t, store, foreignAttachmentDigest, 256)
+
+	publishedArtifact := createArtifact(t, ctx, catalogStore, "published-artifacts", "v1.0.0", primaryDigest)
+	publishedAttachment := createAttachment(
+		t,
+		ctx,
+		catalogStore,
+		"published-artifacts",
+		"v1.0.0",
+		publishedArtifact.ID,
+		"checksums",
+		attachmentDigest,
+	)
+	foreignArtifact := createVariantArtifact(
+		t,
+		ctx,
+		catalogStore,
+		"published-artifacts",
+		"v1.0.0",
+		foreignPrimaryDigest,
+		"arm64",
+	)
+	foreignAttachment := createAttachment(
+		t,
+		ctx,
+		catalogStore,
+		"published-artifacts",
+		"v1.0.0",
+		foreignArtifact.ID,
+		"signature",
+		foreignAttachmentDigest,
+	)
+	draftArtifact := createArtifact(t, ctx, catalogStore, "published-artifacts", "draft-only", primaryDigest)
+	_, err := catalogStore.PublishVersion(ctx, domain.PublishVersionParams{
+		ImageName: "published-artifacts",
+		Version:   "v1.0.0",
+	})
+	require.NoError(t, err)
+
+	artifacts, err := catalogStore.ListPublishedArtifacts(ctx, domain.ListPublishedArtifactsParams{
+		ImageName: "published-artifacts",
+		Version:   "v1.0.0",
+	})
+	require.NoError(t, err)
+	require.Len(t, artifacts, 2)
+	assert.Equal(t, []uuid.UUID{publishedArtifact.ID, foreignArtifact.ID}, artifactIDs(artifacts))
+
+	gotArtifact, err := catalogStore.GetPublishedArtifact(ctx, domain.GetPublishedArtifactParams{
+		ImageName:  "published-artifacts",
+		Version:    "v1.0.0",
+		ArtifactID: publishedArtifact.ID,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, publishedArtifact.ID, gotArtifact.ID)
+
+	gotAttachment, err := catalogStore.GetPublishedAttachment(ctx, domain.GetPublishedAttachmentParams{
+		ImageName:    "published-artifacts",
+		Version:      "v1.0.0",
+		ArtifactID:   publishedArtifact.ID,
+		AttachmentID: publishedAttachment.ID,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, publishedAttachment.ID, gotAttachment.ID)
+
+	_, err = catalogStore.ListPublishedArtifacts(ctx, domain.ListPublishedArtifactsParams{
+		ImageName: "published-artifacts",
+		Version:   "draft-only",
+	})
+	assert.ErrorIs(t, err, domain.ErrNotFound)
+
+	_, err = catalogStore.GetPublishedArtifact(ctx, domain.GetPublishedArtifactParams{
+		ImageName:  "published-artifacts",
+		Version:    "draft-only",
+		ArtifactID: draftArtifact.ID,
+	})
+	assert.ErrorIs(t, err, domain.ErrNotFound)
+
+	_, err = catalogStore.GetPublishedArtifact(ctx, domain.GetPublishedArtifactParams{
+		ImageName:  "published-artifacts",
+		Version:    "v1.0.0",
+		ArtifactID: draftArtifact.ID,
+	})
+	assert.ErrorIs(t, err, domain.ErrNotFound)
+
+	_, err = catalogStore.GetPublishedAttachment(ctx, domain.GetPublishedAttachmentParams{
+		ImageName:    "published-artifacts",
+		Version:      "v1.0.0",
+		ArtifactID:   publishedArtifact.ID,
+		AttachmentID: foreignAttachment.ID,
+	})
+	assert.ErrorIs(t, err, domain.ErrNotFound)
+}
+
 func startCatalogIntegrationStore(t *testing.T) *Store {
 	t.Helper()
 
@@ -314,6 +423,32 @@ func createArtifact(
 	return artifact
 }
 
+func createVariantArtifact(
+	t *testing.T,
+	ctx context.Context,
+	store domain.Store,
+	imageName string,
+	version string,
+	digest domain.Digest,
+	architecture string,
+) domain.Artifact {
+	t.Helper()
+
+	artifact, err := store.AddArtifact(ctx, domain.AddArtifactParams{
+		ImageName:            imageName,
+		Version:              version,
+		OperatingSystem:      "linux",
+		Architecture:         architecture,
+		Format:               domain.ArtifactFormatRaw,
+		PrimaryBlobDigest:    digest,
+		PrimaryBlobSizeBytes: 2048,
+		PrimaryMediaType:     "application/octet-stream",
+	})
+	require.NoError(t, err)
+
+	return artifact
+}
+
 func createAttachment(
 	t *testing.T,
 	ctx context.Context,
@@ -369,6 +504,15 @@ func versionNames(versions []domain.Version) []string {
 	}
 
 	return names
+}
+
+func artifactIDs(artifacts []domain.Artifact) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		ids = append(ids, artifact.ID)
+	}
+
+	return ids
 }
 
 func catalogDigest(hexChar string) domain.Digest {

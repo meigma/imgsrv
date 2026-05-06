@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/meigma/imgsrv/internal/auth"
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
 	"github.com/meigma/imgsrv/internal/objectstore"
@@ -27,6 +28,9 @@ type Dependencies struct {
 
 	// Readiness reports whether the service can accept operational traffic.
 	Readiness ReadinessChecker
+
+	// Auth coordinates API-token authentication for write operations. Nil leaves protected routes unavailable.
+	Auth AuthService
 
 	// Uploads coordinates client-facing upload operations. Nil leaves upload routes unavailable.
 	Uploads UploadService
@@ -56,6 +60,12 @@ type ReadinessFunc func(context.Context) error
 // CheckReady calls f(ctx).
 func (f ReadinessFunc) CheckReady(ctx context.Context) error {
 	return f(ctx)
+}
+
+// AuthService coordinates API-token authentication for HTTP callers.
+type AuthService interface {
+	// AuthenticateToken validates a raw bearer token and records successful use.
+	AuthenticateToken(context.Context, auth.AuthenticateTokenParams) (auth.Token, error)
 }
 
 // UploadService coordinates upload operations for HTTP callers.
@@ -92,6 +102,15 @@ type CatalogService interface {
 
 	// ListVersions returns published versions for one image in stable order.
 	ListVersions(context.Context, catalog.ListVersionsParams) ([]catalog.Version, error)
+
+	// ListPublishedArtifacts returns artifacts for an exact published image version.
+	ListPublishedArtifacts(context.Context, catalog.ListPublishedArtifactsParams) ([]catalog.Artifact, error)
+
+	// GetPublishedArtifact returns one artifact for an exact published image version.
+	GetPublishedArtifact(context.Context, catalog.GetPublishedArtifactParams) (catalog.Artifact, error)
+
+	// GetPublishedAttachment returns one attachment for an exact published image version artifact.
+	GetPublishedAttachment(context.Context, catalog.GetPublishedAttachmentParams) (catalog.Attachment, error)
 
 	// AddArtifact adds a primary artifact on a draft version.
 	AddArtifact(context.Context, catalog.AddArtifactParams) (catalog.Artifact, error)
@@ -140,6 +159,7 @@ type BlobService interface {
 type api struct {
 	logger    *slog.Logger
 	readiness ReadinessChecker
+	auth      AuthService
 	uploads   UploadService
 	catalog   CatalogService
 	blobs     BlobService
@@ -171,6 +191,7 @@ func New(deps Dependencies) http.Handler {
 	api := &api{
 		logger:    logger,
 		readiness: readiness,
+		auth:      deps.Auth,
 		uploads:   deps.Uploads,
 		catalog:   deps.Catalog,
 		blobs:     deps.Blobs,
@@ -181,33 +202,49 @@ func New(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", api.healthz)
 	mux.HandleFunc("GET /readyz", api.readyz)
-	mux.HandleFunc("POST /v1/uploads", api.beginUpload)
+	mux.HandleFunc("POST /v1/uploads", api.requireAuth(api.beginUpload))
 	mux.HandleFunc("GET /v1/uploads/{upload_id}", api.getUpload)
-	mux.HandleFunc("PUT /v1/uploads/{upload_id}/parts/{part_number}", api.putUploadPart)
-	mux.HandleFunc("POST /v1/uploads/{upload_id}/complete", api.completeUpload)
-	mux.HandleFunc("POST /v1/uploads/{upload_id}/abort", api.abortUpload)
+	mux.HandleFunc("PUT /v1/uploads/{upload_id}/parts/{part_number}", api.requireAuth(api.putUploadPart))
+	mux.HandleFunc("POST /v1/uploads/{upload_id}/complete", api.requireAuth(api.completeUpload))
+	mux.HandleFunc("POST /v1/uploads/{upload_id}/abort", api.requireAuth(api.abortUpload))
 	mux.HandleFunc("GET /v1/blobs/{digest}", api.getBlob)
-	mux.HandleFunc("POST /v1/images", api.createImage)
+	mux.HandleFunc("POST /v1/images", api.requireAuth(api.createImage))
 	mux.HandleFunc("GET /v1/images", api.listImages)
 	mux.HandleFunc("GET /v1/images/{name}", api.getImage)
-	mux.HandleFunc("POST /v1/images/{name}/versions", api.createDraftVersion)
+	mux.HandleFunc("POST /v1/images/{name}/versions", api.requireAuth(api.createDraftVersion))
 	mux.HandleFunc("GET /v1/images/{name}/versions", api.listVersions)
 	mux.HandleFunc("GET /v1/images/{name}/versions/{version}", api.getVersionManifest)
-	mux.HandleFunc("POST /v1/images/{name}/versions/{version}/artifacts", api.addArtifact)
-	mux.HandleFunc("DELETE /v1/images/{name}/versions/{version}/artifacts/{artifact_id}", api.deleteArtifact)
+	mux.HandleFunc("GET /v1/images/{name}/versions/{version}/artifacts", api.listPublishedArtifacts)
+	mux.HandleFunc(
+		"GET /v1/images/{name}/versions/{version}/artifacts/{artifact_id}",
+		api.getPublishedArtifact,
+	)
+	mux.HandleFunc(
+		"GET /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/download",
+		api.downloadPublishedArtifact,
+	)
+	mux.HandleFunc("POST /v1/images/{name}/versions/{version}/artifacts", api.requireAuth(api.addArtifact))
+	mux.HandleFunc(
+		"DELETE /v1/images/{name}/versions/{version}/artifacts/{artifact_id}",
+		api.requireAuth(api.deleteArtifact),
+	)
 	mux.HandleFunc(
 		"POST /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments",
-		api.addAttachment,
+		api.requireAuth(api.addAttachment),
 	)
 	mux.HandleFunc(
 		"DELETE /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments/{attachment_id}",
-		api.deleteAttachment,
+		api.requireAuth(api.deleteAttachment),
 	)
-	mux.HandleFunc("POST /v1/images/{name}/versions/{version}/publish", api.publishVersion)
-	mux.HandleFunc("PUT /v1/images/{name}/aliases/{alias}", api.putAlias)
+	mux.HandleFunc(
+		"GET /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments/{attachment_id}/download",
+		api.downloadPublishedAttachment,
+	)
+	mux.HandleFunc("POST /v1/images/{name}/versions/{version}/publish", api.requireAuth(api.publishVersion))
+	mux.HandleFunc("PUT /v1/images/{name}/aliases/{alias}", api.requireAuth(api.putAlias))
 	mux.HandleFunc("GET /v1/images/{name}/aliases", api.listAliases)
 	mux.HandleFunc("GET /v1/images/{name}/aliases/{alias}", api.getAlias)
-	mux.HandleFunc("DELETE /v1/images/{name}/aliases/{alias}", api.deleteAlias)
+	mux.HandleFunc("DELETE /v1/images/{name}/aliases/{alias}", api.requireAuth(api.deleteAlias))
 	mux.HandleFunc("GET /v1/images/{name}/refs/{ref}", api.resolveManifest)
 
 	return deps.Telemetry.WrapHTTPHandler(Chain(mux, logRequests(logger)))

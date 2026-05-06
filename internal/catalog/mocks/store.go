@@ -605,6 +605,138 @@ func (_c *MockStore_GetImage_Call) RunAndReturn(run func(context1 context.Contex
 	return _c
 }
 
+// GetPublishedArtifact provides a mock function for the type MockStore
+func (_mock *MockStore) GetPublishedArtifact(context1 context.Context, getPublishedArtifactParams catalog.GetPublishedArtifactParams) (catalog.Artifact, error) {
+	ret := _mock.Called(context1, getPublishedArtifactParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPublishedArtifact")
+	}
+
+	var r0 catalog.Artifact
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.GetPublishedArtifactParams) (catalog.Artifact, error)); ok {
+		return returnFunc(context1, getPublishedArtifactParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.GetPublishedArtifactParams) catalog.Artifact); ok {
+		r0 = returnFunc(context1, getPublishedArtifactParams)
+	} else {
+		r0 = ret.Get(0).(catalog.Artifact)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.GetPublishedArtifactParams) error); ok {
+		r1 = returnFunc(context1, getPublishedArtifactParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockStore_GetPublishedArtifact_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPublishedArtifact'
+type MockStore_GetPublishedArtifact_Call struct {
+	*mock.Call
+}
+
+// GetPublishedArtifact is a helper method to define mock.On call
+//   - context1 context.Context
+//   - getPublishedArtifactParams catalog.GetPublishedArtifactParams
+func (_e *MockStore_Expecter) GetPublishedArtifact(context1 interface{}, getPublishedArtifactParams interface{}) *MockStore_GetPublishedArtifact_Call {
+	return &MockStore_GetPublishedArtifact_Call{Call: _e.mock.On("GetPublishedArtifact", context1, getPublishedArtifactParams)}
+}
+
+func (_c *MockStore_GetPublishedArtifact_Call) Run(run func(context1 context.Context, getPublishedArtifactParams catalog.GetPublishedArtifactParams)) *MockStore_GetPublishedArtifact_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.GetPublishedArtifactParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.GetPublishedArtifactParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_GetPublishedArtifact_Call) Return(artifact catalog.Artifact, err error) *MockStore_GetPublishedArtifact_Call {
+	_c.Call.Return(artifact, err)
+	return _c
+}
+
+func (_c *MockStore_GetPublishedArtifact_Call) RunAndReturn(run func(context1 context.Context, getPublishedArtifactParams catalog.GetPublishedArtifactParams) (catalog.Artifact, error)) *MockStore_GetPublishedArtifact_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetPublishedAttachment provides a mock function for the type MockStore
+func (_mock *MockStore) GetPublishedAttachment(context1 context.Context, getPublishedAttachmentParams catalog.GetPublishedAttachmentParams) (catalog.Attachment, error) {
+	ret := _mock.Called(context1, getPublishedAttachmentParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPublishedAttachment")
+	}
+
+	var r0 catalog.Attachment
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.GetPublishedAttachmentParams) (catalog.Attachment, error)); ok {
+		return returnFunc(context1, getPublishedAttachmentParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.GetPublishedAttachmentParams) catalog.Attachment); ok {
+		r0 = returnFunc(context1, getPublishedAttachmentParams)
+	} else {
+		r0 = ret.Get(0).(catalog.Attachment)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.GetPublishedAttachmentParams) error); ok {
+		r1 = returnFunc(context1, getPublishedAttachmentParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockStore_GetPublishedAttachment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPublishedAttachment'
+type MockStore_GetPublishedAttachment_Call struct {
+	*mock.Call
+}
+
+// GetPublishedAttachment is a helper method to define mock.On call
+//   - context1 context.Context
+//   - getPublishedAttachmentParams catalog.GetPublishedAttachmentParams
+func (_e *MockStore_Expecter) GetPublishedAttachment(context1 interface{}, getPublishedAttachmentParams interface{}) *MockStore_GetPublishedAttachment_Call {
+	return &MockStore_GetPublishedAttachment_Call{Call: _e.mock.On("GetPublishedAttachment", context1, getPublishedAttachmentParams)}
+}
+
+func (_c *MockStore_GetPublishedAttachment_Call) Run(run func(context1 context.Context, getPublishedAttachmentParams catalog.GetPublishedAttachmentParams)) *MockStore_GetPublishedAttachment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.GetPublishedAttachmentParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.GetPublishedAttachmentParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_GetPublishedAttachment_Call) Return(attachment catalog.Attachment, err error) *MockStore_GetPublishedAttachment_Call {
+	_c.Call.Return(attachment, err)
+	return _c
+}
+
+func (_c *MockStore_GetPublishedAttachment_Call) RunAndReturn(run func(context1 context.Context, getPublishedAttachmentParams catalog.GetPublishedAttachmentParams) (catalog.Attachment, error)) *MockStore_GetPublishedAttachment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetVersionManifest provides a mock function for the type MockStore
 func (_mock *MockStore) GetVersionManifest(context1 context.Context, getVersionManifestParams catalog.GetVersionManifestParams) (catalog.Manifest, error) {
 	ret := _mock.Called(context1, getVersionManifestParams)
@@ -803,6 +935,74 @@ func (_c *MockStore_ListImages_Call) Return(images []catalog.Image, err error) *
 }
 
 func (_c *MockStore_ListImages_Call) RunAndReturn(run func(context1 context.Context, listImagesParams catalog.ListImagesParams) ([]catalog.Image, error)) *MockStore_ListImages_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListPublishedArtifacts provides a mock function for the type MockStore
+func (_mock *MockStore) ListPublishedArtifacts(context1 context.Context, listPublishedArtifactsParams catalog.ListPublishedArtifactsParams) ([]catalog.Artifact, error) {
+	ret := _mock.Called(context1, listPublishedArtifactsParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListPublishedArtifacts")
+	}
+
+	var r0 []catalog.Artifact
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListPublishedArtifactsParams) ([]catalog.Artifact, error)); ok {
+		return returnFunc(context1, listPublishedArtifactsParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListPublishedArtifactsParams) []catalog.Artifact); ok {
+		r0 = returnFunc(context1, listPublishedArtifactsParams)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]catalog.Artifact)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.ListPublishedArtifactsParams) error); ok {
+		r1 = returnFunc(context1, listPublishedArtifactsParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockStore_ListPublishedArtifacts_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListPublishedArtifacts'
+type MockStore_ListPublishedArtifacts_Call struct {
+	*mock.Call
+}
+
+// ListPublishedArtifacts is a helper method to define mock.On call
+//   - context1 context.Context
+//   - listPublishedArtifactsParams catalog.ListPublishedArtifactsParams
+func (_e *MockStore_Expecter) ListPublishedArtifacts(context1 interface{}, listPublishedArtifactsParams interface{}) *MockStore_ListPublishedArtifacts_Call {
+	return &MockStore_ListPublishedArtifacts_Call{Call: _e.mock.On("ListPublishedArtifacts", context1, listPublishedArtifactsParams)}
+}
+
+func (_c *MockStore_ListPublishedArtifacts_Call) Run(run func(context1 context.Context, listPublishedArtifactsParams catalog.ListPublishedArtifactsParams)) *MockStore_ListPublishedArtifacts_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.ListPublishedArtifactsParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.ListPublishedArtifactsParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_ListPublishedArtifacts_Call) Return(artifacts []catalog.Artifact, err error) *MockStore_ListPublishedArtifacts_Call {
+	_c.Call.Return(artifacts, err)
+	return _c
+}
+
+func (_c *MockStore_ListPublishedArtifacts_Call) RunAndReturn(run func(context1 context.Context, listPublishedArtifactsParams catalog.ListPublishedArtifactsParams) ([]catalog.Artifact, error)) *MockStore_ListPublishedArtifacts_Call {
 	_c.Call.Return(run)
 	return _c
 }
