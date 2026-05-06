@@ -359,6 +359,120 @@ func (_c *MockStore_DeleteAlias_Call) RunAndReturn(run func(context1 context.Con
 	return _c
 }
 
+// DeleteArtifact provides a mock function for the type MockStore
+func (_mock *MockStore) DeleteArtifact(context1 context.Context, deleteArtifactParams catalog.DeleteArtifactParams) error {
+	ret := _mock.Called(context1, deleteArtifactParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteArtifact")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.DeleteArtifactParams) error); ok {
+		r0 = returnFunc(context1, deleteArtifactParams)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockStore_DeleteArtifact_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteArtifact'
+type MockStore_DeleteArtifact_Call struct {
+	*mock.Call
+}
+
+// DeleteArtifact is a helper method to define mock.On call
+//   - context1 context.Context
+//   - deleteArtifactParams catalog.DeleteArtifactParams
+func (_e *MockStore_Expecter) DeleteArtifact(context1 interface{}, deleteArtifactParams interface{}) *MockStore_DeleteArtifact_Call {
+	return &MockStore_DeleteArtifact_Call{Call: _e.mock.On("DeleteArtifact", context1, deleteArtifactParams)}
+}
+
+func (_c *MockStore_DeleteArtifact_Call) Run(run func(context1 context.Context, deleteArtifactParams catalog.DeleteArtifactParams)) *MockStore_DeleteArtifact_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.DeleteArtifactParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.DeleteArtifactParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_DeleteArtifact_Call) Return(err error) *MockStore_DeleteArtifact_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockStore_DeleteArtifact_Call) RunAndReturn(run func(context1 context.Context, deleteArtifactParams catalog.DeleteArtifactParams) error) *MockStore_DeleteArtifact_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteAttachment provides a mock function for the type MockStore
+func (_mock *MockStore) DeleteAttachment(context1 context.Context, deleteAttachmentParams catalog.DeleteAttachmentParams) error {
+	ret := _mock.Called(context1, deleteAttachmentParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteAttachment")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.DeleteAttachmentParams) error); ok {
+		r0 = returnFunc(context1, deleteAttachmentParams)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockStore_DeleteAttachment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteAttachment'
+type MockStore_DeleteAttachment_Call struct {
+	*mock.Call
+}
+
+// DeleteAttachment is a helper method to define mock.On call
+//   - context1 context.Context
+//   - deleteAttachmentParams catalog.DeleteAttachmentParams
+func (_e *MockStore_Expecter) DeleteAttachment(context1 interface{}, deleteAttachmentParams interface{}) *MockStore_DeleteAttachment_Call {
+	return &MockStore_DeleteAttachment_Call{Call: _e.mock.On("DeleteAttachment", context1, deleteAttachmentParams)}
+}
+
+func (_c *MockStore_DeleteAttachment_Call) Run(run func(context1 context.Context, deleteAttachmentParams catalog.DeleteAttachmentParams)) *MockStore_DeleteAttachment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.DeleteAttachmentParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.DeleteAttachmentParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_DeleteAttachment_Call) Return(err error) *MockStore_DeleteAttachment_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockStore_DeleteAttachment_Call) RunAndReturn(run func(context1 context.Context, deleteAttachmentParams catalog.DeleteAttachmentParams) error) *MockStore_DeleteAttachment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetAlias provides a mock function for the type MockStore
 func (_mock *MockStore) GetAlias(context1 context.Context, getAliasParams catalog.GetAliasParams) (catalog.Alias, error) {
 	ret := _mock.Called(context1, getAliasParams)
@@ -421,6 +535,72 @@ func (_c *MockStore_GetAlias_Call) Return(alias catalog.Alias, err error) *MockS
 }
 
 func (_c *MockStore_GetAlias_Call) RunAndReturn(run func(context1 context.Context, getAliasParams catalog.GetAliasParams) (catalog.Alias, error)) *MockStore_GetAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetImage provides a mock function for the type MockStore
+func (_mock *MockStore) GetImage(context1 context.Context, getImageParams catalog.GetImageParams) (catalog.Image, error) {
+	ret := _mock.Called(context1, getImageParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetImage")
+	}
+
+	var r0 catalog.Image
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.GetImageParams) (catalog.Image, error)); ok {
+		return returnFunc(context1, getImageParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.GetImageParams) catalog.Image); ok {
+		r0 = returnFunc(context1, getImageParams)
+	} else {
+		r0 = ret.Get(0).(catalog.Image)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.GetImageParams) error); ok {
+		r1 = returnFunc(context1, getImageParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockStore_GetImage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImage'
+type MockStore_GetImage_Call struct {
+	*mock.Call
+}
+
+// GetImage is a helper method to define mock.On call
+//   - context1 context.Context
+//   - getImageParams catalog.GetImageParams
+func (_e *MockStore_Expecter) GetImage(context1 interface{}, getImageParams interface{}) *MockStore_GetImage_Call {
+	return &MockStore_GetImage_Call{Call: _e.mock.On("GetImage", context1, getImageParams)}
+}
+
+func (_c *MockStore_GetImage_Call) Run(run func(context1 context.Context, getImageParams catalog.GetImageParams)) *MockStore_GetImage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.GetImageParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.GetImageParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_GetImage_Call) Return(image catalog.Image, err error) *MockStore_GetImage_Call {
+	_c.Call.Return(image, err)
+	return _c
+}
+
+func (_c *MockStore_GetImage_Call) RunAndReturn(run func(context1 context.Context, getImageParams catalog.GetImageParams) (catalog.Image, error)) *MockStore_GetImage_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -555,6 +735,142 @@ func (_c *MockStore_ListAliases_Call) Return(aliass []catalog.Alias, err error) 
 }
 
 func (_c *MockStore_ListAliases_Call) RunAndReturn(run func(context1 context.Context, listAliasesParams catalog.ListAliasesParams) ([]catalog.Alias, error)) *MockStore_ListAliases_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListImages provides a mock function for the type MockStore
+func (_mock *MockStore) ListImages(context1 context.Context, listImagesParams catalog.ListImagesParams) ([]catalog.Image, error) {
+	ret := _mock.Called(context1, listImagesParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListImages")
+	}
+
+	var r0 []catalog.Image
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListImagesParams) ([]catalog.Image, error)); ok {
+		return returnFunc(context1, listImagesParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListImagesParams) []catalog.Image); ok {
+		r0 = returnFunc(context1, listImagesParams)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]catalog.Image)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.ListImagesParams) error); ok {
+		r1 = returnFunc(context1, listImagesParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockStore_ListImages_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListImages'
+type MockStore_ListImages_Call struct {
+	*mock.Call
+}
+
+// ListImages is a helper method to define mock.On call
+//   - context1 context.Context
+//   - listImagesParams catalog.ListImagesParams
+func (_e *MockStore_Expecter) ListImages(context1 interface{}, listImagesParams interface{}) *MockStore_ListImages_Call {
+	return &MockStore_ListImages_Call{Call: _e.mock.On("ListImages", context1, listImagesParams)}
+}
+
+func (_c *MockStore_ListImages_Call) Run(run func(context1 context.Context, listImagesParams catalog.ListImagesParams)) *MockStore_ListImages_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.ListImagesParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.ListImagesParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_ListImages_Call) Return(images []catalog.Image, err error) *MockStore_ListImages_Call {
+	_c.Call.Return(images, err)
+	return _c
+}
+
+func (_c *MockStore_ListImages_Call) RunAndReturn(run func(context1 context.Context, listImagesParams catalog.ListImagesParams) ([]catalog.Image, error)) *MockStore_ListImages_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListVersions provides a mock function for the type MockStore
+func (_mock *MockStore) ListVersions(context1 context.Context, listVersionsParams catalog.ListVersionsParams) ([]catalog.Version, error) {
+	ret := _mock.Called(context1, listVersionsParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListVersions")
+	}
+
+	var r0 []catalog.Version
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListVersionsParams) ([]catalog.Version, error)); ok {
+		return returnFunc(context1, listVersionsParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListVersionsParams) []catalog.Version); ok {
+		r0 = returnFunc(context1, listVersionsParams)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]catalog.Version)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.ListVersionsParams) error); ok {
+		r1 = returnFunc(context1, listVersionsParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockStore_ListVersions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListVersions'
+type MockStore_ListVersions_Call struct {
+	*mock.Call
+}
+
+// ListVersions is a helper method to define mock.On call
+//   - context1 context.Context
+//   - listVersionsParams catalog.ListVersionsParams
+func (_e *MockStore_Expecter) ListVersions(context1 interface{}, listVersionsParams interface{}) *MockStore_ListVersions_Call {
+	return &MockStore_ListVersions_Call{Call: _e.mock.On("ListVersions", context1, listVersionsParams)}
+}
+
+func (_c *MockStore_ListVersions_Call) Run(run func(context1 context.Context, listVersionsParams catalog.ListVersionsParams)) *MockStore_ListVersions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.ListVersionsParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.ListVersionsParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_ListVersions_Call) Return(versions []catalog.Version, err error) *MockStore_ListVersions_Call {
+	_c.Call.Return(versions, err)
+	return _c
+}
+
+func (_c *MockStore_ListVersions_Call) RunAndReturn(run func(context1 context.Context, listVersionsParams catalog.ListVersionsParams) ([]catalog.Version, error)) *MockStore_ListVersions_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -56,6 +56,43 @@ func TestCreateImageCreatesNamespace(t *testing.T) {
 	assert.Equal(t, description, *got.Description)
 }
 
+func TestListImagesReturnsNamespaces(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+
+	tc.catalog.EXPECT().
+		ListImages(mock.Anything, catalog.ListImagesParams{}).
+		Return([]catalog.Image{catalogImageFixture()}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/images", nil)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got imageListResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Len(t, got.Images, 1)
+	assert.Equal(t, "debian", got.Images[0].Name)
+}
+
+func TestGetImageReturnsNamespace(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+
+	tc.catalog.EXPECT().
+		GetImage(mock.Anything, catalog.GetImageParams{Name: "debian"}).
+		Return(catalogImageFixture(), nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/images/debian", nil)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got imageResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, "debian", got.Name)
+}
+
 func TestCreateDraftVersionCreatesVersionUnderImage(t *testing.T) {
 	tc := newCatalogHandlerTestContext(t)
 	wantVersion := catalogVersionFixture(catalog.VersionStateDraft)
@@ -82,6 +119,26 @@ func TestCreateDraftVersionCreatesVersionUnderImage(t *testing.T) {
 	assert.Equal(t, "v1.0.0", got.Version)
 	assert.Equal(t, catalog.VersionStateDraft, got.State)
 	assert.Nil(t, got.PublishedAt)
+}
+
+func TestListVersionsReturnsImageVersions(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+
+	tc.catalog.EXPECT().
+		ListVersions(mock.Anything, catalog.ListVersionsParams{ImageName: "debian"}).
+		Return([]catalog.Version{catalogVersionFixture(catalog.VersionStateDraft)}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/images/debian/versions", nil)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got versionListResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Len(t, got.Versions, 1)
+	assert.Equal(t, "v1.0.0", got.Versions[0].Version)
+	assert.Equal(t, catalog.VersionStateDraft, got.Versions[0].State)
 }
 
 func TestGetVersionManifestReturnsManifest(t *testing.T) {
@@ -175,6 +232,30 @@ func TestAddArtifactCreatesPrimaryArtifact(t *testing.T) {
 	assert.Equal(t, catalogDigestFixture().String(), got.PrimaryBlobDigest)
 }
 
+func TestDeleteArtifactDeletesDraftArtifact(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+
+	tc.catalog.EXPECT().
+		DeleteArtifact(mock.Anything, catalog.DeleteArtifactParams{
+			ImageName:  "debian",
+			Version:    "v1.0.0",
+			ArtifactID: catalogArtifactIDFixture(),
+		}).
+		Return(nil)
+
+	req := httptest.NewRequest(
+		http.MethodDelete,
+		"/v1/images/debian/versions/v1.0.0/artifacts/"+catalogArtifactIDFixture().String(),
+		nil,
+	)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Empty(t, rec.Body.String())
+}
+
 func TestAddAttachmentCreatesAttachmentUnderArtifactPath(t *testing.T) {
 	tc := newCatalogHandlerTestContext(t)
 	wantAttachment := catalogAttachmentFixture()
@@ -211,6 +292,34 @@ func TestAddAttachmentCreatesAttachmentUnderArtifactPath(t *testing.T) {
 	assert.Equal(t, catalogAttachmentIDFixture().String(), got.ID)
 	assert.Equal(t, catalogArtifactIDFixture().String(), got.ArtifactID)
 	assert.Equal(t, "rootfs.sha256", got.Name)
+}
+
+func TestDeleteAttachmentDeletesDraftAttachment(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+
+	tc.catalog.EXPECT().
+		DeleteAttachment(mock.Anything, catalog.DeleteAttachmentParams{
+			ImageName:    "debian",
+			Version:      "v1.0.0",
+			ArtifactID:   catalogArtifactIDFixture(),
+			AttachmentID: catalogAttachmentIDFixture(),
+		}).
+		Return(nil)
+
+	req := httptest.NewRequest(
+		http.MethodDelete,
+		"/v1/images/debian/versions/v1.0.0/artifacts/"+
+			catalogArtifactIDFixture().String()+
+			"/attachments/"+
+			catalogAttachmentIDFixture().String(),
+		nil,
+	)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Empty(t, rec.Body.String())
 }
 
 func TestPublishVersionPublishesDraft(t *testing.T) {
@@ -364,6 +473,20 @@ func TestCatalogHandlersRejectInvalidRequests(t *testing.T) {
 			want:   "artifact id must be a UUID",
 		},
 		{
+			name:   "delete artifact rejects invalid artifact id",
+			method: http.MethodDelete,
+			path:   "/v1/images/debian/versions/v1.0.0/artifacts/not-a-uuid",
+			want:   "artifact id must be a UUID",
+		},
+		{
+			name:   "delete attachment rejects invalid attachment id",
+			method: http.MethodDelete,
+			path: "/v1/images/debian/versions/v1.0.0/artifacts/" +
+				catalogArtifactIDFixture().String() +
+				"/attachments/not-a-uuid",
+			want: "attachment id must be a UUID",
+		},
+		{
 			name:   "add attachment rejects invalid digest",
 			method: http.MethodPost,
 			path: "/v1/images/debian/versions/v1.0.0/artifacts/" +
@@ -426,7 +549,10 @@ func TestCatalogHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 		body   string
 	}{
 		{name: "create image", method: http.MethodPost, path: "/v1/images", body: `{}`},
+		{name: "list images", method: http.MethodGet, path: "/v1/images"},
+		{name: "get image", method: http.MethodGet, path: "/v1/images/debian"},
 		{name: "create version", method: http.MethodPost, path: "/v1/images/debian/versions", body: `{}`},
+		{name: "list versions", method: http.MethodGet, path: "/v1/images/debian/versions"},
 		{name: "get manifest", method: http.MethodGet, path: "/v1/images/debian/versions/v1.0.0"},
 		{name: "resolve manifest", method: http.MethodGet, path: "/v1/images/debian/refs/latest"},
 		{
@@ -441,6 +567,19 @@ func TestCatalogHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 			path: "/v1/images/debian/versions/v1.0.0/artifacts/" + catalogArtifactIDFixture().String() +
 				"/attachments",
 			body: `{}`,
+		},
+		{
+			name:   "delete artifact",
+			method: http.MethodDelete,
+			path:   "/v1/images/debian/versions/v1.0.0/artifacts/" + catalogArtifactIDFixture().String(),
+		},
+		{
+			name:   "delete attachment",
+			method: http.MethodDelete,
+			path: "/v1/images/debian/versions/v1.0.0/artifacts/" +
+				catalogArtifactIDFixture().String() +
+				"/attachments/" +
+				catalogAttachmentIDFixture().String(),
 		},
 		{name: "publish", method: http.MethodPost, path: "/v1/images/debian/versions/v1.0.0/publish"},
 		{name: "put alias", method: http.MethodPut, path: "/v1/images/debian/aliases/latest", body: `{}`},

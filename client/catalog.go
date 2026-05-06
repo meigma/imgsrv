@@ -11,8 +11,17 @@ type CatalogClient interface {
 	// CreateImage creates an image namespace.
 	CreateImage(context.Context, CreateImageRequest) (Image, error)
 
+	// ListImages returns image namespaces with published versions.
+	ListImages(context.Context) ([]Image, error)
+
+	// GetImage returns one image namespace with a published version.
+	GetImage(context.Context, string) (Image, error)
+
 	// CreateDraftVersion creates a mutable draft version for an image.
 	CreateDraftVersion(context.Context, string, CreateDraftVersionRequest) (ImageVersion, error)
+
+	// ListVersions returns published versions for an image.
+	ListVersions(context.Context, string) ([]ImageVersion, error)
 
 	// GetVersionManifest returns an exact draft or published version manifest.
 	GetVersionManifest(context.Context, string, string) (Manifest, error)
@@ -22,6 +31,12 @@ type CatalogClient interface {
 
 	// AddAttachment adds a secondary attachment on a draft artifact.
 	AddAttachment(context.Context, string, string, string, AddAttachmentRequest) (Attachment, error)
+
+	// DeleteArtifact removes a primary artifact from a draft version.
+	DeleteArtifact(context.Context, string, string, string) error
+
+	// DeleteAttachment removes an attachment from a draft artifact.
+	DeleteAttachment(context.Context, string, string, string, string) error
 
 	// PublishVersion publishes a draft version.
 	PublishVersion(context.Context, string, string) (ImageVersion, error)
@@ -131,6 +146,12 @@ type Image struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// imageListResponse is the JSON wire shape for image lists.
+type imageListResponse struct {
+	// Images are image namespaces in stable order.
+	Images []Image `json:"images"`
+}
+
 // ImageVersion is a draft or published version of an image.
 type ImageVersion struct {
 	// ID is the stable image-version identity.
@@ -153,6 +174,12 @@ type ImageVersion struct {
 
 	// UpdatedAt is the RFC3339 timestamp when mutable version metadata last changed.
 	UpdatedAt string `json:"updated_at"`
+}
+
+// versionListResponse is the JSON wire shape for image version lists.
+type versionListResponse struct {
+	// Versions are image versions in stable order.
+	Versions []ImageVersion `json:"versions"`
 }
 
 // Artifact describes a primary release artifact on a version.
@@ -279,6 +306,23 @@ func (client *HTTPCatalogClient) CreateImage(ctx context.Context, request Create
 	return image, err
 }
 
+// ListImages returns image namespaces with published versions.
+func (client *HTTPCatalogClient) ListImages(ctx context.Context) ([]Image, error) {
+	var response imageListResponse
+	err := client.transport.do(ctx, http.MethodGet, "/v1/images", nil, 0, nil, &response)
+
+	return response.Images, err
+}
+
+// GetImage returns one image namespace with a published version.
+func (client *HTTPCatalogClient) GetImage(ctx context.Context, imageName string) (Image, error) {
+	var image Image
+	path := imagePath(imageName)
+	err := client.transport.do(ctx, http.MethodGet, path, nil, 0, nil, &image)
+
+	return image, err
+}
+
 // CreateDraftVersion creates a mutable draft version for an image.
 func (client *HTTPCatalogClient) CreateDraftVersion(
 	ctx context.Context,
@@ -290,6 +334,15 @@ func (client *HTTPCatalogClient) CreateDraftVersion(
 	err := client.transport.doJSON(ctx, path, request, http.StatusCreated, &version)
 
 	return version, err
+}
+
+// ListVersions returns published versions for an image.
+func (client *HTTPCatalogClient) ListVersions(ctx context.Context, imageName string) ([]ImageVersion, error) {
+	var response versionListResponse
+	path := imagePath(imageName) + "/versions"
+	err := client.transport.do(ctx, http.MethodGet, path, nil, 0, nil, &response)
+
+	return response.Versions, err
 }
 
 // GetVersionManifest returns an exact draft or published version manifest.
@@ -332,6 +385,31 @@ func (client *HTTPCatalogClient) AddAttachment(
 	err := client.transport.doJSON(ctx, path, request, http.StatusCreated, &attachment)
 
 	return attachment, err
+}
+
+// DeleteArtifact removes a primary artifact from a draft version.
+func (client *HTTPCatalogClient) DeleteArtifact(
+	ctx context.Context,
+	imageName string,
+	version string,
+	artifactID string,
+) error {
+	path := artifactPath(imageName, version, artifactID)
+
+	return client.deleteNoContent(ctx, path)
+}
+
+// DeleteAttachment removes an attachment from a draft artifact.
+func (client *HTTPCatalogClient) DeleteAttachment(
+	ctx context.Context,
+	imageName string,
+	version string,
+	artifactID string,
+	attachmentID string,
+) error {
+	path := artifactPath(imageName, version, artifactID) + "/attachments/" + url.PathEscape(attachmentID)
+
+	return client.deleteNoContent(ctx, path)
 }
 
 // PublishVersion publishes a draft version.
@@ -380,10 +458,15 @@ func (client *HTTPCatalogClient) GetAlias(ctx context.Context, imageName string,
 
 // DeleteAlias removes one image alias.
 func (client *HTTPCatalogClient) DeleteAlias(ctx context.Context, imageName string, aliasName string) error {
+	return client.deleteNoContent(ctx, aliasPath(imageName, aliasName))
+}
+
+// deleteNoContent issues a DELETE request and requires a 204 response.
+func (client *HTTPCatalogClient) deleteNoContent(ctx context.Context, path string) error {
 	resp, err := client.transport.doResponse(
 		ctx,
 		http.MethodDelete,
-		aliasPath(imageName, aliasName),
+		path,
 		nil,
 		0,
 		nil,
@@ -408,9 +491,19 @@ func (client *HTTPCatalogClient) ResolveManifest(ctx context.Context, imageName 
 	return manifest, err
 }
 
+// imagePath returns the API path for one image namespace.
+func imagePath(imageName string) string {
+	return "/v1/images/" + url.PathEscape(imageName)
+}
+
 // versionPath returns the API path for an exact image version.
 func versionPath(imageName string, version string) string {
-	return "/v1/images/" + url.PathEscape(imageName) + "/versions/" + url.PathEscape(version)
+	return imagePath(imageName) + "/versions/" + url.PathEscape(version)
+}
+
+// artifactPath returns the API path for one version artifact.
+func artifactPath(imageName string, version string, artifactID string) string {
+	return versionPath(imageName, version) + "/artifacts/" + url.PathEscape(artifactID)
 }
 
 // aliasPath returns the API path for one image alias.

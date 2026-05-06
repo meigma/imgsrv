@@ -94,6 +94,12 @@ type imageResponse struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// imageListResponse is the JSON wire shape for image namespace lists.
+type imageListResponse struct {
+	// Images are image namespaces in stable order.
+	Images []imageResponse `json:"images"`
+}
+
 // versionResponse is the JSON wire shape of an image version.
 type versionResponse struct {
 	// ID is the stable image-version identity.
@@ -116,6 +122,12 @@ type versionResponse struct {
 
 	// UpdatedAt is when mutable version metadata last changed.
 	UpdatedAt string `json:"updated_at"`
+}
+
+// versionListResponse is the JSON wire shape for image version lists.
+type versionListResponse struct {
+	// Versions are image versions in stable order.
+	Versions []versionResponse `json:"versions"`
 }
 
 // artifactResponse is the JSON wire shape of a primary release artifact.
@@ -255,6 +267,38 @@ func (a *api) createImage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, newImageResponse(image))
 }
 
+// listImages handles GET /v1/images and returns image namespaces with published versions.
+func (a *api) listImages(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.catalogService(w)
+	if !ok {
+		return
+	}
+
+	images, err := service.ListImages(r.Context(), catalog.ListImagesParams{})
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newImageListResponse(images))
+}
+
+// getImage handles GET /v1/images/{name} and returns one image namespace with a published version.
+func (a *api) getImage(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.catalogService(w)
+	if !ok {
+		return
+	}
+
+	image, err := service.GetImage(r.Context(), catalog.GetImageParams{Name: r.PathValue("name")})
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newImageResponse(image))
+}
+
 // createDraftVersion handles POST /v1/images/{name}/versions and creates a draft version.
 func (a *api) createDraftVersion(w http.ResponseWriter, r *http.Request) {
 	service, ok := a.catalogService(w)
@@ -278,6 +322,24 @@ func (a *api) createDraftVersion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, newVersionResponse(version))
+}
+
+// listVersions handles GET /v1/images/{name}/versions and returns published image versions.
+func (a *api) listVersions(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.catalogService(w)
+	if !ok {
+		return
+	}
+
+	versions, err := service.ListVersions(r.Context(), catalog.ListVersionsParams{
+		ImageName: r.PathValue("name"),
+	})
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newVersionListResponse(versions))
 }
 
 // getVersionManifest handles GET /v1/images/{name}/versions/{version} and returns an exact version manifest.
@@ -354,6 +416,30 @@ func (a *api) addArtifact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, newArtifactResponse(artifact))
 }
 
+// deleteArtifact handles DELETE /v1/images/{name}/versions/{version}/artifacts/{artifact_id}.
+func (a *api) deleteArtifact(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.catalogService(w)
+	if !ok {
+		return
+	}
+	artifactID, ok := parseArtifactIDPath(w, r)
+	if !ok {
+		return
+	}
+
+	err := service.DeleteArtifact(r.Context(), catalog.DeleteArtifactParams{
+		ImageName:  r.PathValue("name"),
+		Version:    r.PathValue("version"),
+		ArtifactID: artifactID,
+	})
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // addAttachment handles POST /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments.
 func (a *api) addAttachment(w http.ResponseWriter, r *http.Request) {
 	service, ok := a.catalogService(w)
@@ -391,6 +477,35 @@ func (a *api) addAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, newAttachmentResponse(attachment))
+}
+
+// deleteAttachment handles DELETE /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments/{attachment_id}.
+func (a *api) deleteAttachment(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.catalogService(w)
+	if !ok {
+		return
+	}
+	artifactID, ok := parseArtifactIDPath(w, r)
+	if !ok {
+		return
+	}
+	attachmentID, ok := parseAttachmentIDPath(w, r)
+	if !ok {
+		return
+	}
+
+	err := service.DeleteAttachment(r.Context(), catalog.DeleteAttachmentParams{
+		ImageName:    r.PathValue("name"),
+		Version:      r.PathValue("version"),
+		ArtifactID:   artifactID,
+		AttachmentID: attachmentID,
+	})
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // publishVersion handles POST /v1/images/{name}/versions/{version}/publish and publishes a draft version.
@@ -517,6 +632,19 @@ func parseArtifactIDPath(w http.ResponseWriter, r *http.Request) (uuid.UUID, boo
 	return artifactID, true
 }
 
+// parseAttachmentIDPath extracts and validates the attachment ID path value.
+//
+// On failure it writes a problem response and returns false; callers should not write further.
+func parseAttachmentIDPath(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	attachmentID, err := uuid.Parse(r.PathValue("attachment_id"))
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "attachment id must be a UUID")
+		return uuid.Nil, false
+	}
+
+	return attachmentID, true
+}
+
 // newImageResponse projects an image namespace onto its JSON wire shape.
 func newImageResponse(image catalog.Image) imageResponse {
 	return imageResponse{
@@ -527,6 +655,16 @@ func newImageResponse(image catalog.Image) imageResponse {
 		CreatedAt:   formatCatalogTime(image.CreatedAt),
 		UpdatedAt:   formatCatalogTime(image.UpdatedAt),
 	}
+}
+
+// newImageListResponse projects image namespaces onto their JSON wire shape.
+func newImageListResponse(images []catalog.Image) imageListResponse {
+	items := make([]imageResponse, 0, len(images))
+	for _, image := range images {
+		items = append(items, newImageResponse(image))
+	}
+
+	return imageListResponse{Images: items}
 }
 
 // newVersionResponse projects an image version onto its JSON wire shape.
@@ -540,6 +678,16 @@ func newVersionResponse(version catalog.Version) versionResponse {
 		CreatedAt:   formatCatalogTime(version.CreatedAt),
 		UpdatedAt:   formatCatalogTime(version.UpdatedAt),
 	}
+}
+
+// newVersionListResponse projects image versions onto their JSON wire shape.
+func newVersionListResponse(versions []catalog.Version) versionListResponse {
+	items := make([]versionResponse, 0, len(versions))
+	for _, version := range versions {
+		items = append(items, newVersionResponse(version))
+	}
+
+	return versionListResponse{Versions: items}
 }
 
 // newArtifactResponse projects a release artifact onto its JSON wire shape.

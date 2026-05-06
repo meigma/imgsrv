@@ -179,6 +179,90 @@ func (store *Store) AddAttachment(
 	return attachment, nil
 }
 
+// DeleteArtifact removes a primary artifact from a draft version.
+func (store *Store) DeleteArtifact(ctx context.Context, params domain.DeleteArtifactParams) error {
+	if err := validateDeleteArtifactParams(params); err != nil {
+		return err
+	}
+
+	err := store.withTx(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(
+			ctx,
+			`DELETE FROM artifact_attachments
+			USING release_artifacts, image_versions, images
+			WHERE artifact_attachments.artifact_id = release_artifacts.id
+				AND release_artifacts.version_id = image_versions.id
+				AND image_versions.image_id = images.id
+				AND images.name = $1
+				AND image_versions.version = $2
+				AND release_artifacts.id = $3`,
+			params.ImageName,
+			params.Version,
+			params.ArtifactID,
+		)
+		if err != nil {
+			return err
+		}
+
+		var id uuid.UUID
+		return tx.QueryRow(
+			ctx,
+			`DELETE FROM release_artifacts
+			USING image_versions, images
+			WHERE release_artifacts.version_id = image_versions.id
+				AND image_versions.image_id = images.id
+				AND images.name = $1
+				AND image_versions.version = $2
+				AND release_artifacts.id = $3
+			RETURNING release_artifacts.id`,
+			params.ImageName,
+			params.Version,
+			params.ArtifactID,
+		).Scan(&id)
+	})
+	if err != nil {
+		return mapCatalogError(err)
+	}
+
+	return nil
+}
+
+// DeleteAttachment removes an attachment from a draft artifact.
+func (store *Store) DeleteAttachment(ctx context.Context, params domain.DeleteAttachmentParams) error {
+	if err := validateDeleteAttachmentParams(params); err != nil {
+		return err
+	}
+
+	db, err := store.catalogDB()
+	if err != nil {
+		return err
+	}
+
+	var id uuid.UUID
+	err = db.QueryRow(
+		ctx,
+		`DELETE FROM artifact_attachments
+		USING release_artifacts, image_versions, images
+		WHERE artifact_attachments.artifact_id = release_artifacts.id
+			AND release_artifacts.version_id = image_versions.id
+			AND image_versions.image_id = images.id
+			AND images.name = $1
+			AND image_versions.version = $2
+			AND release_artifacts.id = $3
+			AND artifact_attachments.id = $4
+		RETURNING artifact_attachments.id`,
+		params.ImageName,
+		params.Version,
+		params.ArtifactID,
+		params.AttachmentID,
+	).Scan(&id)
+	if err != nil {
+		return mapCatalogError(err)
+	}
+
+	return nil
+}
+
 // PublishVersion publishes a draft version.
 func (store *Store) PublishVersion(
 	ctx context.Context,

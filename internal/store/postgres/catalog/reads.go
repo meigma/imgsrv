@@ -16,6 +16,123 @@ type queryer interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
+// getImageID resolves imageName to an image ID and maps a missing image to
+// the catalog not-found sentinel.
+func getImageID(ctx context.Context, db queryer, imageName string) (uuid.UUID, error) {
+	var imageID uuid.UUID
+	err := db.QueryRow(ctx, `SELECT id FROM images WHERE name = $1`, imageName).Scan(&imageID)
+	if err != nil {
+		return uuid.Nil, mapCatalogError(err)
+	}
+
+	return imageID, nil
+}
+
+// getPublicImageID resolves imageName to an image ID only when the image has
+// at least one published version.
+func getPublicImageID(ctx context.Context, db queryer, imageName string) (uuid.UUID, error) {
+	var imageID uuid.UUID
+	err := db.QueryRow(
+		ctx,
+		`SELECT id
+		FROM images
+		WHERE name = $1
+			AND EXISTS (
+				SELECT 1
+				FROM image_versions
+				WHERE image_versions.image_id = images.id
+					AND image_versions.state = 'published'
+			)`,
+		imageName,
+	).Scan(&imageID)
+	if err != nil {
+		return uuid.Nil, mapCatalogError(err)
+	}
+
+	return imageID, nil
+}
+
+// collectRows scans a pgx row set into a typed domain slice and always closes
+// the row cursor.
+func collectRows[T any](rows pgx.Rows, scan func(rowScanner) (T, error)) ([]T, error) {
+	defer rows.Close()
+
+	var items []T
+	for rows.Next() {
+		item, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
+// ListImages returns image namespaces with published versions ordered by image name.
+func (store *Store) ListImages(ctx context.Context, params domain.ListImagesParams) ([]domain.Image, error) {
+	if err := validateListImagesParams(params); err != nil {
+		return nil, err
+	}
+
+	db, err := store.catalogDB()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := db.Query(
+		ctx,
+		`SELECT id, name, display_name, description, created_at, updated_at
+		FROM images
+		WHERE EXISTS (
+			SELECT 1
+			FROM image_versions
+			WHERE image_versions.image_id = images.id
+				AND image_versions.state = 'published'
+		)
+		ORDER BY name, id`,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return collectRows(rows, scanImage)
+}
+
+// GetImage returns one image namespace by name when it has a published version.
+func (store *Store) GetImage(ctx context.Context, params domain.GetImageParams) (domain.Image, error) {
+	if err := validateGetImageParams(params); err != nil {
+		return domain.Image{}, err
+	}
+
+	db, err := store.catalogDB()
+	if err != nil {
+		return domain.Image{}, err
+	}
+
+	image, err := scanImage(db.QueryRow(
+		ctx,
+		`SELECT id, name, display_name, description, created_at, updated_at
+		FROM images
+		WHERE name = $1
+			AND EXISTS (
+				SELECT 1
+				FROM image_versions
+				WHERE image_versions.image_id = images.id
+					AND image_versions.state = 'published'
+			)`,
+		params.Name,
+	))
+	if err != nil {
+		return domain.Image{}, mapCatalogError(err)
+	}
+
+	return image, nil
+}
+
 // GetAlias looks up an image alias.
 func (store *Store) GetAlias(ctx context.Context, params domain.GetAliasParams) (domain.Alias, error) {
 	if err := validateGetAliasParams(params); err != nil {
@@ -62,10 +179,9 @@ func (store *Store) ListAliases(ctx context.Context, params domain.ListAliasesPa
 		return nil, err
 	}
 
-	var imageID uuid.UUID
-	err = db.QueryRow(ctx, `SELECT id FROM images WHERE name = $1`, params.ImageName).Scan(&imageID)
+	imageID, err := getImageID(ctx, db, params.ImageName)
 	if err != nil {
-		return nil, mapCatalogError(err)
+		return nil, err
 	}
 
 	rows, err := db.Query(
@@ -86,21 +202,40 @@ func (store *Store) ListAliases(ctx context.Context, params domain.ListAliasesPa
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var aliases []domain.Alias
-	for rows.Next() {
-		alias, err := scanAlias(rows)
-		if err != nil {
-			return nil, err
-		}
-		aliases = append(aliases, alias)
-	}
-	if err := rows.Err(); err != nil {
+	return collectRows(rows, scanAlias)
+}
+
+// ListVersions returns published versions for one image ordered by creation time descending.
+func (store *Store) ListVersions(ctx context.Context, params domain.ListVersionsParams) ([]domain.Version, error) {
+	if err := validateListVersionsParams(params); err != nil {
 		return nil, err
 	}
 
-	return aliases, nil
+	db, err := store.catalogDB()
+	if err != nil {
+		return nil, err
+	}
+
+	imageID, err := getPublicImageID(ctx, db, params.ImageName)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := db.Query(
+		ctx,
+		`SELECT id, image_id, version, state, published_at, created_at, updated_at
+		FROM image_versions
+		WHERE image_id = $1
+			AND state = 'published'
+		ORDER BY created_at DESC, version, id`,
+		imageID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return collectRows(rows, scanVersion)
 }
 
 // GetVersionManifest resolves the manifest for an exact draft or published image version.

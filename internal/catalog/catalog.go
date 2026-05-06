@@ -38,14 +38,29 @@ type Store interface {
 	// CreateImage creates an operator-defined image namespace.
 	CreateImage(context.Context, CreateImageParams) (Image, error)
 
+	// ListImages returns image namespaces with published versions in stable order.
+	ListImages(context.Context, ListImagesParams) ([]Image, error)
+
+	// GetImage returns one image namespace by name when it has a published version.
+	GetImage(context.Context, GetImageParams) (Image, error)
+
 	// CreateDraftVersion creates a mutable draft version for an image.
 	CreateDraftVersion(context.Context, CreateDraftVersionParams) (Version, error)
+
+	// ListVersions returns published versions for one image in stable order.
+	ListVersions(context.Context, ListVersionsParams) ([]Version, error)
 
 	// AddArtifact adds a primary artifact on a draft version.
 	AddArtifact(context.Context, AddArtifactParams) (Artifact, error)
 
 	// AddAttachment adds a secondary attachment on a draft version.
 	AddAttachment(context.Context, AddAttachmentParams) (Attachment, error)
+
+	// DeleteArtifact removes a primary artifact from a draft version.
+	DeleteArtifact(context.Context, DeleteArtifactParams) error
+
+	// DeleteAttachment removes an attachment from a draft artifact.
+	DeleteAttachment(context.Context, DeleteAttachmentParams) error
 
 	// PublishVersion marks a draft version immutable and publishable.
 	PublishVersion(context.Context, PublishVersionParams) (Version, error)
@@ -270,6 +285,15 @@ type CreateImageParams struct {
 	Description *string
 }
 
+// ListImagesParams lists image namespaces.
+type ListImagesParams struct{}
+
+// GetImageParams looks up one image namespace.
+type GetImageParams struct {
+	// Name identifies the image namespace.
+	Name string
+}
+
 // CreateDraftVersionParams creates a mutable draft version.
 type CreateDraftVersionParams struct {
 	// ImageName identifies the parent image by name.
@@ -277,6 +301,12 @@ type CreateDraftVersionParams struct {
 
 	// Version is the operator-defined version string.
 	Version string
+}
+
+// ListVersionsParams lists versions for an image.
+type ListVersionsParams struct {
+	// ImageName identifies the image that owns the versions.
+	ImageName string
 }
 
 // AddArtifactParams adds a primary artifact to a draft version.
@@ -328,6 +358,33 @@ type AddAttachmentParams struct {
 
 	// BlobSizeBytes is the expected size of the attachment CAS blob.
 	BlobSizeBytes int64
+}
+
+// DeleteArtifactParams removes a primary artifact from a draft version.
+type DeleteArtifactParams struct {
+	// ImageName identifies the parent image by name.
+	ImageName string
+
+	// Version identifies the draft image version.
+	Version string
+
+	// ArtifactID identifies the artifact to remove.
+	ArtifactID uuid.UUID
+}
+
+// DeleteAttachmentParams removes an attachment from a draft artifact.
+type DeleteAttachmentParams struct {
+	// ImageName identifies the parent image by name.
+	ImageName string
+
+	// Version identifies the draft image version.
+	Version string
+
+	// ArtifactID identifies the parent artifact.
+	ArtifactID uuid.UUID
+
+	// AttachmentID identifies the attachment to remove.
+	AttachmentID uuid.UUID
 }
 
 // PublishVersionParams publishes a draft version.

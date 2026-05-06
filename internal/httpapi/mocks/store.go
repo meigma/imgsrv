@@ -719,6 +719,120 @@ func (_c *MockCatalogService_DeleteAlias_Call) RunAndReturn(run func(context1 co
 	return _c
 }
 
+// DeleteArtifact provides a mock function for the type MockCatalogService
+func (_mock *MockCatalogService) DeleteArtifact(context1 context.Context, deleteArtifactParams catalog.DeleteArtifactParams) error {
+	ret := _mock.Called(context1, deleteArtifactParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteArtifact")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.DeleteArtifactParams) error); ok {
+		r0 = returnFunc(context1, deleteArtifactParams)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockCatalogService_DeleteArtifact_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteArtifact'
+type MockCatalogService_DeleteArtifact_Call struct {
+	*mock.Call
+}
+
+// DeleteArtifact is a helper method to define mock.On call
+//   - context1 context.Context
+//   - deleteArtifactParams catalog.DeleteArtifactParams
+func (_e *MockCatalogService_Expecter) DeleteArtifact(context1 interface{}, deleteArtifactParams interface{}) *MockCatalogService_DeleteArtifact_Call {
+	return &MockCatalogService_DeleteArtifact_Call{Call: _e.mock.On("DeleteArtifact", context1, deleteArtifactParams)}
+}
+
+func (_c *MockCatalogService_DeleteArtifact_Call) Run(run func(context1 context.Context, deleteArtifactParams catalog.DeleteArtifactParams)) *MockCatalogService_DeleteArtifact_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.DeleteArtifactParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.DeleteArtifactParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCatalogService_DeleteArtifact_Call) Return(err error) *MockCatalogService_DeleteArtifact_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockCatalogService_DeleteArtifact_Call) RunAndReturn(run func(context1 context.Context, deleteArtifactParams catalog.DeleteArtifactParams) error) *MockCatalogService_DeleteArtifact_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteAttachment provides a mock function for the type MockCatalogService
+func (_mock *MockCatalogService) DeleteAttachment(context1 context.Context, deleteAttachmentParams catalog.DeleteAttachmentParams) error {
+	ret := _mock.Called(context1, deleteAttachmentParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteAttachment")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.DeleteAttachmentParams) error); ok {
+		r0 = returnFunc(context1, deleteAttachmentParams)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockCatalogService_DeleteAttachment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteAttachment'
+type MockCatalogService_DeleteAttachment_Call struct {
+	*mock.Call
+}
+
+// DeleteAttachment is a helper method to define mock.On call
+//   - context1 context.Context
+//   - deleteAttachmentParams catalog.DeleteAttachmentParams
+func (_e *MockCatalogService_Expecter) DeleteAttachment(context1 interface{}, deleteAttachmentParams interface{}) *MockCatalogService_DeleteAttachment_Call {
+	return &MockCatalogService_DeleteAttachment_Call{Call: _e.mock.On("DeleteAttachment", context1, deleteAttachmentParams)}
+}
+
+func (_c *MockCatalogService_DeleteAttachment_Call) Run(run func(context1 context.Context, deleteAttachmentParams catalog.DeleteAttachmentParams)) *MockCatalogService_DeleteAttachment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.DeleteAttachmentParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.DeleteAttachmentParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCatalogService_DeleteAttachment_Call) Return(err error) *MockCatalogService_DeleteAttachment_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockCatalogService_DeleteAttachment_Call) RunAndReturn(run func(context1 context.Context, deleteAttachmentParams catalog.DeleteAttachmentParams) error) *MockCatalogService_DeleteAttachment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetAlias provides a mock function for the type MockCatalogService
 func (_mock *MockCatalogService) GetAlias(context1 context.Context, getAliasParams catalog.GetAliasParams) (catalog.Alias, error) {
 	ret := _mock.Called(context1, getAliasParams)
@@ -781,6 +895,72 @@ func (_c *MockCatalogService_GetAlias_Call) Return(alias catalog.Alias, err erro
 }
 
 func (_c *MockCatalogService_GetAlias_Call) RunAndReturn(run func(context1 context.Context, getAliasParams catalog.GetAliasParams) (catalog.Alias, error)) *MockCatalogService_GetAlias_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetImage provides a mock function for the type MockCatalogService
+func (_mock *MockCatalogService) GetImage(context1 context.Context, getImageParams catalog.GetImageParams) (catalog.Image, error) {
+	ret := _mock.Called(context1, getImageParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetImage")
+	}
+
+	var r0 catalog.Image
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.GetImageParams) (catalog.Image, error)); ok {
+		return returnFunc(context1, getImageParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.GetImageParams) catalog.Image); ok {
+		r0 = returnFunc(context1, getImageParams)
+	} else {
+		r0 = ret.Get(0).(catalog.Image)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.GetImageParams) error); ok {
+		r1 = returnFunc(context1, getImageParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockCatalogService_GetImage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImage'
+type MockCatalogService_GetImage_Call struct {
+	*mock.Call
+}
+
+// GetImage is a helper method to define mock.On call
+//   - context1 context.Context
+//   - getImageParams catalog.GetImageParams
+func (_e *MockCatalogService_Expecter) GetImage(context1 interface{}, getImageParams interface{}) *MockCatalogService_GetImage_Call {
+	return &MockCatalogService_GetImage_Call{Call: _e.mock.On("GetImage", context1, getImageParams)}
+}
+
+func (_c *MockCatalogService_GetImage_Call) Run(run func(context1 context.Context, getImageParams catalog.GetImageParams)) *MockCatalogService_GetImage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.GetImageParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.GetImageParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCatalogService_GetImage_Call) Return(image catalog.Image, err error) *MockCatalogService_GetImage_Call {
+	_c.Call.Return(image, err)
+	return _c
+}
+
+func (_c *MockCatalogService_GetImage_Call) RunAndReturn(run func(context1 context.Context, getImageParams catalog.GetImageParams) (catalog.Image, error)) *MockCatalogService_GetImage_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -915,6 +1095,142 @@ func (_c *MockCatalogService_ListAliases_Call) Return(aliass []catalog.Alias, er
 }
 
 func (_c *MockCatalogService_ListAliases_Call) RunAndReturn(run func(context1 context.Context, listAliasesParams catalog.ListAliasesParams) ([]catalog.Alias, error)) *MockCatalogService_ListAliases_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListImages provides a mock function for the type MockCatalogService
+func (_mock *MockCatalogService) ListImages(context1 context.Context, listImagesParams catalog.ListImagesParams) ([]catalog.Image, error) {
+	ret := _mock.Called(context1, listImagesParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListImages")
+	}
+
+	var r0 []catalog.Image
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListImagesParams) ([]catalog.Image, error)); ok {
+		return returnFunc(context1, listImagesParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListImagesParams) []catalog.Image); ok {
+		r0 = returnFunc(context1, listImagesParams)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]catalog.Image)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.ListImagesParams) error); ok {
+		r1 = returnFunc(context1, listImagesParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockCatalogService_ListImages_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListImages'
+type MockCatalogService_ListImages_Call struct {
+	*mock.Call
+}
+
+// ListImages is a helper method to define mock.On call
+//   - context1 context.Context
+//   - listImagesParams catalog.ListImagesParams
+func (_e *MockCatalogService_Expecter) ListImages(context1 interface{}, listImagesParams interface{}) *MockCatalogService_ListImages_Call {
+	return &MockCatalogService_ListImages_Call{Call: _e.mock.On("ListImages", context1, listImagesParams)}
+}
+
+func (_c *MockCatalogService_ListImages_Call) Run(run func(context1 context.Context, listImagesParams catalog.ListImagesParams)) *MockCatalogService_ListImages_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.ListImagesParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.ListImagesParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCatalogService_ListImages_Call) Return(images []catalog.Image, err error) *MockCatalogService_ListImages_Call {
+	_c.Call.Return(images, err)
+	return _c
+}
+
+func (_c *MockCatalogService_ListImages_Call) RunAndReturn(run func(context1 context.Context, listImagesParams catalog.ListImagesParams) ([]catalog.Image, error)) *MockCatalogService_ListImages_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListVersions provides a mock function for the type MockCatalogService
+func (_mock *MockCatalogService) ListVersions(context1 context.Context, listVersionsParams catalog.ListVersionsParams) ([]catalog.Version, error) {
+	ret := _mock.Called(context1, listVersionsParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListVersions")
+	}
+
+	var r0 []catalog.Version
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListVersionsParams) ([]catalog.Version, error)); ok {
+		return returnFunc(context1, listVersionsParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, catalog.ListVersionsParams) []catalog.Version); ok {
+		r0 = returnFunc(context1, listVersionsParams)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]catalog.Version)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, catalog.ListVersionsParams) error); ok {
+		r1 = returnFunc(context1, listVersionsParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockCatalogService_ListVersions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListVersions'
+type MockCatalogService_ListVersions_Call struct {
+	*mock.Call
+}
+
+// ListVersions is a helper method to define mock.On call
+//   - context1 context.Context
+//   - listVersionsParams catalog.ListVersionsParams
+func (_e *MockCatalogService_Expecter) ListVersions(context1 interface{}, listVersionsParams interface{}) *MockCatalogService_ListVersions_Call {
+	return &MockCatalogService_ListVersions_Call{Call: _e.mock.On("ListVersions", context1, listVersionsParams)}
+}
+
+func (_c *MockCatalogService_ListVersions_Call) Run(run func(context1 context.Context, listVersionsParams catalog.ListVersionsParams)) *MockCatalogService_ListVersions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 catalog.ListVersionsParams
+		if args[1] != nil {
+			arg1 = args[1].(catalog.ListVersionsParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockCatalogService_ListVersions_Call) Return(versions []catalog.Version, err error) *MockCatalogService_ListVersions_Call {
+	_c.Call.Return(versions, err)
+	return _c
+}
+
+func (_c *MockCatalogService_ListVersions_Call) RunAndReturn(run func(context1 context.Context, listVersionsParams catalog.ListVersionsParams) ([]catalog.Version, error)) *MockCatalogService_ListVersions_Call {
 	_c.Call.Return(run)
 	return _c
 }
