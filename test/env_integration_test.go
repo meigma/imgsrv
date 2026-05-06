@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"net/http"
 	"testing"
 	"time"
 
@@ -150,6 +151,76 @@ func TestEnvWithCASPromotionPublishesReleaseFlow(t *testing.T) {
 	)
 }
 
+func TestEnvWithCASPromotionManagesAliases(t *testing.T) {
+	env := imgsrvtest.Start(t, imgsrvtest.WithCASPromotion())
+	client := env.Client(t)
+	ctx := t.Context()
+	catalog := client.Catalog()
+	primaryBlob := uploadReadyBlob(ctx, t, client, []byte("public imgsrv alias primary artifact"))
+
+	image, err := catalog.CreateImage(ctx, imgsrv.CreateImageRequest{Name: "public-alias-flow"})
+	require.NoError(t, err)
+
+	first := publishVersionWithArtifact(ctx, t, catalog, image.Name, "v1.0.0", primaryBlob)
+	second := publishVersionWithArtifact(ctx, t, catalog, image.Name, "v1.1.0", primaryBlob)
+
+	alias, err := catalog.PutAlias(ctx, image.Name, "latest", imgsrv.PutAliasRequest{Version: first.Version})
+	require.NoError(t, err)
+	assert.Equal(t, "latest", alias.Alias)
+	assert.Equal(t, first.ID, alias.VersionID)
+	assert.Equal(t, first.Version, alias.Version)
+
+	gotAlias, err := catalog.GetAlias(ctx, image.Name, "latest")
+	require.NoError(t, err)
+	assert.Equal(t, alias.ID, gotAlias.ID)
+
+	aliases, err := catalog.ListAliases(ctx, image.Name)
+	require.NoError(t, err)
+	require.Len(t, aliases, 1)
+	assert.Equal(t, alias.ID, aliases[0].ID)
+
+	resolved, err := catalog.ResolveManifest(ctx, image.Name, "latest")
+	require.NoError(t, err)
+	assert.Equal(t, first.Version, resolved.Version.Version)
+
+	moved, err := catalog.PutAlias(ctx, image.Name, "latest", imgsrv.PutAliasRequest{Version: second.Version})
+	require.NoError(t, err)
+	assert.Equal(t, alias.ID, moved.ID)
+	assert.Equal(t, second.ID, moved.VersionID)
+
+	resolved, err = catalog.ResolveManifest(ctx, image.Name, "latest")
+	require.NoError(t, err)
+	assert.Equal(t, second.Version, resolved.Version.Version)
+
+	require.NoError(t, catalog.DeleteAlias(ctx, image.Name, "latest"))
+	_, err = catalog.GetAlias(ctx, image.Name, "latest")
+	assertProblemStatus(t, err, http.StatusNotFound)
+	_, err = catalog.ResolveManifest(ctx, image.Name, "latest")
+	assertProblemStatus(t, err, http.StatusNotFound)
+
+	exact, err := catalog.GetVersionManifest(ctx, image.Name, first.Version)
+	require.NoError(t, err)
+	assert.Equal(t, first.Version, exact.Version.Version)
+}
+
+func TestEnvWithCASPromotionRejectsInvalidAliases(t *testing.T) {
+	env := imgsrvtest.Start(t, imgsrvtest.WithCASPromotion())
+	client := env.Client(t)
+	ctx := t.Context()
+	catalog := client.Catalog()
+
+	image, err := catalog.CreateImage(ctx, imgsrv.CreateImageRequest{Name: "public-invalid-aliases"})
+	require.NoError(t, err)
+	draft, err := catalog.CreateDraftVersion(ctx, image.Name, imgsrv.CreateDraftVersionRequest{Version: "v1.0.0"})
+	require.NoError(t, err)
+
+	_, err = catalog.PutAlias(ctx, image.Name, "latest", imgsrv.PutAliasRequest{Version: draft.Version})
+	assertProblemStatus(t, err, http.StatusPreconditionFailed)
+
+	_, err = catalog.PutAlias(ctx, image.Name, "latest", imgsrv.PutAliasRequest{Version: "v9.9.9"})
+	assertProblemStatus(t, err, http.StatusNotFound)
+}
+
 type releaseBlob struct {
 	Digest    imgsrv.Digest
 	SizeBytes int64
@@ -166,6 +237,33 @@ func uploadReadyBlob(ctx context.Context, t *testing.T, client *imgsrv.Client, p
 		Digest:    imgsrv.Digest(digestFor(payload)),
 		SizeBytes: int64(len(payload)),
 	}
+}
+
+func publishVersionWithArtifact(
+	ctx context.Context,
+	t *testing.T,
+	catalog imgsrv.CatalogClient,
+	imageName string,
+	version string,
+	primaryBlob releaseBlob,
+) imgsrv.ImageVersion {
+	t.Helper()
+
+	draft, err := catalog.CreateDraftVersion(ctx, imageName, imgsrv.CreateDraftVersionRequest{Version: version})
+	require.NoError(t, err)
+	_, err = catalog.AddArtifact(ctx, imageName, draft.Version, imgsrv.AddArtifactRequest{
+		OperatingSystem:      "linux",
+		Architecture:         "x86_64",
+		Format:               imgsrv.ArtifactFormatQCOW2,
+		PrimaryBlobDigest:    primaryBlob.Digest,
+		PrimaryBlobSizeBytes: primaryBlob.SizeBytes,
+		PrimaryMediaType:     "application/x-qcow2",
+	})
+	require.NoError(t, err)
+	published, err := catalog.PublishVersion(ctx, imageName, draft.Version)
+	require.NoError(t, err)
+
+	return published
 }
 
 func assertReleaseManifest(
@@ -198,6 +296,14 @@ func assertReleaseManifest(
 	assert.Equal(t, "rootfs.sha256", attachment.Name)
 	assert.Equal(t, attachmentBlob.Digest, attachment.BlobDigest)
 	assert.Equal(t, attachmentBlob.SizeBytes, attachment.BlobSizeBytes)
+}
+
+func assertProblemStatus(t *testing.T, err error, status int) {
+	t.Helper()
+
+	var problem *imgsrv.ProblemError
+	require.ErrorAs(t, err, &problem)
+	assert.Equal(t, status, problem.HTTPStatus)
 }
 
 func uploadPayload(ctx context.Context, t *testing.T, client *imgsrv.Client, payload []byte) imgsrv.UploadSession {

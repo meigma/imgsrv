@@ -98,6 +98,11 @@ func validatePutAliasParams(params domain.PutAliasParams) error {
 	return domain.ValidateVersion(params.Version)
 }
 
+// validateListAliasesParams validates inputs to Store.ListAliases.
+func validateListAliasesParams(params domain.ListAliasesParams) error {
+	return domain.ValidateImageName(params.ImageName)
+}
+
 // validateGetAliasParams validates the inputs to Store.GetAlias.
 func validateGetAliasParams(params domain.GetAliasParams) error {
 	if err := domain.ValidateImageName(params.ImageName); err != nil {
@@ -105,6 +110,11 @@ func validateGetAliasParams(params domain.GetAliasParams) error {
 	}
 
 	return domain.ValidateAlias(params.Alias)
+}
+
+// validateDeleteAliasParams validates inputs to Store.DeleteAlias.
+func validateDeleteAliasParams(params domain.DeleteAliasParams) error {
+	return validateGetAliasParams(domain.GetAliasParams(params))
 }
 
 // validateGetVersionManifestParams validates inputs to Store.GetVersionManifest.

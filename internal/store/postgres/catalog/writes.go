@@ -235,7 +235,9 @@ func (store *Store) PutAlias(ctx context.Context, params domain.PutAliasParams) 
 	alias, err := scanAlias(db.QueryRow(
 		ctx,
 		`WITH target_version AS (
-			SELECT images.id AS image_id, image_versions.id AS version_id
+			SELECT images.id AS image_id,
+				image_versions.id AS version_id,
+				image_versions.version
 			FROM images
 			INNER JOIN image_versions ON image_versions.image_id = images.id
 			WHERE images.name = $1
@@ -247,7 +249,13 @@ func (store *Store) PutAlias(ctx context.Context, params domain.PutAliasParams) 
 		ON CONFLICT (image_id, alias)
 		DO UPDATE SET version_id = excluded.version_id,
 			updated_at = now()
-		RETURNING id, image_id, alias, version_id, created_at, updated_at`,
+		RETURNING aliases.id,
+			aliases.image_id,
+			aliases.alias,
+			aliases.version_id,
+			(SELECT target_version.version FROM target_version),
+			aliases.created_at,
+			aliases.updated_at`,
 		params.ImageName,
 		params.Alias,
 		params.Version,
@@ -258,4 +266,34 @@ func (store *Store) PutAlias(ctx context.Context, params domain.PutAliasParams) 
 	}
 
 	return alias, nil
+}
+
+// DeleteAlias removes an image alias.
+func (store *Store) DeleteAlias(ctx context.Context, params domain.DeleteAliasParams) error {
+	if err := validateDeleteAliasParams(params); err != nil {
+		return err
+	}
+
+	db, err := store.catalogDB()
+	if err != nil {
+		return err
+	}
+
+	var id uuid.UUID
+	err = db.QueryRow(
+		ctx,
+		`DELETE FROM aliases
+		USING images
+		WHERE aliases.image_id = images.id
+			AND images.name = $1
+			AND aliases.alias = $2
+		RETURNING aliases.id`,
+		params.ImageName,
+		params.Alias,
+	).Scan(&id)
+	if err != nil {
+		return mapCatalogError(err)
+	}
+
+	return nil
 }

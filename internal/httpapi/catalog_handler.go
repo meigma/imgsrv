@@ -31,6 +31,12 @@ type createDraftVersionRequest struct {
 	Version string `json:"version"`
 }
 
+// putAliasRequest is the JSON body for PUT /v1/images/{name}/aliases/{alias}.
+type putAliasRequest struct {
+	// Version is the published target version string.
+	Version string `json:"version"`
+}
+
 // addArtifactRequest is the JSON body for POST /v1/images/{name}/versions/{version}/artifacts.
 type addArtifactRequest struct {
 	// OperatingSystem is the artifact operating-system token.
@@ -172,6 +178,36 @@ type attachmentResponse struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// aliasResponse is the JSON wire shape of an image alias.
+type aliasResponse struct {
+	// ID is the stable alias identity.
+	ID string `json:"id"`
+
+	// ImageID identifies the image that owns the alias.
+	ImageID string `json:"image_id"`
+
+	// Alias is the mutable pointer name.
+	Alias string `json:"alias"`
+
+	// VersionID identifies the published target version.
+	VersionID string `json:"version_id"`
+
+	// Version is the published target version string.
+	Version string `json:"version"`
+
+	// CreatedAt is when the alias was first created.
+	CreatedAt string `json:"created_at"`
+
+	// UpdatedAt is when the alias target last changed.
+	UpdatedAt string `json:"updated_at"`
+}
+
+// aliasListResponse is the JSON wire shape for image alias lists.
+type aliasListResponse struct {
+	// Aliases are image aliases in stable order.
+	Aliases []aliasResponse `json:"aliases"`
+}
+
 // manifestResponse is the JSON wire shape of an image version manifest.
 type manifestResponse struct {
 	// Image is the image namespace for the manifest.
@@ -254,6 +290,25 @@ func (a *api) getVersionManifest(w http.ResponseWriter, r *http.Request) {
 	manifest, err := service.GetVersionManifest(r.Context(), catalog.GetVersionManifestParams{
 		ImageName: r.PathValue("name"),
 		Version:   r.PathValue("version"),
+	})
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newManifestResponse(manifest))
+}
+
+// resolveManifest handles GET /v1/images/{name}/refs/{ref} and resolves an exact published version or alias.
+func (a *api) resolveManifest(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.catalogService(w)
+	if !ok {
+		return
+	}
+
+	manifest, err := service.ResolveManifest(r.Context(), catalog.ResolveManifestParams{
+		ImageName: r.PathValue("name"),
+		Version:   r.PathValue("ref"),
 	})
 	if err != nil {
 		writeCatalogError(w, err)
@@ -357,6 +412,88 @@ func (a *api) publishVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, newVersionResponse(version))
 }
 
+// putAlias handles PUT /v1/images/{name}/aliases/{alias} and creates or moves an alias.
+func (a *api) putAlias(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.catalogService(w)
+	if !ok {
+		return
+	}
+
+	var request putAliasRequest
+	if err := decodeControlJSON(w, r, &request); err != nil {
+		writeProblem(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	alias, err := service.PutAlias(r.Context(), catalog.PutAliasParams{
+		ImageName: r.PathValue("name"),
+		Alias:     r.PathValue("alias"),
+		Version:   request.Version,
+	})
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newAliasResponse(alias))
+}
+
+// listAliases handles GET /v1/images/{name}/aliases and returns image aliases.
+func (a *api) listAliases(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.catalogService(w)
+	if !ok {
+		return
+	}
+
+	aliases, err := service.ListAliases(r.Context(), catalog.ListAliasesParams{
+		ImageName: r.PathValue("name"),
+	})
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newAliasListResponse(aliases))
+}
+
+// getAlias handles GET /v1/images/{name}/aliases/{alias} and returns one image alias.
+func (a *api) getAlias(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.catalogService(w)
+	if !ok {
+		return
+	}
+
+	alias, err := service.GetAlias(r.Context(), catalog.GetAliasParams{
+		ImageName: r.PathValue("name"),
+		Alias:     r.PathValue("alias"),
+	})
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newAliasResponse(alias))
+}
+
+// deleteAlias handles DELETE /v1/images/{name}/aliases/{alias} and removes one image alias.
+func (a *api) deleteAlias(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.catalogService(w)
+	if !ok {
+		return
+	}
+
+	err := service.DeleteAlias(r.Context(), catalog.DeleteAliasParams{
+		ImageName: r.PathValue("name"),
+		Alias:     r.PathValue("alias"),
+	})
+	if err != nil {
+		writeCatalogError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // catalogService returns the configured CatalogService or writes a 503 problem and reports false.
 func (a *api) catalogService(w http.ResponseWriter) (CatalogService, bool) {
 	if a.catalog == nil {
@@ -433,6 +570,29 @@ func newAttachmentResponse(attachment catalog.Attachment) attachmentResponse {
 		CreatedAt:     formatCatalogTime(attachment.CreatedAt),
 		UpdatedAt:     formatCatalogTime(attachment.UpdatedAt),
 	}
+}
+
+// newAliasResponse projects an image alias onto its JSON wire shape.
+func newAliasResponse(alias catalog.Alias) aliasResponse {
+	return aliasResponse{
+		ID:        alias.ID.String(),
+		ImageID:   alias.ImageID.String(),
+		Alias:     alias.Alias,
+		VersionID: alias.VersionID.String(),
+		Version:   alias.Version,
+		CreatedAt: formatCatalogTime(alias.CreatedAt),
+		UpdatedAt: formatCatalogTime(alias.UpdatedAt),
+	}
+}
+
+// newAliasListResponse projects image aliases onto their JSON wire shape.
+func newAliasListResponse(aliases []catalog.Alias) aliasListResponse {
+	items := make([]aliasResponse, 0, len(aliases))
+	for _, alias := range aliases {
+		items = append(items, newAliasResponse(alias))
+	}
+
+	return aliasListResponse{Aliases: items}
 }
 
 // newManifestResponse projects a catalog manifest onto its JSON wire shape.

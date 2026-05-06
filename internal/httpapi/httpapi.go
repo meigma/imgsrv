@@ -93,6 +93,18 @@ type CatalogService interface {
 	// PublishVersion marks a draft version immutable and publishable.
 	PublishVersion(context.Context, catalog.PublishVersionParams) (catalog.Version, error)
 
+	// PutAlias creates or moves an alias to a published version.
+	PutAlias(context.Context, catalog.PutAliasParams) (catalog.Alias, error)
+
+	// ListAliases returns aliases for one image in stable order.
+	ListAliases(context.Context, catalog.ListAliasesParams) ([]catalog.Alias, error)
+
+	// GetAlias returns an alias by image and alias name.
+	GetAlias(context.Context, catalog.GetAliasParams) (catalog.Alias, error)
+
+	// DeleteAlias removes an image alias.
+	DeleteAlias(context.Context, catalog.DeleteAliasParams) error
+
 	// GetVersionManifest resolves an exact draft or published image version manifest.
 	GetVersionManifest(context.Context, catalog.GetVersionManifestParams) (catalog.Manifest, error)
 
@@ -169,6 +181,11 @@ func New(deps Dependencies) http.Handler {
 		api.addAttachment,
 	)
 	mux.HandleFunc("POST /v1/images/{name}/versions/{version}/publish", api.publishVersion)
+	mux.HandleFunc("PUT /v1/images/{name}/aliases/{alias}", api.putAlias)
+	mux.HandleFunc("GET /v1/images/{name}/aliases", api.listAliases)
+	mux.HandleFunc("GET /v1/images/{name}/aliases/{alias}", api.getAlias)
+	mux.HandleFunc("DELETE /v1/images/{name}/aliases/{alias}", api.deleteAlias)
+	mux.HandleFunc("GET /v1/images/{name}/refs/{ref}", api.resolveManifest)
 
 	return deps.Telemetry.WrapHTTPHandler(Chain(mux, logRequests(logger)))
 }

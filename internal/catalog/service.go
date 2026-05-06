@@ -85,6 +85,16 @@ func (service *Service) PutAlias(ctx context.Context, params PutAliasParams) (Al
 	return store.PutAlias(ctx, params)
 }
 
+// ListAliases returns aliases for one image in stable order.
+func (service *Service) ListAliases(ctx context.Context, params ListAliasesParams) ([]Alias, error) {
+	store, err := service.dependencies()
+	if err != nil {
+		return nil, err
+	}
+
+	return store.ListAliases(ctx, params)
+}
+
 // GetAlias returns an alias by image and alias name.
 func (service *Service) GetAlias(ctx context.Context, params GetAliasParams) (Alias, error) {
 	store, err := service.dependencies()
@@ -93,6 +103,16 @@ func (service *Service) GetAlias(ctx context.Context, params GetAliasParams) (Al
 	}
 
 	return store.GetAlias(ctx, params)
+}
+
+// DeleteAlias removes an image alias.
+func (service *Service) DeleteAlias(ctx context.Context, params DeleteAliasParams) error {
+	store, err := service.dependencies()
+	if err != nil {
+		return err
+	}
+
+	return store.DeleteAlias(ctx, params)
 }
 
 // GetVersionManifest resolves an exact draft or published image version manifest.

@@ -25,6 +25,21 @@ type CatalogClient interface {
 
 	// PublishVersion publishes a draft version.
 	PublishVersion(context.Context, string, string) (ImageVersion, error)
+
+	// PutAlias creates or moves an alias to a published version.
+	PutAlias(context.Context, string, string, PutAliasRequest) (Alias, error)
+
+	// ListAliases returns aliases for an image.
+	ListAliases(context.Context, string) ([]Alias, error)
+
+	// GetAlias returns one image alias.
+	GetAlias(context.Context, string, string) (Alias, error)
+
+	// DeleteAlias removes one image alias.
+	DeleteAlias(context.Context, string, string) error
+
+	// ResolveManifest resolves a published manifest by exact version or alias.
+	ResolveManifest(context.Context, string, string) (Manifest, error)
 }
 
 // HTTPCatalogClient is the concrete HTTP implementation of CatalogClient.
@@ -50,6 +65,12 @@ type CreateImageRequest struct {
 // CreateDraftVersionRequest creates a mutable draft version.
 type CreateDraftVersionRequest struct {
 	// Version is the operator-defined version string.
+	Version string `json:"version"`
+}
+
+// PutAliasRequest creates or moves an alias to a published version.
+type PutAliasRequest struct {
+	// Version is the published target version string.
 	Version string `json:"version"`
 }
 
@@ -194,6 +215,36 @@ type Attachment struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// Alias is a mutable pointer to a published image version.
+type Alias struct {
+	// ID is the stable alias identity.
+	ID string `json:"id"`
+
+	// ImageID identifies the image that owns the alias.
+	ImageID string `json:"image_id"`
+
+	// Alias is the mutable pointer name.
+	Alias string `json:"alias"`
+
+	// VersionID identifies the published target version.
+	VersionID string `json:"version_id"`
+
+	// Version is the published target version string.
+	Version string `json:"version"`
+
+	// CreatedAt is the RFC3339 timestamp when the alias was first created.
+	CreatedAt string `json:"created_at"`
+
+	// UpdatedAt is the RFC3339 timestamp when the alias target last changed.
+	UpdatedAt string `json:"updated_at"`
+}
+
+// aliasListResponse is the JSON wire shape for image alias lists.
+type aliasListResponse struct {
+	// Aliases are image aliases in stable order.
+	Aliases []Alias `json:"aliases"`
+}
+
 // Manifest is the catalog view for an exact image version.
 type Manifest struct {
 	// Image is the image namespace for the manifest.
@@ -296,7 +347,73 @@ func (client *HTTPCatalogClient) PublishVersion(
 	return published, err
 }
 
+// PutAlias creates or moves an alias to a published version.
+func (client *HTTPCatalogClient) PutAlias(
+	ctx context.Context,
+	imageName string,
+	aliasName string,
+	request PutAliasRequest,
+) (Alias, error) {
+	var alias Alias
+	path := aliasPath(imageName, aliasName)
+	err := client.transport.doJSONMethod(ctx, http.MethodPut, path, request, http.StatusOK, &alias)
+
+	return alias, err
+}
+
+// ListAliases returns aliases for an image.
+func (client *HTTPCatalogClient) ListAliases(ctx context.Context, imageName string) ([]Alias, error) {
+	var response aliasListResponse
+	path := "/v1/images/" + url.PathEscape(imageName) + "/aliases"
+	err := client.transport.do(ctx, http.MethodGet, path, nil, 0, nil, &response)
+
+	return response.Aliases, err
+}
+
+// GetAlias returns one image alias.
+func (client *HTTPCatalogClient) GetAlias(ctx context.Context, imageName string, aliasName string) (Alias, error) {
+	var alias Alias
+	err := client.transport.do(ctx, http.MethodGet, aliasPath(imageName, aliasName), nil, 0, nil, &alias)
+
+	return alias, err
+}
+
+// DeleteAlias removes one image alias.
+func (client *HTTPCatalogClient) DeleteAlias(ctx context.Context, imageName string, aliasName string) error {
+	resp, err := client.transport.doResponse(
+		ctx,
+		http.MethodDelete,
+		aliasPath(imageName, aliasName),
+		nil,
+		0,
+		nil,
+		http.StatusNoContent,
+	)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	return nil
+}
+
+// ResolveManifest resolves a published manifest by exact version or alias.
+func (client *HTTPCatalogClient) ResolveManifest(ctx context.Context, imageName string, ref string) (Manifest, error) {
+	var manifest Manifest
+	path := "/v1/images/" + url.PathEscape(imageName) + "/refs/" + url.PathEscape(ref)
+	err := client.transport.do(ctx, http.MethodGet, path, nil, 0, nil, &manifest)
+
+	return manifest, err
+}
+
 // versionPath returns the API path for an exact image version.
 func versionPath(imageName string, version string) string {
 	return "/v1/images/" + url.PathEscape(imageName) + "/versions/" + url.PathEscape(version)
+}
+
+// aliasPath returns the API path for one image alias.
+func aliasPath(imageName string, aliasName string) string {
+	return "/v1/images/" + url.PathEscape(imageName) + "/aliases/" + url.PathEscape(aliasName)
 }

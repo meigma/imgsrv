@@ -33,10 +33,12 @@ func (store *Store) GetAlias(ctx context.Context, params domain.GetAliasParams) 
 			aliases.image_id,
 			aliases.alias,
 			aliases.version_id,
+			image_versions.version,
 			aliases.created_at,
 			aliases.updated_at
 		FROM aliases
 		INNER JOIN images ON images.id = aliases.image_id
+		INNER JOIN image_versions ON image_versions.id = aliases.version_id
 		WHERE images.name = $1
 			AND aliases.alias = $2`,
 		params.ImageName,
@@ -47,6 +49,58 @@ func (store *Store) GetAlias(ctx context.Context, params domain.GetAliasParams) 
 	}
 
 	return alias, nil
+}
+
+// ListAliases returns aliases for one image ordered by alias name.
+func (store *Store) ListAliases(ctx context.Context, params domain.ListAliasesParams) ([]domain.Alias, error) {
+	if err := validateListAliasesParams(params); err != nil {
+		return nil, err
+	}
+
+	db, err := store.catalogDB()
+	if err != nil {
+		return nil, err
+	}
+
+	var imageID uuid.UUID
+	err = db.QueryRow(ctx, `SELECT id FROM images WHERE name = $1`, params.ImageName).Scan(&imageID)
+	if err != nil {
+		return nil, mapCatalogError(err)
+	}
+
+	rows, err := db.Query(
+		ctx,
+		`SELECT aliases.id,
+			aliases.image_id,
+			aliases.alias,
+			aliases.version_id,
+			image_versions.version,
+			aliases.created_at,
+			aliases.updated_at
+		FROM aliases
+		INNER JOIN image_versions ON image_versions.id = aliases.version_id
+		WHERE aliases.image_id = $1
+		ORDER BY aliases.alias, aliases.id`,
+		imageID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var aliases []domain.Alias
+	for rows.Next() {
+		alias, err := scanAlias(rows)
+		if err != nil {
+			return nil, err
+		}
+		aliases = append(aliases, alias)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return aliases, nil
 }
 
 // GetVersionManifest resolves the manifest for an exact draft or published image version.
