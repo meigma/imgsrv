@@ -73,7 +73,10 @@ func collectRows[T any](rows pgx.Rows, scan func(rowScanner) (T, error)) ([]T, e
 }
 
 // ListImages returns image namespaces with published versions ordered by image name.
-func (store *Store) ListImages(ctx context.Context, params domain.ListImagesParams) ([]domain.Image, error) {
+func (store *Store) ListImages(
+	ctx context.Context,
+	params domain.ListImagesParams,
+) ([]domain.Image, error) {
 	if err := validateListImagesParams(params); err != nil {
 		return nil, err
 	}
@@ -103,7 +106,10 @@ func (store *Store) ListImages(ctx context.Context, params domain.ListImagesPara
 }
 
 // GetImage returns one image namespace by name when it has a published version.
-func (store *Store) GetImage(ctx context.Context, params domain.GetImageParams) (domain.Image, error) {
+func (store *Store) GetImage(
+	ctx context.Context,
+	params domain.GetImageParams,
+) (domain.Image, error) {
 	if err := validateGetImageParams(params); err != nil {
 		return domain.Image{}, err
 	}
@@ -134,7 +140,10 @@ func (store *Store) GetImage(ctx context.Context, params domain.GetImageParams) 
 }
 
 // GetAlias looks up an image alias.
-func (store *Store) GetAlias(ctx context.Context, params domain.GetAliasParams) (domain.Alias, error) {
+func (store *Store) GetAlias(
+	ctx context.Context,
+	params domain.GetAliasParams,
+) (domain.Alias, error) {
 	if err := validateGetAliasParams(params); err != nil {
 		return domain.Alias{}, err
 	}
@@ -169,7 +178,10 @@ func (store *Store) GetAlias(ctx context.Context, params domain.GetAliasParams) 
 }
 
 // ListAliases returns aliases for one image ordered by alias name.
-func (store *Store) ListAliases(ctx context.Context, params domain.ListAliasesParams) ([]domain.Alias, error) {
+func (store *Store) ListAliases(
+	ctx context.Context,
+	params domain.ListAliasesParams,
+) ([]domain.Alias, error) {
 	if err := validateListAliasesParams(params); err != nil {
 		return nil, err
 	}
@@ -207,7 +219,10 @@ func (store *Store) ListAliases(ctx context.Context, params domain.ListAliasesPa
 }
 
 // ListVersions returns published versions for one image ordered by creation time descending.
-func (store *Store) ListVersions(ctx context.Context, params domain.ListVersionsParams) ([]domain.Version, error) {
+func (store *Store) ListVersions(
+	ctx context.Context,
+	params domain.ListVersionsParams,
+) ([]domain.Version, error) {
 	if err := validateListVersionsParams(params); err != nil {
 		return nil, err
 	}
@@ -236,6 +251,126 @@ func (store *Store) ListVersions(ctx context.Context, params domain.ListVersions
 	}
 
 	return collectRows(rows, scanVersion)
+}
+
+// ListPublishedArtifacts returns primary artifacts for an exact published image version.
+func (store *Store) ListPublishedArtifacts(
+	ctx context.Context,
+	params domain.ListPublishedArtifactsParams,
+) ([]domain.Artifact, error) {
+	if err := validateListPublishedArtifactsParams(params); err != nil {
+		return nil, err
+	}
+
+	db, err := store.catalogDB()
+	if err != nil {
+		return nil, err
+	}
+
+	manifest, err := resolveExactPublishedManifestHeader(
+		ctx,
+		db,
+		domain.ResolveManifestParams(params),
+	)
+	if err != nil {
+		return nil, mapCatalogError(err)
+	}
+
+	artifacts, err := listArtifacts(ctx, db, manifest.Version.ID)
+	if err != nil {
+		return nil, mapCatalogError(err)
+	}
+
+	return artifacts, nil
+}
+
+// GetPublishedArtifact returns one primary artifact for an exact published image version.
+func (store *Store) GetPublishedArtifact(
+	ctx context.Context,
+	params domain.GetPublishedArtifactParams,
+) (domain.Artifact, error) {
+	if err := validateGetPublishedArtifactParams(params); err != nil {
+		return domain.Artifact{}, err
+	}
+
+	db, err := store.catalogDB()
+	if err != nil {
+		return domain.Artifact{}, err
+	}
+
+	artifact, err := scanArtifact(db.QueryRow(
+		ctx,
+		`SELECT release_artifacts.id,
+			release_artifacts.version_id,
+			release_artifacts.operating_system,
+			release_artifacts.architecture,
+			release_artifacts.format,
+			release_artifacts.primary_blob_digest,
+			release_artifacts.primary_blob_size_bytes,
+			release_artifacts.primary_media_type,
+			release_artifacts.created_at,
+			release_artifacts.updated_at
+		FROM images
+		INNER JOIN image_versions ON image_versions.image_id = images.id
+		INNER JOIN release_artifacts ON release_artifacts.version_id = image_versions.id
+		WHERE images.name = $1
+			AND image_versions.version = $2
+			AND image_versions.state = 'published'
+			AND release_artifacts.id = $3`,
+		params.ImageName,
+		params.Version,
+		params.ArtifactID,
+	))
+	if err != nil {
+		return domain.Artifact{}, mapCatalogError(err)
+	}
+
+	return artifact, nil
+}
+
+// GetPublishedAttachment returns one attachment for an exact published image version artifact.
+func (store *Store) GetPublishedAttachment(
+	ctx context.Context,
+	params domain.GetPublishedAttachmentParams,
+) (domain.Attachment, error) {
+	if err := validateGetPublishedAttachmentParams(params); err != nil {
+		return domain.Attachment{}, err
+	}
+
+	db, err := store.catalogDB()
+	if err != nil {
+		return domain.Attachment{}, err
+	}
+
+	attachment, err := scanAttachment(db.QueryRow(
+		ctx,
+		`SELECT artifact_attachments.id,
+			artifact_attachments.artifact_id,
+			artifact_attachments.name,
+			artifact_attachments.media_type,
+			artifact_attachments.blob_digest,
+			artifact_attachments.blob_size_bytes,
+			artifact_attachments.created_at,
+			artifact_attachments.updated_at
+		FROM images
+		INNER JOIN image_versions ON image_versions.image_id = images.id
+		INNER JOIN release_artifacts ON release_artifacts.version_id = image_versions.id
+		INNER JOIN artifact_attachments ON artifact_attachments.artifact_id = release_artifacts.id
+		WHERE images.name = $1
+			AND image_versions.version = $2
+			AND image_versions.state = 'published'
+			AND release_artifacts.id = $3
+			AND artifact_attachments.id = $4`,
+		params.ImageName,
+		params.Version,
+		params.ArtifactID,
+		params.AttachmentID,
+	))
+	if err != nil {
+		return domain.Attachment{}, mapCatalogError(err)
+	}
+
+	return attachment, nil
 }
 
 // GetVersionManifest resolves the manifest for an exact draft or published image version.
@@ -466,7 +601,11 @@ func resolveManifestArtifacts(
 
 // listArtifacts returns the release artifacts for versionID ordered by
 // operating system, architecture, format, and id.
-func listArtifacts(ctx context.Context, db queryer, versionID uuid.UUID) ([]domain.Artifact, error) {
+func listArtifacts(
+	ctx context.Context,
+	db queryer,
+	versionID uuid.UUID,
+) ([]domain.Artifact, error) {
 	rows, err := db.Query(
 		ctx,
 		`SELECT id,

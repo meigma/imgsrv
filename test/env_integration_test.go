@@ -20,12 +20,13 @@ import (
 )
 
 const (
-	readyTimeout  = 5 * time.Second
-	readyInterval = 25 * time.Millisecond
+	readyTimeout   = 5 * time.Second
+	readyInterval  = 25 * time.Millisecond
+	publicAPIToken = "testtok.public-integration"
 )
 
 func TestEnvDrivesUploadThroughPublicClient(t *testing.T) {
-	env := imgsrvtest.Start(t)
+	env := startEnv(t)
 	client := env.Client(t)
 	ctx := t.Context()
 	payload := []byte("public imgsrv test upload payload")
@@ -40,7 +41,7 @@ func TestEnvDrivesUploadThroughPublicClient(t *testing.T) {
 }
 
 func TestEnvWithCASPromotionPromotesUpload(t *testing.T) {
-	env := imgsrvtest.Start(t, imgsrvtest.WithCASPromotion())
+	env := startEnv(t, imgsrvtest.WithCASPromotion())
 	client := env.Client(t)
 	ctx := t.Context()
 	payload := []byte("public imgsrv test cas promotion payload")
@@ -53,13 +54,14 @@ func TestEnvWithCASPromotionPromotesUpload(t *testing.T) {
 }
 
 func TestEnvWithCASPromotionReadsBlobThroughPublicClient(t *testing.T) {
-	env := imgsrvtest.Start(t, imgsrvtest.WithCASPromotion())
+	env := startEnv(t, imgsrvtest.WithCASPromotion())
 	client := env.Client(t)
+	anonymous := anonymousClient(t, env)
 	ctx := t.Context()
 	payload := []byte("public imgsrv blob download payload")
 
 	blob := uploadReadyBlob(ctx, t, client, payload)
-	head, err := client.Blobs().HeadBlob(ctx, blob.Digest)
+	head, err := anonymous.Blobs().HeadBlob(ctx, blob.Digest)
 	require.NoError(t, err)
 	assert.Equal(t, blob.Digest, head.Digest)
 	assert.Equal(t, blob.SizeBytes, head.SizeBytes)
@@ -67,7 +69,7 @@ func TestEnvWithCASPromotionReadsBlobThroughPublicClient(t *testing.T) {
 
 	suffixRange, err := imgsrv.BlobRangeSuffix(4)
 	require.NoError(t, err)
-	open, err := client.Blobs().OpenBlob(ctx, blob.Digest, imgsrv.OpenBlobOptions{Range: &suffixRange})
+	open, err := anonymous.Blobs().OpenBlob(ctx, blob.Digest, imgsrv.OpenBlobOptions{Range: &suffixRange})
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, open.Body.Close())
@@ -80,12 +82,15 @@ func TestEnvWithCASPromotionReadsBlobThroughPublicClient(t *testing.T) {
 }
 
 func TestEnvWithCASPromotionPublishesReleaseFlow(t *testing.T) {
-	env := imgsrvtest.Start(t, imgsrvtest.WithCASPromotion())
+	env := startEnv(t, imgsrvtest.WithCASPromotion())
 	client := env.Client(t)
+	anonymous := anonymousClient(t, env)
 	ctx := t.Context()
 	catalog := client.Catalog()
-	primaryBlob := uploadReadyBlob(ctx, t, client, []byte("public imgsrv release primary artifact"))
-	attachmentBlob := uploadReadyBlob(ctx, t, client, []byte("public imgsrv release attachment"))
+	primaryPayload := []byte("public imgsrv release primary artifact")
+	attachmentPayload := []byte("public imgsrv release attachment")
+	primaryBlob := uploadReadyBlob(ctx, t, client, primaryPayload)
+	attachmentBlob := uploadReadyBlob(ctx, t, client, attachmentPayload)
 
 	image, err := catalog.CreateImage(ctx, imgsrv.CreateImageRequest{Name: "public-release-flow"})
 	require.NoError(t, err)
@@ -149,10 +154,76 @@ func TestEnvWithCASPromotionPublishesReleaseFlow(t *testing.T) {
 		primaryBlob,
 		attachmentBlob,
 	)
+
+	anonymousCatalog := anonymous.Catalog()
+	anonymousManifest, err := anonymousCatalog.GetVersionManifest(ctx, image.Name, version.Version)
+	require.NoError(t, err)
+	assertReleaseManifest(
+		t,
+		anonymousManifest,
+		image.Name,
+		imgsrv.ImageVersionStatePublished,
+		primaryBlob,
+		attachmentBlob,
+	)
+
+	artifacts, err := anonymousCatalog.ListArtifacts(ctx, image.Name, version.Version)
+	require.NoError(t, err)
+	require.Len(t, artifacts, 1)
+	assert.Equal(t, artifact.ID, artifacts[0].ID)
+
+	gotArtifact, err := anonymousCatalog.GetArtifact(ctx, image.Name, version.Version, artifact.ID.String())
+	require.NoError(t, err)
+	assert.Equal(t, artifact.ID, gotArtifact.ID)
+
+	artifactDownload, err := anonymousCatalog.OpenArtifactDownload(
+		ctx,
+		image.Name,
+		version.Version,
+		artifact.ID.String(),
+		imgsrv.OpenBlobOptions{},
+	)
+	require.NoError(t, err)
+	artifactBody, err := io.ReadAll(artifactDownload.Body)
+	require.NoError(t, err)
+	require.NoError(t, artifactDownload.Body.Close())
+	assert.Equal(t, primaryPayload, artifactBody)
+	assert.Equal(t, primaryBlob.Digest, artifactDownload.Metadata.Digest)
+	assert.Equal(t, primaryBlob.SizeBytes, artifactDownload.Metadata.SizeBytes)
+	assert.Equal(t, "application/x-qcow2", artifactDownload.Metadata.ContentType)
+
+	suffixRange, err := imgsrv.BlobRangeSuffix(4)
+	require.NoError(t, err)
+	attachmentDownload, err := anonymousCatalog.OpenAttachmentDownload(
+		ctx,
+		image.Name,
+		version.Version,
+		artifact.ID.String(),
+		attachment.ID,
+		imgsrv.OpenBlobOptions{Range: &suffixRange},
+	)
+	require.NoError(t, err)
+	attachmentBody, err := io.ReadAll(attachmentDownload.Body)
+	require.NoError(t, err)
+	require.NoError(t, attachmentDownload.Body.Close())
+	assert.Equal(t, attachmentPayload[len(attachmentPayload)-4:], attachmentBody)
+	assert.Equal(t, attachmentBlob.Digest, attachmentDownload.Metadata.Digest)
+	assert.Equal(t, attachmentBlob.SizeBytes, attachmentDownload.Metadata.SizeBytes)
+	assert.Equal(t, "text/plain", attachmentDownload.Metadata.ContentType)
+}
+
+func TestEnvWriteFlowRequiresBearerToken(t *testing.T) {
+	env := startEnv(t)
+	client := anonymousClient(t, env)
+	ctx := t.Context()
+
+	_, err := client.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{Name: "public-missing-auth"})
+
+	assertProblemStatus(t, err, http.StatusUnauthorized)
 }
 
 func TestEnvWithCASPromotionBrowsesAndDeletesDraftCatalog(t *testing.T) {
-	env := imgsrvtest.Start(t, imgsrvtest.WithCASPromotion())
+	env := startEnv(t, imgsrvtest.WithCASPromotion())
 	client := env.Client(t)
 	ctx := t.Context()
 	catalog := client.Catalog()
@@ -247,7 +318,7 @@ func TestEnvWithCASPromotionBrowsesAndDeletesDraftCatalog(t *testing.T) {
 }
 
 func TestEnvWithCASPromotionManagesAliases(t *testing.T) {
-	env := imgsrvtest.Start(t, imgsrvtest.WithCASPromotion())
+	env := startEnv(t, imgsrvtest.WithCASPromotion())
 	client := env.Client(t)
 	ctx := t.Context()
 	catalog := client.Catalog()
@@ -299,7 +370,7 @@ func TestEnvWithCASPromotionManagesAliases(t *testing.T) {
 }
 
 func TestEnvWithCASPromotionRejectsInvalidAliases(t *testing.T) {
-	env := imgsrvtest.Start(t, imgsrvtest.WithCASPromotion())
+	env := startEnv(t, imgsrvtest.WithCASPromotion())
 	client := env.Client(t)
 	ctx := t.Context()
 	catalog := client.Catalog()
@@ -399,6 +470,28 @@ func assertProblemStatus(t *testing.T, err error, status int) {
 	var problem *imgsrv.ProblemError
 	require.ErrorAs(t, err, &problem)
 	assert.Equal(t, status, problem.HTTPStatus)
+}
+
+func startEnv(t testing.TB, opts ...imgsrvtest.Option) *imgsrvtest.Env {
+	t.Helper()
+
+	allOptions := make([]imgsrvtest.Option, 0, len(opts)+1)
+	allOptions = append(allOptions, imgsrvtest.WithAPIToken(publicAPIToken))
+	allOptions = append(allOptions, opts...)
+
+	return imgsrvtest.Start(t, allOptions...)
+}
+
+func anonymousClient(t testing.TB, env *imgsrvtest.Env) *imgsrv.Client {
+	t.Helper()
+
+	client, err := imgsrv.New(imgsrv.Options{
+		BaseURL:    env.BaseURL(),
+		HTTPClient: env.HTTPClient(),
+	})
+	require.NoError(t, err)
+
+	return client
 }
 
 func uploadPayload(ctx context.Context, t *testing.T, client *imgsrv.Client, payload []byte) imgsrv.UploadSession {

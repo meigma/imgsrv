@@ -50,6 +50,15 @@ type Store interface {
 	// ListVersions returns published versions for one image in stable order.
 	ListVersions(context.Context, ListVersionsParams) ([]Version, error)
 
+	// ListPublishedArtifacts returns artifacts for an exact published image version.
+	ListPublishedArtifacts(context.Context, ListPublishedArtifactsParams) ([]Artifact, error)
+
+	// GetPublishedArtifact returns one artifact for an exact published image version.
+	GetPublishedArtifact(context.Context, GetPublishedArtifactParams) (Artifact, error)
+
+	// GetPublishedAttachment returns one attachment for an exact published image version artifact.
+	GetPublishedAttachment(context.Context, GetPublishedAttachmentParams) (Attachment, error)
+
 	// AddArtifact adds a primary artifact on a draft version.
 	AddArtifact(context.Context, AddArtifactParams) (Artifact, error)
 
@@ -307,6 +316,42 @@ type CreateDraftVersionParams struct {
 type ListVersionsParams struct {
 	// ImageName identifies the image that owns the versions.
 	ImageName string
+}
+
+// ListPublishedArtifactsParams lists primary artifacts on an exact published version.
+type ListPublishedArtifactsParams struct {
+	// ImageName identifies the parent image by name.
+	ImageName string
+
+	// Version identifies the published image version.
+	Version string
+}
+
+// GetPublishedArtifactParams looks up one primary artifact on an exact published version.
+type GetPublishedArtifactParams struct {
+	// ImageName identifies the parent image by name.
+	ImageName string
+
+	// Version identifies the published image version.
+	Version string
+
+	// ArtifactID identifies the artifact.
+	ArtifactID uuid.UUID
+}
+
+// GetPublishedAttachmentParams looks up one attachment on an exact published version artifact.
+type GetPublishedAttachmentParams struct {
+	// ImageName identifies the parent image by name.
+	ImageName string
+
+	// Version identifies the published image version.
+	Version string
+
+	// ArtifactID identifies the parent artifact.
+	ArtifactID uuid.UUID
+
+	// AttachmentID identifies the attachment.
+	AttachmentID uuid.UUID
 }
 
 // AddArtifactParams adds a primary artifact to a draft version.

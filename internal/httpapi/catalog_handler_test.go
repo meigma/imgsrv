@@ -14,8 +14,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
 	httpmocks "github.com/meigma/imgsrv/internal/httpapi/mocks"
+	"github.com/meigma/imgsrv/internal/objectstore"
 )
 
 func TestCreateImageCreatesNamespace(t *testing.T) {
@@ -36,7 +38,7 @@ func TestCreateImageCreatesNamespace(t *testing.T) {
 		})).
 		Return(wantImage, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/images", strings.NewReader(`{
+	req := newHTTPAPIRequest(http.MethodPost, "/v1/images", strings.NewReader(`{
 		"name": "debian",
 		"display_name": "Debian 12",
 		"description": "Base image"
@@ -63,7 +65,7 @@ func TestListImagesReturnsNamespaces(t *testing.T) {
 		ListImages(mock.Anything, catalog.ListImagesParams{}).
 		Return([]catalog.Image{catalogImageFixture()}, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/images", nil)
+	req := newHTTPAPIRequest(http.MethodGet, "/v1/images", nil)
 	rec := httptest.NewRecorder()
 
 	tc.handler.ServeHTTP(rec, req)
@@ -82,7 +84,7 @@ func TestGetImageReturnsNamespace(t *testing.T) {
 		GetImage(mock.Anything, catalog.GetImageParams{Name: "debian"}).
 		Return(catalogImageFixture(), nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/images/debian", nil)
+	req := newHTTPAPIRequest(http.MethodGet, "/v1/images/debian", nil)
 	rec := httptest.NewRecorder()
 
 	tc.handler.ServeHTTP(rec, req)
@@ -104,7 +106,7 @@ func TestCreateDraftVersionCreatesVersionUnderImage(t *testing.T) {
 		}).
 		Return(wantVersion, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/debian/versions", strings.NewReader(`{
+	req := newHTTPAPIRequest(http.MethodPost, "/v1/images/debian/versions", strings.NewReader(`{
 		"version": "v1.0.0"
 	}`))
 	rec := httptest.NewRecorder()
@@ -128,7 +130,7 @@ func TestListVersionsReturnsImageVersions(t *testing.T) {
 		ListVersions(mock.Anything, catalog.ListVersionsParams{ImageName: "debian"}).
 		Return([]catalog.Version{catalogVersionFixture(catalog.VersionStateDraft)}, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/images/debian/versions", nil)
+	req := newHTTPAPIRequest(http.MethodGet, "/v1/images/debian/versions", nil)
 	rec := httptest.NewRecorder()
 
 	tc.handler.ServeHTTP(rec, req)
@@ -152,7 +154,7 @@ func TestGetVersionManifestReturnsManifest(t *testing.T) {
 		}).
 		Return(wantManifest, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/images/debian/versions/v1.0.0", nil)
+	req := newHTTPAPIRequest(http.MethodGet, "/v1/images/debian/versions/v1.0.0", nil)
 	rec := httptest.NewRecorder()
 
 	tc.handler.ServeHTTP(rec, req)
@@ -169,6 +171,226 @@ func TestGetVersionManifestReturnsManifest(t *testing.T) {
 	assert.Equal(t, catalogAttachmentIDFixture().String(), got.Artifacts[0].Attachments[0].ID)
 }
 
+func TestListPublishedArtifactsReturnsArtifacts(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+
+	tc.catalog.EXPECT().
+		ListPublishedArtifacts(mock.Anything, catalog.ListPublishedArtifactsParams{
+			ImageName: "debian",
+			Version:   "v1.0.0",
+		}).
+		Return([]catalog.Artifact{catalogArtifactFixture()}, nil)
+
+	req := newHTTPAPIRequest(http.MethodGet, "/v1/images/debian/versions/v1.0.0/artifacts", nil)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got artifactListResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Len(t, got.Artifacts, 1)
+	assert.Equal(t, catalogArtifactIDFixture().String(), got.Artifacts[0].ID)
+	assert.Equal(t, catalogDigestFixture().String(), got.Artifacts[0].PrimaryBlobDigest)
+}
+
+func TestGetPublishedArtifactReturnsArtifact(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+
+	tc.catalog.EXPECT().
+		GetPublishedArtifact(mock.Anything, catalog.GetPublishedArtifactParams{
+			ImageName:  "debian",
+			Version:    "v1.0.0",
+			ArtifactID: catalogArtifactIDFixture(),
+		}).
+		Return(catalogArtifactFixture(), nil)
+
+	req := newHTTPAPIRequest(
+		http.MethodGet,
+		"/v1/images/debian/versions/v1.0.0/artifacts/"+catalogArtifactIDFixture().String(),
+		nil,
+	)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got artifactResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, catalogArtifactIDFixture().String(), got.ID)
+	assert.Equal(t, "application/x-qcow2", got.PrimaryMediaType)
+}
+
+func TestDownloadPublishedArtifactStreamsBlobWithCatalogMediaType(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+	body := "artifact-bytes"
+	artifact := catalogArtifactFixture()
+	artifact.PrimaryBlobSizeBytes = int64(len(body))
+	blob := catalogArtifactBlob(artifact)
+
+	tc.catalog.EXPECT().
+		GetPublishedArtifact(mock.Anything, catalog.GetPublishedArtifactParams{
+			ImageName:  "debian",
+			Version:    "v1.0.0",
+			ArtifactID: catalogArtifactIDFixture(),
+		}).
+		Return(artifact, nil)
+	tc.blobs.EXPECT().
+		OpenBlob(mock.Anything, cas.OpenBlobParams{Digest: blob.Digest}).
+		Return(blobReaderFixture(blob, body), nil)
+
+	req := newHTTPAPIRequest(
+		http.MethodGet,
+		"/v1/images/debian/versions/v1.0.0/artifacts/"+catalogArtifactIDFixture().String()+"/download",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "application/x-qcow2", rec.Header().Get("Content-Type"))
+	assert.Equal(t, blobETag(blob), rec.Header().Get("ETag"))
+	assert.Equal(t, "14", rec.Header().Get("Content-Length"))
+	assert.Equal(t, body, rec.Body.String())
+}
+
+func TestDownloadPublishedArtifactSupportsRangeAndHead(t *testing.T) {
+	tests := []struct {
+		name       string
+		method     string
+		rangeValue string
+		wantStatus int
+		wantLength string
+		wantRange  string
+		wantBody   string
+	}{
+		{
+			name:       "range",
+			method:     http.MethodGet,
+			rangeValue: "bytes=2-4",
+			wantStatus: http.StatusPartialContent,
+			wantLength: "3",
+			wantRange:  "bytes 2-4/10",
+			wantBody:   "234",
+		},
+		{
+			name:       "head",
+			method:     http.MethodHead,
+			wantStatus: http.StatusOK,
+			wantLength: "10",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := newCatalogHandlerTestContext(t)
+			body := blobPayload
+			if tt.rangeValue != "" {
+				body = tt.wantBody
+			}
+			artifact := catalogArtifactFixture()
+			artifact.PrimaryBlobSizeBytes = int64(len(blobPayload))
+			blob := catalogArtifactBlob(artifact)
+
+			tc.catalog.EXPECT().
+				GetPublishedArtifact(mock.Anything, catalog.GetPublishedArtifactParams{
+					ImageName:  "debian",
+					Version:    "v1.0.0",
+					ArtifactID: catalogArtifactIDFixture(),
+				}).
+				Return(artifact, nil)
+			expectedOpen := cas.OpenBlobParams{Digest: blob.Digest}
+			if tt.rangeValue != "" {
+				expectedOpen.Range = rangePtr(2, 4)
+			}
+			tc.blobs.EXPECT().
+				OpenBlob(mock.Anything, expectedOpen).
+				Return(blobReaderFixture(blob, body), nil)
+
+			req := newHTTPAPIRequest(
+				tt.method,
+				"/v1/images/debian/versions/v1.0.0/artifacts/"+catalogArtifactIDFixture().String()+"/download",
+				nil,
+			)
+			if tt.rangeValue != "" {
+				req.Header.Set("Range", tt.rangeValue)
+			}
+			rec := httptest.NewRecorder()
+
+			tc.handler.ServeHTTP(rec, req)
+
+			require.Equal(t, tt.wantStatus, rec.Code)
+			assert.Equal(t, tt.wantLength, rec.Header().Get("Content-Length"))
+			assert.Equal(t, tt.wantRange, rec.Header().Get("Content-Range"))
+			assert.Equal(t, tt.wantBody, rec.Body.String())
+		})
+	}
+}
+
+func TestDownloadPublishedAttachmentStreamsAttachmentBlob(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+	body := "checksum"
+	attachment := catalogAttachmentFixture()
+	attachment.BlobSizeBytes = int64(len(body))
+	blob := catalogAttachmentBlob(attachment)
+
+	tc.catalog.EXPECT().
+		GetPublishedAttachment(mock.Anything, catalog.GetPublishedAttachmentParams{
+			ImageName:    "debian",
+			Version:      "v1.0.0",
+			ArtifactID:   catalogArtifactIDFixture(),
+			AttachmentID: catalogAttachmentIDFixture(),
+		}).
+		Return(attachment, nil)
+	tc.blobs.EXPECT().
+		OpenBlob(mock.Anything, cas.OpenBlobParams{Digest: blob.Digest}).
+		Return(blobReaderFixture(blob, body), nil)
+
+	req := newHTTPAPIRequest(
+		http.MethodGet,
+		"/v1/images/debian/versions/v1.0.0/artifacts/"+
+			catalogArtifactIDFixture().String()+
+			"/attachments/"+
+			catalogAttachmentIDFixture().String()+
+			"/download",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "text/plain", rec.Header().Get("Content-Type"))
+	assert.Equal(t, "8", rec.Header().Get("Content-Length"))
+	assert.Equal(t, body, rec.Body.String())
+}
+
+func TestDownloadPublishedArtifactMapsMissingCASBlobToNotFound(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+	artifact := catalogArtifactFixture()
+	blob := catalogArtifactBlob(artifact)
+
+	tc.catalog.EXPECT().
+		GetPublishedArtifact(mock.Anything, mock.Anything).
+		Return(artifact, nil)
+	tc.blobs.EXPECT().
+		OpenBlob(mock.Anything, cas.OpenBlobParams{Digest: blob.Digest}).
+		Return(blobReaderFixture(blob, ""), cas.ErrNotFound)
+
+	req := newHTTPAPIRequest(
+		http.MethodGet,
+		"/v1/images/debian/versions/v1.0.0/artifacts/"+catalogArtifactIDFixture().String()+"/download",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	assertProblem(t, rec, http.StatusNotFound, cas.ErrNotFound.Error())
+}
+
 func TestResolveManifestReturnsPublishedManifestForRef(t *testing.T) {
 	tc := newCatalogHandlerTestContext(t)
 	wantManifest := catalogManifestFixture(catalog.VersionStatePublished)
@@ -180,7 +402,7 @@ func TestResolveManifestReturnsPublishedManifestForRef(t *testing.T) {
 		}).
 		Return(wantManifest, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/images/debian/refs/latest", nil)
+	req := newHTTPAPIRequest(http.MethodGet, "/v1/images/debian/refs/latest", nil)
 	rec := httptest.NewRecorder()
 
 	tc.handler.ServeHTTP(rec, req)
@@ -210,7 +432,7 @@ func TestAddArtifactCreatesPrimaryArtifact(t *testing.T) {
 		}).
 		Return(wantArtifact, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/debian/versions/v1.0.0/artifacts", strings.NewReader(`{
+	req := newHTTPAPIRequest(http.MethodPost, "/v1/images/debian/versions/v1.0.0/artifacts", strings.NewReader(`{
 		"operating_system": "linux",
 		"architecture": "x86_64",
 		"format": "qcow2",
@@ -243,7 +465,7 @@ func TestDeleteArtifactDeletesDraftArtifact(t *testing.T) {
 		}).
 		Return(nil)
 
-	req := httptest.NewRequest(
+	req := newHTTPAPIRequest(
 		http.MethodDelete,
 		"/v1/images/debian/versions/v1.0.0/artifacts/"+catalogArtifactIDFixture().String(),
 		nil,
@@ -272,7 +494,7 @@ func TestAddAttachmentCreatesAttachmentUnderArtifactPath(t *testing.T) {
 		}).
 		Return(wantAttachment, nil)
 
-	req := httptest.NewRequest(
+	req := newHTTPAPIRequest(
 		http.MethodPost,
 		"/v1/images/debian/versions/v1.0.0/artifacts/"+catalogArtifactIDFixture().String()+"/attachments",
 		strings.NewReader(`{
@@ -306,7 +528,7 @@ func TestDeleteAttachmentDeletesDraftAttachment(t *testing.T) {
 		}).
 		Return(nil)
 
-	req := httptest.NewRequest(
+	req := newHTTPAPIRequest(
 		http.MethodDelete,
 		"/v1/images/debian/versions/v1.0.0/artifacts/"+
 			catalogArtifactIDFixture().String()+
@@ -333,7 +555,7 @@ func TestPublishVersionPublishesDraft(t *testing.T) {
 		}).
 		Return(wantVersion, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/debian/versions/v1.0.0/publish", nil)
+	req := newHTTPAPIRequest(http.MethodPost, "/v1/images/debian/versions/v1.0.0/publish", nil)
 	rec := httptest.NewRecorder()
 
 	tc.handler.ServeHTTP(rec, req)
@@ -358,7 +580,7 @@ func TestPutAliasCreatesOrMovesAlias(t *testing.T) {
 		}).
 		Return(wantAlias, nil)
 
-	req := httptest.NewRequest(http.MethodPut, "/v1/images/debian/aliases/latest", strings.NewReader(`{
+	req := newHTTPAPIRequest(http.MethodPut, "/v1/images/debian/aliases/latest", strings.NewReader(`{
 		"version": "v1.0.0"
 	}`))
 	rec := httptest.NewRecorder()
@@ -382,7 +604,7 @@ func TestListAliasesReturnsAliases(t *testing.T) {
 		ListAliases(mock.Anything, catalog.ListAliasesParams{ImageName: "debian"}).
 		Return([]catalog.Alias{catalogAliasFixture()}, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/images/debian/aliases", nil)
+	req := newHTTPAPIRequest(http.MethodGet, "/v1/images/debian/aliases", nil)
 	rec := httptest.NewRecorder()
 
 	tc.handler.ServeHTTP(rec, req)
@@ -405,7 +627,7 @@ func TestGetAliasReturnsAlias(t *testing.T) {
 		}).
 		Return(catalogAliasFixture(), nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/images/debian/aliases/latest", nil)
+	req := newHTTPAPIRequest(http.MethodGet, "/v1/images/debian/aliases/latest", nil)
 	rec := httptest.NewRecorder()
 
 	tc.handler.ServeHTTP(rec, req)
@@ -427,7 +649,7 @@ func TestDeleteAliasDeletesAlias(t *testing.T) {
 		}).
 		Return(nil)
 
-	req := httptest.NewRequest(http.MethodDelete, "/v1/images/debian/aliases/latest", nil)
+	req := newHTTPAPIRequest(http.MethodDelete, "/v1/images/debian/aliases/latest", nil)
 	rec := httptest.NewRecorder()
 
 	tc.handler.ServeHTTP(rec, req)
@@ -473,6 +695,20 @@ func TestCatalogHandlersRejectInvalidRequests(t *testing.T) {
 			want:   "artifact id must be a UUID",
 		},
 		{
+			name:   "get artifact rejects invalid artifact id",
+			method: http.MethodGet,
+			path:   "/v1/images/debian/versions/v1.0.0/artifacts/not-a-uuid",
+			want:   "artifact id must be a UUID",
+		},
+		{
+			name:   "download attachment rejects invalid attachment id",
+			method: http.MethodGet,
+			path: "/v1/images/debian/versions/v1.0.0/artifacts/" +
+				catalogArtifactIDFixture().String() +
+				"/attachments/not-a-uuid/download",
+			want: "attachment id must be a UUID",
+		},
+		{
 			name:   "delete artifact rejects invalid artifact id",
 			method: http.MethodDelete,
 			path:   "/v1/images/debian/versions/v1.0.0/artifacts/not-a-uuid",
@@ -500,7 +736,7 @@ func TestCatalogHandlersRejectInvalidRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tc := newCatalogHandlerTestContext(t)
-			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			req := newHTTPAPIRequest(tt.method, tt.path, strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
 
 			tc.handler.ServeHTTP(rec, req)
@@ -530,7 +766,7 @@ func TestCatalogHandlersMapDomainErrors(t *testing.T) {
 			tc.catalog.EXPECT().
 				CreateImage(mock.Anything, mock.Anything).
 				Return(catalog.Image{}, tt.err)
-			req := httptest.NewRequest(http.MethodPost, "/v1/images", strings.NewReader(`{"name":"debian"}`))
+			req := newHTTPAPIRequest(http.MethodPost, "/v1/images", strings.NewReader(`{"name":"debian"}`))
 			rec := httptest.NewRecorder()
 
 			tc.handler.ServeHTTP(rec, req)
@@ -554,6 +790,17 @@ func TestCatalogHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 		{name: "create version", method: http.MethodPost, path: "/v1/images/debian/versions", body: `{}`},
 		{name: "list versions", method: http.MethodGet, path: "/v1/images/debian/versions"},
 		{name: "get manifest", method: http.MethodGet, path: "/v1/images/debian/versions/v1.0.0"},
+		{name: "list published artifacts", method: http.MethodGet, path: "/v1/images/debian/versions/v1.0.0/artifacts"},
+		{
+			name:   "get published artifact",
+			method: http.MethodGet,
+			path:   "/v1/images/debian/versions/v1.0.0/artifacts/" + catalogArtifactIDFixture().String(),
+		},
+		{
+			name:   "download published artifact",
+			method: http.MethodGet,
+			path:   "/v1/images/debian/versions/v1.0.0/artifacts/" + catalogArtifactIDFixture().String() + "/download",
+		},
 		{name: "resolve manifest", method: http.MethodGet, path: "/v1/images/debian/refs/latest"},
 		{
 			name:   "add artifact",
@@ -586,12 +833,23 @@ func TestCatalogHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 		{name: "list aliases", method: http.MethodGet, path: "/v1/images/debian/aliases"},
 		{name: "get alias", method: http.MethodGet, path: "/v1/images/debian/aliases/latest"},
 		{name: "delete alias", method: http.MethodDelete, path: "/v1/images/debian/aliases/latest"},
+		{
+			name:   "download published attachment",
+			method: http.MethodGet,
+			path: "/v1/images/debian/versions/v1.0.0/artifacts/" +
+				catalogArtifactIDFixture().String() +
+				"/attachments/" +
+				catalogAttachmentIDFixture().String() +
+				"/download",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := New(Dependencies{})
-			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			handler := New(Dependencies{
+				Auth: newAcceptingAuthService(t),
+			})
+			req := newHTTPAPIRequest(tt.method, tt.path, strings.NewReader(tt.body))
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)
@@ -604,6 +862,7 @@ func TestCatalogHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 
 type catalogHandlerTestContext struct {
 	catalog *httpmocks.MockCatalogService
+	blobs   *httpmocks.MockBlobService
 	handler http.Handler
 }
 
@@ -611,10 +870,14 @@ func newCatalogHandlerTestContext(t *testing.T) *catalogHandlerTestContext {
 	t.Helper()
 
 	catalogService := httpmocks.NewMockCatalogService(t)
+	blobService := httpmocks.NewMockBlobService(t)
 	return &catalogHandlerTestContext{
 		catalog: catalogService,
+		blobs:   blobService,
 		handler: New(Dependencies{
 			Catalog: catalogService,
+			Blobs:   blobService,
+			Auth:    newAcceptingAuthService(t),
 		}),
 	}
 }
@@ -730,4 +993,8 @@ func catalogUpdatedAtFixture() time.Time {
 
 func catalogPublishedAtFixture() time.Time {
 	return time.Date(2026, 5, 5, 18, 2, 0, 0, time.UTC)
+}
+
+func rangePtr(start int64, end int64) *objectstore.ByteRange {
+	return &objectstore.ByteRange{Start: start, End: end}
 }

@@ -4,6 +4,7 @@
 package harness
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
+	"github.com/meigma/imgsrv/internal/auth"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/objectstore/s3"
 	"github.com/meigma/imgsrv/internal/store/postgres"
@@ -41,6 +46,13 @@ func WithCASPromotion() Option {
 	}
 }
 
+// WithAPIToken seeds rawToken as an active API token for write-route authentication.
+func WithAPIToken(rawToken string) Option {
+	return func(options *options) {
+		options.apiToken = rawToken
+	}
+}
+
 // Env owns a running imgsrv integration-test environment.
 type Env struct {
 	// baseURL is the root URL for the in-process imgsrv HTTP server.
@@ -68,6 +80,7 @@ func Start(t testing.TB, opts ...Option) *Env {
 	postgresURL := startPostgres(ctx, t)
 	s3Config := startGarage(ctx, t)
 	store := openStore(ctx, t, postgresURL)
+	seedAPIToken(ctx, t, store, startupOptions.apiToken)
 	objectStore := openObjectStore(t, s3Config)
 	baseURL := startServer(ctx, t, startupOptions, store, objectStore)
 
@@ -117,6 +130,7 @@ func (env *Env) S3Config() s3.Config {
 type options struct {
 	logger       *slog.Logger
 	casPromotion bool
+	apiToken     string
 }
 
 // newOptions applies opts to a zero options value and returns the resolved
@@ -130,6 +144,27 @@ func newOptions(opts ...Option) options {
 	}
 
 	return result
+}
+
+// seedAPIToken inserts a test API token when configured.
+func seedAPIToken(ctx context.Context, t testing.TB, store *postgres.Store, rawToken string) {
+	t.Helper()
+	if strings.TrimSpace(rawToken) == "" {
+		return
+	}
+
+	prefix, err := auth.ParseTokenPrefix(rawToken)
+	require.NoError(t, err)
+	tokenHash, err := auth.HashToken(rawToken)
+	require.NoError(t, err)
+
+	_, err = store.Auth().CreateToken(ctx, auth.CreateTokenParams{
+		ID:          uuid.New(),
+		Name:        "integration test",
+		TokenPrefix: prefix,
+		TokenHash:   tokenHash,
+	})
+	require.NoError(t, err)
 }
 
 // newHTTPClient builds the HTTP client integration tests use to talk to the

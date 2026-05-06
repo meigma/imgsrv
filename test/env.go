@@ -28,11 +28,22 @@ func WithCASPromotion() Option {
 	}
 }
 
+// WithAPIToken seeds rawToken and configures Env.Client to send it as a bearer token.
+func WithAPIToken(rawToken string) Option {
+	return func(options *options) {
+		options.harness = append(options.harness, harness.WithAPIToken(rawToken))
+		options.bearerToken = rawToken
+	}
+}
+
 // Env owns a running imgsrv functional-test environment.
 type Env struct {
 	// harness is the underlying internal integration harness that drives the
 	// in-process imgsrv server, dependencies, and lifecycle.
 	harness *harness.Env
+
+	// bearerToken is sent by Env.Client when configured.
+	bearerToken string
 }
 
 // Start creates a disposable imgsrv functional-test environment.
@@ -42,7 +53,8 @@ func Start(t testing.TB, opts ...Option) *Env {
 	startupOptions := newOptions(opts...)
 
 	return &Env{
-		harness: harness.Start(t, startupOptions.harness...),
+		harness:     harness.Start(t, startupOptions.harness...),
+		bearerToken: startupOptions.bearerToken,
 	}
 }
 
@@ -64,8 +76,9 @@ func (env *Env) HTTPClient() *http.Client {
 // ClientOptions returns client SDK options for this environment.
 func (env *Env) ClientOptions() imgsrv.Options {
 	return imgsrv.Options{
-		BaseURL:    env.BaseURL(),
-		HTTPClient: env.HTTPClient(),
+		BaseURL:     env.BaseURL(),
+		HTTPClient:  env.HTTPClient(),
+		BearerToken: env.bearerToken,
 	}
 }
 
@@ -84,7 +97,8 @@ func (env *Env) Client(t testing.TB) *imgsrv.Client {
 // options holds the resolved startup configuration produced by applying the
 // caller-provided Option values.
 type options struct {
-	harness []harness.Option
+	harness     []harness.Option
+	bearerToken string
 }
 
 // newOptions applies opts and returns the resolved startup configuration.

@@ -18,10 +18,12 @@ const (
 	testArtifactID   = "33333333-4444-5555-6666-777777777777"
 	testAttachmentID = "44444444-5555-6666-7777-888888888888"
 	testAliasID      = "66666666-7777-8888-9999-aaaaaaaaaaaa"
-	testDigest       = Digest("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-	testImageID      = "22222222-3333-4444-5555-666666666666"
-	testUploadID     = "11111111-2222-3333-4444-555555555555"
-	testVersionID    = "55555555-6666-7777-8888-999999999999"
+	testDigest       = Digest(
+		"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	)
+	testImageID   = "22222222-3333-4444-5555-666666666666"
+	testUploadID  = "11111111-2222-3333-4444-555555555555"
+	testVersionID = "55555555-6666-7777-8888-999999999999"
 )
 
 func TestNewValidatesBaseURL(t *testing.T) {
@@ -96,44 +98,57 @@ func TestClientUploadFlowBuildsRequests(t *testing.T) {
 
 		writeJSON(t, w, http.StatusCreated, uploadSessionFixture(UploadStateCreated))
 	})
-	mux.HandleFunc("/api/v1/uploads/"+testUploadID+"/parts/1", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodPut)
-		assert.Equal(t, "application/octet-stream", r.Header.Get("Content-Type"))
-		assert.Equal(t, int64(12), r.ContentLength)
-		body, err := io.ReadAll(r.Body)
-		if !assert.NoError(t, err) {
-			return
-		}
-		assert.Equal(t, "hello upload", string(body))
+	mux.HandleFunc(
+		"/api/v1/uploads/"+testUploadID+"/parts/1",
+		func(w http.ResponseWriter, r *http.Request) {
+			assertRequestBasics(t, r, http.MethodPut)
+			assert.Equal(t, "application/octet-stream", r.Header.Get("Content-Type"))
+			assert.Equal(t, int64(12), r.ContentLength)
+			body, err := io.ReadAll(r.Body)
+			if !assert.NoError(t, err) {
+				return
+			}
+			assert.Equal(t, "hello upload", string(body))
 
-		writeJSON(t, w, http.StatusOK, UploadPart{
-			UploadID:   UploadID(testUploadID),
-			PartNumber: 1,
-			ETag:       "etag-1",
-			SizeBytes:  12,
-		})
-	})
-	mux.HandleFunc("/api/v1/uploads/"+testUploadID+"/complete", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodPost)
-		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			writeJSON(t, w, http.StatusOK, UploadPart{
+				UploadID:   UploadID(testUploadID),
+				PartNumber: 1,
+				ETag:       "etag-1",
+				SizeBytes:  12,
+			})
+		},
+	)
+	mux.HandleFunc(
+		"/api/v1/uploads/"+testUploadID+"/complete",
+		func(w http.ResponseWriter, r *http.Request) {
+			assertRequestBasics(t, r, http.MethodPost)
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
-		var got CompleteUploadRequest
-		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
-			return
-		}
-		if !assert.Len(t, got.Parts, 1) {
-			return
-		}
-		assert.Equal(t, CompleteUploadPart{Number: 1, ETag: "etag-1", SizeBytes: 12}, got.Parts[0])
+			var got CompleteUploadRequest
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+				return
+			}
+			if !assert.Len(t, got.Parts, 1) {
+				return
+			}
+			assert.Equal(
+				t,
+				CompleteUploadPart{Number: 1, ETag: "etag-1", SizeBytes: 12},
+				got.Parts[0],
+			)
 
-		writeJSON(t, w, http.StatusOK, uploadSessionFixture(UploadStateCompleted))
-	})
-	mux.HandleFunc("/api/v1/uploads/"+testUploadID+"/abort", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodPost)
-		assert.Zero(t, r.ContentLength)
+			writeJSON(t, w, http.StatusOK, uploadSessionFixture(UploadStateCompleted))
+		},
+	)
+	mux.HandleFunc(
+		"/api/v1/uploads/"+testUploadID+"/abort",
+		func(w http.ResponseWriter, r *http.Request) {
+			assertRequestBasics(t, r, http.MethodPost)
+			assert.Zero(t, r.ContentLength)
 
-		writeJSON(t, w, http.StatusOK, uploadSessionFixture(UploadStateAborted))
-	})
+			writeJSON(t, w, http.StatusOK, uploadSessionFixture(UploadStateAborted))
+		},
+	)
 	mux.HandleFunc("/api/v1/uploads/"+testUploadID, func(w http.ResponseWriter, r *http.Request) {
 		assertRequestBasics(t, r, http.MethodGet)
 		writeJSON(t, w, http.StatusOK, uploadSessionFixture(UploadStateCompleted))
@@ -160,12 +175,20 @@ func TestClientUploadFlowBuildsRequests(t *testing.T) {
 	assert.Equal(t, UploadID(testUploadID), begin.ID)
 	assert.Equal(t, UploadStateCreated, begin.State)
 
-	part, err := uploads.PutUploadPart(ctx, begin.ID.String(), 1, strings.NewReader("hello upload"), 12)
+	part, err := uploads.PutUploadPart(
+		ctx,
+		begin.ID.String(),
+		1,
+		strings.NewReader("hello upload"),
+		12,
+	)
 	require.NoError(t, err)
 	assert.Equal(t, "etag-1", part.ETag)
 
 	complete, err := uploads.CompleteUpload(ctx, begin.ID.String(), CompleteUploadRequest{
-		Parts: []CompleteUploadPart{{Number: part.PartNumber, ETag: part.ETag, SizeBytes: part.SizeBytes}},
+		Parts: []CompleteUploadPart{
+			{Number: part.PartNumber, ETag: part.ETag, SizeBytes: part.SizeBytes},
+		},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, UploadStateCompleted, complete.State)
@@ -237,7 +260,11 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, image.ID, gotImage.ID)
 
-	version, err := catalog.CreateDraftVersion(ctx, image.Name, CreateDraftVersionRequest{Version: "v1.0.0"})
+	version, err := catalog.CreateDraftVersion(
+		ctx,
+		image.Name,
+		CreateDraftVersionRequest{Version: "v1.0.0"},
+	)
 	require.NoError(t, err)
 	assert.Equal(t, ImageVersionStateDraft, version.State)
 
@@ -272,8 +299,20 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, testAttachmentID, attachment.ID)
 
-	require.NoError(t, catalog.DeleteAttachment(ctx, image.Name, version.Version, artifact.ID.String(), attachment.ID))
-	require.NoError(t, catalog.DeleteArtifact(ctx, image.Name, version.Version, artifact.ID.String()))
+	require.NoError(
+		t,
+		catalog.DeleteAttachment(
+			ctx,
+			image.Name,
+			version.Version,
+			artifact.ID.String(),
+			attachment.ID,
+		),
+	)
+	require.NoError(
+		t,
+		catalog.DeleteArtifact(ctx, image.Name, version.Version, artifact.ID.String()),
+	)
 
 	manifest, err := catalog.GetVersionManifest(ctx, image.Name, version.Version)
 	require.NoError(t, err)
@@ -284,7 +323,12 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, ImageVersionStatePublished, published.State)
 
-	alias, err := catalog.PutAlias(ctx, image.Name, "latest", PutAliasRequest{Version: version.Version})
+	alias, err := catalog.PutAlias(
+		ctx,
+		image.Name,
+		"latest",
+		PutAliasRequest{Version: version.Version},
+	)
 	require.NoError(t, err)
 	assert.Equal(t, "latest", alias.Alias)
 	assert.Equal(t, version.Version, alias.Version)
@@ -301,6 +345,47 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	resolved, err := catalog.ResolveManifest(ctx, image.Name, alias.Alias)
 	require.NoError(t, err)
 	assert.Equal(t, ImageVersionStatePublished, resolved.Version.State)
+
+	artifacts, err := catalog.ListArtifacts(ctx, image.Name, version.Version)
+	require.NoError(t, err)
+	require.Len(t, artifacts, 1)
+	assert.Equal(t, artifact.ID, artifacts[0].ID)
+
+	gotArtifact, err := catalog.GetArtifact(ctx, image.Name, version.Version, artifact.ID.String())
+	require.NoError(t, err)
+	assert.Equal(t, artifact.ID, gotArtifact.ID)
+
+	artifactDownload, err := catalog.OpenArtifactDownload(
+		ctx,
+		image.Name,
+		version.Version,
+		artifact.ID.String(),
+		OpenBlobOptions{},
+	)
+	require.NoError(t, err)
+	artifactBody, err := io.ReadAll(artifactDownload.Body)
+	require.NoError(t, err)
+	require.NoError(t, artifactDownload.Body.Close())
+	assert.Equal(t, "artifact-bytes", string(artifactBody))
+	assert.Equal(t, testDigest, artifactDownload.Metadata.Digest)
+	assert.Equal(t, "application/x-qcow2", artifactDownload.Metadata.ContentType)
+
+	downloadRange, err := BlobRangeSpan(1, 3)
+	require.NoError(t, err)
+	attachmentDownload, err := catalog.OpenAttachmentDownload(
+		ctx,
+		image.Name,
+		version.Version,
+		artifact.ID.String(),
+		testAttachmentID,
+		OpenBlobOptions{Range: &downloadRange},
+	)
+	require.NoError(t, err)
+	attachmentBody, err := io.ReadAll(attachmentDownload.Body)
+	require.NoError(t, err)
+	require.NoError(t, attachmentDownload.Body.Close())
+	assert.Equal(t, "oot", string(attachmentBody))
+	assert.Equal(t, "bytes 1-3/8", attachmentDownload.Metadata.ContentRange)
 
 	require.NoError(t, catalog.DeleteAlias(ctx, image.Name, alias.Alias))
 }
@@ -378,45 +463,80 @@ func registerCatalogVersionHandlers(t *testing.T, mux *http.ServeMux) {
 			t.Fatalf("unexpected versions method %s", r.Method)
 		}
 	})
-	mux.HandleFunc("/api/v1/images/debian/versions/v1.0.0", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodGet)
-		writeJSON(t, w, http.StatusOK, manifestFixture(ImageVersionStateDraft))
-	})
-	mux.HandleFunc("/api/v1/images/debian/versions/v1.0.0/publish", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodPost)
-		assert.Zero(t, r.ContentLength)
-		writeJSON(t, w, http.StatusOK, versionFixture(ImageVersionStatePublished))
-	})
-	mux.HandleFunc("/api/v1/images/debian/refs/latest", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodGet)
-		writeJSON(t, w, http.StatusOK, manifestFixture(ImageVersionStatePublished))
-	})
+	mux.HandleFunc(
+		"/api/v1/images/debian/versions/v1.0.0",
+		func(w http.ResponseWriter, r *http.Request) {
+			assertRequestBasics(t, r, http.MethodGet)
+			writeJSON(t, w, http.StatusOK, manifestFixture(ImageVersionStateDraft))
+		},
+	)
+	mux.HandleFunc(
+		"/api/v1/images/debian/versions/v1.0.0/publish",
+		func(w http.ResponseWriter, r *http.Request) {
+			assertRequestBasics(t, r, http.MethodPost)
+			assert.Zero(t, r.ContentLength)
+			writeJSON(t, w, http.StatusOK, versionFixture(ImageVersionStatePublished))
+		},
+	)
+	mux.HandleFunc(
+		"/api/v1/images/debian/refs/latest",
+		func(w http.ResponseWriter, r *http.Request) {
+			assertRequestBasics(t, r, http.MethodGet)
+			writeJSON(t, w, http.StatusOK, manifestFixture(ImageVersionStatePublished))
+		},
+	)
 }
 
 func registerCatalogArtifactHandlers(t *testing.T, mux *http.ServeMux) {
 	t.Helper()
 
 	artifactPath := "/api/v1/images/debian/versions/v1.0.0/artifacts/" + testArtifactID
-	mux.HandleFunc("/api/v1/images/debian/versions/v1.0.0/artifacts", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodPost)
-		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+	mux.HandleFunc(
+		"/api/v1/images/debian/versions/v1.0.0/artifacts",
+		func(w http.ResponseWriter, r *http.Request) {
+			assertRequestBasics(t, r, r.Method)
 
-		var got AddArtifactRequest
-		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
-			return
-		}
-		assert.Equal(t, "linux", got.OperatingSystem)
-		assert.Equal(t, "x86_64", got.Architecture)
-		assert.Equal(t, ArtifactFormatQCOW2, got.Format)
-		assert.Equal(t, testDigest, got.PrimaryBlobDigest)
-		assert.Equal(t, int64(12), got.PrimaryBlobSizeBytes)
-		assert.Equal(t, "application/x-qcow2", got.PrimaryMediaType)
-
-		writeJSON(t, w, http.StatusCreated, artifactFixture())
-	})
+			switch r.Method {
+			case http.MethodPost:
+				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+				var got AddArtifactRequest
+				if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+					return
+				}
+				assert.Equal(t, "linux", got.OperatingSystem)
+				assert.Equal(t, "x86_64", got.Architecture)
+				assert.Equal(t, ArtifactFormatQCOW2, got.Format)
+				assert.Equal(t, testDigest, got.PrimaryBlobDigest)
+				assert.Equal(t, int64(12), got.PrimaryBlobSizeBytes)
+				assert.Equal(t, "application/x-qcow2", got.PrimaryMediaType)
+				writeJSON(t, w, http.StatusCreated, artifactFixture())
+			case http.MethodGet:
+				writeJSON(
+					t,
+					w,
+					http.StatusOK,
+					artifactListResponse{Artifacts: []Artifact{artifactFixture()}},
+				)
+			default:
+				t.Fatalf("unexpected artifacts method %s", r.Method)
+			}
+		},
+	)
 	mux.HandleFunc(artifactPath, func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodDelete)
-		w.WriteHeader(http.StatusNoContent)
+		assertRequestBasics(t, r, r.Method)
+
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, artifactFixture())
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected artifact method %s", r.Method)
+		}
+	})
+	mux.HandleFunc(artifactPath+"/download", func(w http.ResponseWriter, r *http.Request) {
+		assertBlobDownloadRequest(t, r, "")
+		writeDownload(t, w, http.StatusOK, "application/x-qcow2", "14", "", "artifact-bytes")
 	})
 	mux.HandleFunc(artifactPath+"/attachments", func(w http.ResponseWriter, r *http.Request) {
 		assertRequestBasics(t, r, http.MethodPost)
@@ -433,10 +553,20 @@ func registerCatalogArtifactHandlers(t *testing.T, mux *http.ServeMux) {
 
 		writeJSON(t, w, http.StatusCreated, attachmentFixture())
 	})
-	mux.HandleFunc(artifactPath+"/attachments/"+testAttachmentID, func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, http.MethodDelete)
-		w.WriteHeader(http.StatusNoContent)
-	})
+	mux.HandleFunc(
+		artifactPath+"/attachments/"+testAttachmentID,
+		func(w http.ResponseWriter, r *http.Request) {
+			assertRequestBasics(t, r, http.MethodDelete)
+			w.WriteHeader(http.StatusNoContent)
+		},
+	)
+	mux.HandleFunc(
+		artifactPath+"/attachments/"+testAttachmentID+"/download",
+		func(w http.ResponseWriter, r *http.Request) {
+			assertBlobDownloadRequest(t, r, "bytes=1-3")
+			writeDownload(t, w, http.StatusPartialContent, "text/plain", "3", "bytes 1-3/8", "oot")
+		},
+	)
 }
 
 func registerCatalogAliasHandlers(t *testing.T, mux *http.ServeMux) {
@@ -446,26 +576,29 @@ func registerCatalogAliasHandlers(t *testing.T, mux *http.ServeMux) {
 		assertRequestBasics(t, r, http.MethodGet)
 		writeJSON(t, w, http.StatusOK, aliasListResponse{Aliases: []Alias{aliasFixture()}})
 	})
-	mux.HandleFunc("/api/v1/images/debian/aliases/latest", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, r.Method)
+	mux.HandleFunc(
+		"/api/v1/images/debian/aliases/latest",
+		func(w http.ResponseWriter, r *http.Request) {
+			assertRequestBasics(t, r, r.Method)
 
-		switch r.Method {
-		case http.MethodPut:
-			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-			var got PutAliasRequest
-			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
-				return
+			switch r.Method {
+			case http.MethodPut:
+				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+				var got PutAliasRequest
+				if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+					return
+				}
+				assert.Equal(t, "v1.0.0", got.Version)
+				writeJSON(t, w, http.StatusOK, aliasFixture())
+			case http.MethodGet:
+				writeJSON(t, w, http.StatusOK, aliasFixture())
+			case http.MethodDelete:
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				t.Fatalf("unexpected alias method %s", r.Method)
 			}
-			assert.Equal(t, "v1.0.0", got.Version)
-			writeJSON(t, w, http.StatusOK, aliasFixture())
-		case http.MethodGet:
-			writeJSON(t, w, http.StatusOK, aliasFixture())
-		case http.MethodDelete:
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Fatalf("unexpected alias method %s", r.Method)
-		}
-	})
+		},
+	)
 }
 
 func TestClientBlobFlowBuildsRequests(t *testing.T) {
@@ -476,55 +609,66 @@ func TestClientBlobFlowBuildsRequests(t *testing.T) {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/blobs/"+url.PathEscape(testDigest.String()), func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "*/*", r.Header.Get("Accept"))
-		assert.Equal(t, "imgsrv-test-client", r.Header.Get("User-Agent"))
-		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+	mux.HandleFunc(
+		"/api/v1/blobs/"+url.PathEscape(testDigest.String()),
+		func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "*/*", r.Header.Get("Accept"))
+			assert.Equal(t, "imgsrv-test-client", r.Header.Get("User-Agent"))
+			assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 
-		switch {
-		case r.Method == http.MethodHead:
-			w.Header().Set("Accept-Ranges", "bytes")
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Header().Set("Content-Length", "10")
-			w.Header().Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
-			w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
-			w.WriteHeader(http.StatusOK)
-		case r.Method == http.MethodGet && r.Header.Get("Range") == "":
-			w.Header().Set("Accept-Ranges", "bytes")
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Header().Set("Content-Length", "10")
-			w.Header().Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
-			w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
-			_, writeErr := w.Write([]byte("0123456789"))
-			assert.NoError(t, writeErr)
-		case r.Method == http.MethodGet && r.Header.Get("Range") == "bytes=3-":
-			w.Header().Set("Accept-Ranges", "bytes")
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Header().Set("Content-Length", "7")
-			w.Header().Set("Content-Range", "bytes 3-9/10")
-			w.Header().Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
-			w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
-			w.WriteHeader(http.StatusPartialContent)
-			_, writeErr := w.Write([]byte("3456789"))
-			assert.NoError(t, writeErr)
-		case r.Method == http.MethodGet && r.Header.Get("Range") == "bytes=-4":
-			w.Header().Set("Accept-Ranges", "bytes")
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Header().Set("Content-Length", "4")
-			w.Header().Set("Content-Range", "bytes 6-9/10")
-			w.Header().Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
-			w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
-			w.WriteHeader(http.StatusPartialContent)
-			_, writeErr := w.Write([]byte("6789"))
-			assert.NoError(t, writeErr)
-		default:
-			t.Fatalf("unexpected blob request: method=%s range=%q", r.Method, r.Header.Get("Range"))
-		}
-	})
+			switch {
+			case r.Method == http.MethodHead:
+				w.Header().Set("Accept-Ranges", "bytes")
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set("Content-Length", "10")
+				w.Header().
+					Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
+				w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
+				w.WriteHeader(http.StatusOK)
+			case r.Method == http.MethodGet && r.Header.Get("Range") == "":
+				w.Header().Set("Accept-Ranges", "bytes")
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set("Content-Length", "10")
+				w.Header().
+					Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
+				w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
+				_, writeErr := w.Write([]byte("0123456789"))
+				assert.NoError(t, writeErr)
+			case r.Method == http.MethodGet && r.Header.Get("Range") == "bytes=3-":
+				w.Header().Set("Accept-Ranges", "bytes")
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set("Content-Length", "7")
+				w.Header().Set("Content-Range", "bytes 3-9/10")
+				w.Header().
+					Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
+				w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
+				w.WriteHeader(http.StatusPartialContent)
+				_, writeErr := w.Write([]byte("3456789"))
+				assert.NoError(t, writeErr)
+			case r.Method == http.MethodGet && r.Header.Get("Range") == "bytes=-4":
+				w.Header().Set("Accept-Ranges", "bytes")
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Header().Set("Content-Length", "4")
+				w.Header().Set("Content-Range", "bytes 6-9/10")
+				w.Header().
+					Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
+				w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
+				w.WriteHeader(http.StatusPartialContent)
+				_, writeErr := w.Write([]byte("6789"))
+				assert.NoError(t, writeErr)
+			default:
+				t.Fatalf(
+					"unexpected blob request: method=%s range=%q",
+					r.Method,
+					r.Header.Get("Range"),
+				)
+			}
+		},
+	)
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 
@@ -658,6 +802,42 @@ func assertRequestBasics(t *testing.T, r *http.Request, method string) {
 	assert.Equal(t, "application/json, application/problem+json", r.Header.Get("Accept"))
 	assert.Equal(t, "imgsrv-test-client", r.Header.Get("User-Agent"))
 	assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+}
+
+func assertBlobDownloadRequest(t *testing.T, r *http.Request, rangeValue string) {
+	t.Helper()
+
+	assert.Equal(t, http.MethodGet, r.Method)
+	assert.Equal(t, "*/*", r.Header.Get("Accept"))
+	assert.Equal(t, rangeValue, r.Header.Get("Range"))
+	assert.Equal(t, "imgsrv-test-client", r.Header.Get("User-Agent"))
+	assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+}
+
+func writeDownload(
+	t *testing.T,
+	w http.ResponseWriter,
+	status int,
+	contentType string,
+	contentLength string,
+	contentRange string,
+	body string,
+) {
+	t.Helper()
+
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", contentLength)
+	w.Header().
+		Set("ETag", `"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"`)
+	w.Header().Set("Last-Modified", "Mon, 05 May 2026 12:00:00 GMT")
+	if contentRange != "" {
+		w.Header().Set("Content-Range", contentRange)
+	}
+	w.WriteHeader(status)
+	_, err := w.Write([]byte(body))
+	assert.NoError(t, err)
 }
 
 func uploadSessionFixture(state UploadState) UploadSession {

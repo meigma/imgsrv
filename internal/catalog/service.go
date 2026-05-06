@@ -75,6 +75,45 @@ func (service *Service) ListVersions(ctx context.Context, params ListVersionsPar
 	return store.ListVersions(ctx, params)
 }
 
+// ListPublishedArtifacts returns artifacts for an exact published image version.
+func (service *Service) ListPublishedArtifacts(
+	ctx context.Context,
+	params ListPublishedArtifactsParams,
+) ([]Artifact, error) {
+	store, err := service.dependencies()
+	if err != nil {
+		return nil, err
+	}
+
+	return store.ListPublishedArtifacts(ctx, params)
+}
+
+// GetPublishedArtifact returns one artifact for an exact published image version.
+func (service *Service) GetPublishedArtifact(
+	ctx context.Context,
+	params GetPublishedArtifactParams,
+) (Artifact, error) {
+	store, err := service.dependencies()
+	if err != nil {
+		return Artifact{}, err
+	}
+
+	return store.GetPublishedArtifact(ctx, params)
+}
+
+// GetPublishedAttachment returns one attachment for an exact published image version artifact.
+func (service *Service) GetPublishedAttachment(
+	ctx context.Context,
+	params GetPublishedAttachmentParams,
+) (Attachment, error) {
+	store, err := service.dependencies()
+	if err != nil {
+		return Attachment{}, err
+	}
+
+	return store.GetPublishedAttachment(ctx, params)
+}
+
 // AddArtifact adds a primary artifact on a draft version.
 func (service *Service) AddArtifact(ctx context.Context, params AddArtifactParams) (Artifact, error) {
 	store, err := service.dependencies()

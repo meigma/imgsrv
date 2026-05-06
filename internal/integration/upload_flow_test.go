@@ -26,8 +26,10 @@ import (
 	"github.com/meigma/imgsrv/internal/uploads"
 )
 
+const integrationAPIToken = "testtok.integration-secret"
+
 func TestUploadFlowStagesCompletedObject(t *testing.T) {
-	env := harness.Start(t)
+	env := startIntegrationEnv(t)
 	ctx := t.Context()
 	payload := []byte("imgsrv integration upload payload")
 	expectedDigest := imgsrv.Digest(digestFor(payload))
@@ -117,7 +119,7 @@ func TestUploadFlowStagesCompletedObject(t *testing.T) {
 }
 
 func TestUploadFlowSkipsTrustedDigestAndLeavesNoQueuedJob(t *testing.T) {
-	env := harness.Start(t)
+	env := startIntegrationEnv(t)
 	ctx := t.Context()
 	client := newClient(t, env)
 	payload := []byte("imgsrv integration trusted digest payload")
@@ -141,6 +143,7 @@ func TestUploadFlowSkipsTrustedDigestAndLeavesNoQueuedJob(t *testing.T) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, env.URL("/v1/uploads"), body)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+integrationAPIToken)
 
 	resp, err := env.HTTPClient().Do(req)
 	require.NoError(t, err)
@@ -165,7 +168,7 @@ func TestUploadFlowSkipsTrustedDigestAndLeavesNoQueuedJob(t *testing.T) {
 }
 
 func TestBlobRouteSupportsHeadAndRanges(t *testing.T) {
-	env := harness.Start(t)
+	env := startIntegrationEnv(t)
 	ctx := t.Context()
 	client := newClient(t, env)
 	payload := []byte("imgsrv integration ranged blob payload")
@@ -224,7 +227,7 @@ func TestBlobRouteSupportsHeadAndRanges(t *testing.T) {
 }
 
 func TestUploadFlowAbortsMutableUpload(t *testing.T) {
-	env := harness.Start(t)
+	env := startIntegrationEnv(t)
 	ctx := t.Context()
 	payload := []byte("imgsrv integration abort upload payload")
 	expectedDigest := imgsrv.Digest(digestFor(payload))
@@ -273,13 +276,20 @@ func newClient(t *testing.T, env *harness.Env) *imgsrv.Client {
 	t.Helper()
 
 	client, err := imgsrv.New(imgsrv.Options{
-		BaseURL:    env.BaseURL(),
-		HTTPClient: env.HTTPClient(),
-		UserAgent:  "imgsrv-integration-test",
+		BaseURL:     env.BaseURL(),
+		BearerToken: integrationAPIToken,
+		HTTPClient:  env.HTTPClient(),
+		UserAgent:   "imgsrv-integration-test",
 	})
 	require.NoError(t, err)
 
 	return client
+}
+
+func startIntegrationEnv(t testing.TB) *harness.Env {
+	t.Helper()
+
+	return harness.Start(t, harness.WithAPIToken(integrationAPIToken))
 }
 
 func readObject(ctx context.Context, t *testing.T, env *harness.Env, key string) stagedObject {

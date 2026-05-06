@@ -22,6 +22,9 @@ const (
 
 	// blobDefaultContentType is the fallback media type when trusted blob metadata has no media type.
 	blobDefaultContentType = "application/octet-stream"
+
+	// blobTimePrecision is the precision supported by HTTP date validators.
+	blobTimePrecision = time.Second
 )
 
 // errBlobServiceUnavailable signals that blob routes were called without a configured BlobService.
@@ -64,7 +67,7 @@ func (a *api) getBlob(w http.ResponseWriter, r *http.Request) {
 
 	rangeRequest, ok, err := selectBlobRange(r, etag, modifiedAt, blob.SizeBytes)
 	if err != nil {
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", blob.SizeBytes))
+		w.Header().Set("Content-Range", unsatisfiedBlobRange(blob.SizeBytes))
 		writeBlobProblem(w, r, http.StatusRequestedRangeNotSatisfiable, err.Error())
 		return
 	}
@@ -76,10 +79,7 @@ func (a *api) getBlob(w http.ResponseWriter, r *http.Request) {
 		contentLength = rangeRequest.length
 	}
 
-	var byteRange *objectstore.ByteRange
-	if ok {
-		byteRange = &rangeRequest.open
-	}
+	byteRange := rangeRequest.openPointer(ok)
 	reader, err := openBlobReader(r.Context(), service, digest, byteRange)
 	if err != nil {
 		writeBlobReadError(w, r, err)
@@ -98,6 +98,15 @@ func (a *api) getBlob(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, reader.Body); err != nil {
 		a.logger.Warn("stream blob response failed", "digest", digest, "error", err)
 	}
+}
+
+// openPointer returns the object-store range pointer for a selected range.
+func (selected selectedBlobRange) openPointer(ok bool) *objectstore.ByteRange {
+	if !ok {
+		return nil
+	}
+
+	return &selected.open
 }
 
 // blobService returns the configured BlobService or writes a 503 response and reports false.
@@ -358,6 +367,11 @@ func parseBlobRangeHeader(header string, size int64) (selectedBlobRange, bool, e
 // formatContentRange formats a Content-Range header value for one selected byte range.
 func formatContentRange(start int64, end int64, size int64) string {
 	return fmt.Sprintf("bytes %d-%d/%d", start, end, size)
+}
+
+// unsatisfiedBlobRange returns the Content-Range value for an unsatisfied range request.
+func unsatisfiedBlobRange(size int64) string {
+	return fmt.Sprintf("bytes */%d", size)
 }
 
 // matchHeader reports whether header matches etag, optionally allowing weak validators.
