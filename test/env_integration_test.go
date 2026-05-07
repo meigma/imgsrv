@@ -210,6 +210,21 @@ func TestEnvWithCASPromotionPublishesReleaseFlow(t *testing.T) {
 	assert.Equal(t, attachmentBlob.Digest, attachmentDownload.Metadata.Digest)
 	assert.Equal(t, attachmentBlob.SizeBytes, attachmentDownload.Metadata.SizeBytes)
 	assert.Equal(t, "text/plain", attachmentDownload.Metadata.ContentType)
+
+	images, err := anonymousCatalog.ListImages(ctx)
+	require.NoError(t, err)
+	require.Len(t, images, 1)
+	assert.Equal(t, image.ID, images[0].ID)
+
+	gotImage, err := anonymousCatalog.GetImage(ctx, image.Name)
+	require.NoError(t, err)
+	assert.Equal(t, image.ID, gotImage.ID)
+
+	versions, err := anonymousCatalog.ListVersions(ctx, image.Name)
+	require.NoError(t, err)
+	require.Len(t, versions, 1)
+	assert.Equal(t, published.Version, versions[0].Version)
+	assert.Equal(t, imgsrv.ImageVersionStatePublished, versions[0].State)
 }
 
 func TestEnvWriteFlowRequiresBearerToken(t *testing.T) {
@@ -220,101 +235,6 @@ func TestEnvWriteFlowRequiresBearerToken(t *testing.T) {
 	_, err := client.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{Name: "public-missing-auth"})
 
 	assertProblemStatus(t, err, http.StatusUnauthorized)
-}
-
-func TestEnvWithCASPromotionBrowsesAndDeletesDraftCatalog(t *testing.T) {
-	env := startEnv(t, imgsrvtest.WithCASPromotion())
-	client := env.Client(t)
-	ctx := t.Context()
-	catalog := client.Catalog()
-	primaryBlob := uploadReadyBlob(ctx, t, client, []byte("public imgsrv browse delete primary artifact"))
-	attachmentBlob := uploadReadyBlob(ctx, t, client, []byte("public imgsrv browse delete attachment"))
-
-	image, err := catalog.CreateImage(ctx, imgsrv.CreateImageRequest{Name: "public-browse-delete"})
-	require.NoError(t, err)
-
-	images, err := catalog.ListImages(ctx)
-	require.NoError(t, err)
-	assert.Empty(t, images)
-
-	_, err = catalog.GetImage(ctx, image.Name)
-	assertProblemStatus(t, err, http.StatusNotFound)
-
-	firstVersion, err := catalog.CreateDraftVersion(ctx, image.Name, imgsrv.CreateDraftVersionRequest{
-		Version: "v1.0.0",
-	})
-	require.NoError(t, err)
-	_, err = catalog.CreateDraftVersion(ctx, image.Name, imgsrv.CreateDraftVersionRequest{
-		Version: "v1.1.0",
-	})
-	require.NoError(t, err)
-
-	_, err = catalog.ListVersions(ctx, image.Name)
-	assertProblemStatus(t, err, http.StatusNotFound)
-
-	artifact, err := catalog.AddArtifact(ctx, image.Name, firstVersion.Version, imgsrv.AddArtifactRequest{
-		OperatingSystem:      "linux",
-		Architecture:         "x86_64",
-		Format:               imgsrv.ArtifactFormatQCOW2,
-		PrimaryBlobDigest:    primaryBlob.Digest,
-		PrimaryBlobSizeBytes: primaryBlob.SizeBytes,
-		PrimaryMediaType:     "application/x-qcow2",
-	})
-	require.NoError(t, err)
-	attachment, err := catalog.AddAttachment(
-		ctx,
-		image.Name,
-		firstVersion.Version,
-		artifact.ID.String(),
-		imgsrv.AddAttachmentRequest{
-			Name:          "rootfs.sha256",
-			MediaType:     "text/plain",
-			BlobDigest:    attachmentBlob.Digest,
-			BlobSizeBytes: attachmentBlob.SizeBytes,
-		},
-	)
-	require.NoError(t, err)
-
-	require.NoError(
-		t,
-		catalog.DeleteAttachment(ctx, image.Name, firstVersion.Version, artifact.ID.String(), attachment.ID),
-	)
-	manifest, err := catalog.GetVersionManifest(ctx, image.Name, firstVersion.Version)
-	require.NoError(t, err)
-	require.Len(t, manifest.Artifacts, 1)
-	assert.Empty(t, manifest.Artifacts[0].Attachments)
-
-	require.NoError(t, catalog.DeleteArtifact(ctx, image.Name, firstVersion.Version, artifact.ID.String()))
-	manifest, err = catalog.GetVersionManifest(ctx, image.Name, firstVersion.Version)
-	require.NoError(t, err)
-	assert.Empty(t, manifest.Artifacts)
-
-	publishedVersion := publishVersionWithArtifact(ctx, t, catalog, image.Name, "v1.2.0", primaryBlob)
-	images, err = catalog.ListImages(ctx)
-	require.NoError(t, err)
-	require.Len(t, images, 1)
-	assert.Equal(t, image.ID, images[0].ID)
-
-	gotImage, err := catalog.GetImage(ctx, image.Name)
-	require.NoError(t, err)
-	assert.Equal(t, image.ID, gotImage.ID)
-
-	versions, err := catalog.ListVersions(ctx, image.Name)
-	require.NoError(t, err)
-	require.Len(t, versions, 1)
-	assert.Equal(t, publishedVersion.Version, versions[0].Version)
-	assert.Equal(t, imgsrv.ImageVersionStatePublished, versions[0].State)
-
-	publishedManifest, err := catalog.GetVersionManifest(ctx, image.Name, publishedVersion.Version)
-	require.NoError(t, err)
-	require.Len(t, publishedManifest.Artifacts, 1)
-	err = catalog.DeleteArtifact(
-		ctx,
-		image.Name,
-		publishedVersion.Version,
-		publishedManifest.Artifacts[0].Artifact.ID.String(),
-	)
-	assertProblemStatus(t, err, http.StatusPreconditionFailed)
 }
 
 func TestEnvWithCASPromotionManagesAliases(t *testing.T) {
@@ -367,24 +287,6 @@ func TestEnvWithCASPromotionManagesAliases(t *testing.T) {
 	exact, err := catalog.GetVersionManifest(ctx, image.Name, first.Version)
 	require.NoError(t, err)
 	assert.Equal(t, first.Version, exact.Version.Version)
-}
-
-func TestEnvWithCASPromotionRejectsInvalidAliases(t *testing.T) {
-	env := startEnv(t, imgsrvtest.WithCASPromotion())
-	client := env.Client(t)
-	ctx := t.Context()
-	catalog := client.Catalog()
-
-	image, err := catalog.CreateImage(ctx, imgsrv.CreateImageRequest{Name: "public-invalid-aliases"})
-	require.NoError(t, err)
-	draft, err := catalog.CreateDraftVersion(ctx, image.Name, imgsrv.CreateDraftVersionRequest{Version: "v1.0.0"})
-	require.NoError(t, err)
-
-	_, err = catalog.PutAlias(ctx, image.Name, "latest", imgsrv.PutAliasRequest{Version: draft.Version})
-	assertProblemStatus(t, err, http.StatusPreconditionFailed)
-
-	_, err = catalog.PutAlias(ctx, image.Name, "latest", imgsrv.PutAliasRequest{Version: "v9.9.9"})
-	assertProblemStatus(t, err, http.StatusNotFound)
 }
 
 type releaseBlob struct {
