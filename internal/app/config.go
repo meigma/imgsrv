@@ -3,7 +3,9 @@ package app
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -67,6 +69,15 @@ type Config struct {
 	// PostgresURL is the PostgreSQL connection URL used for the control plane.
 	// Empty skips database startup for operational-only runs.
 	PostgresURL string
+
+	// OIDCIssuerURL is the configured issuer for generic OIDC JWT bearer tokens.
+	OIDCIssuerURL string
+
+	// OIDCAudience is the required audience for generic OIDC JWT bearer tokens.
+	OIDCAudience string
+
+	// OIDCRequiredScope is the token scope required before OIDC principals may write content.
+	OIDCRequiredScope string
 
 	// S3Endpoint is the S3-compatible API endpoint without a URL scheme.
 	S3Endpoint string
@@ -203,4 +214,33 @@ func (c Config) hasS3Config() bool {
 		c.S3SecretAccessKey != "" ||
 		c.S3SessionToken != "" ||
 		c.S3Region != ""
+}
+
+// hasOIDCConfig reports whether any generic OIDC configuration field is populated.
+func (c Config) hasOIDCConfig() bool {
+	return strings.TrimSpace(c.OIDCIssuerURL) != "" ||
+		strings.TrimSpace(c.OIDCAudience) != "" ||
+		strings.TrimSpace(c.OIDCRequiredScope) != ""
+}
+
+// validateOIDCConfig enforces all-or-nothing generic OIDC configuration.
+func (c Config) validateOIDCConfig() error {
+	issuerURL := strings.TrimSpace(c.OIDCIssuerURL)
+	audience := strings.TrimSpace(c.OIDCAudience)
+	scope := strings.TrimSpace(c.OIDCRequiredScope)
+	if issuerURL == "" && audience == "" && scope == "" {
+		return nil
+	}
+	if issuerURL == "" || audience == "" || scope == "" {
+		return errors.New("oidc issuer url, audience, and required scope must be set together")
+	}
+	issuer, err := url.Parse(issuerURL)
+	if err != nil || issuer.Scheme == "" || issuer.Host == "" {
+		return errors.New("oidc issuer url must be an absolute URL")
+	}
+	if issuer.Scheme != "https" {
+		return errors.New("oidc issuer url must use https")
+	}
+
+	return nil
 }

@@ -78,6 +78,32 @@ func TestServiceAuthenticateTokenReturnsLookupErrorWithoutMarkingUsed(t *testing
 	assert.Equal(t, auth.Principal{}, got)
 }
 
+func TestServiceAuthenticateTokenFallsThroughToAdditionalAuthenticators(t *testing.T) {
+	store := mocks.NewMockStore(t)
+	want := auth.Principal{
+		Kind:    auth.PrincipalKindOIDC,
+		ID:      "https://issuer.example#subject",
+		Actions: []auth.Action{auth.ActionContentWrite},
+	}
+	service := auth.NewService(auth.ServiceConfig{
+		Store: store,
+		Authenticators: []auth.Authenticator{
+			staticAuthenticator{principal: want},
+		},
+	})
+
+	store.EXPECT().
+		LookupActiveToken(mock.Anything, mock.Anything).
+		Return(auth.Token{}, auth.ErrNotFound)
+
+	got, err := service.AuthenticateToken(context.Background(), auth.AuthenticateTokenParams{
+		Token: "testtok.secret",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
 func TestServiceAuthenticateTokenReturnsMarkUsedError(t *testing.T) {
 	store := mocks.NewMockStore(t)
 	service := auth.NewService(auth.ServiceConfig{Store: store})
@@ -126,7 +152,7 @@ func TestServiceReturnsUnavailableWhenStoreMissing(t *testing.T) {
 		context.Background(),
 		auth.AuthenticateTokenParams{Token: "testtok.secret"},
 	)
-	require.EqualError(t, err, "auth store is not configured")
+	require.EqualError(t, err, "auth service is not configured")
 
 	_, err = service.CreateToken(context.Background(), auth.CreateTokenParams{})
 	require.EqualError(t, err, "auth store is not configured")
@@ -136,7 +162,7 @@ func TestServiceReturnsUnavailableWhenStoreMissing(t *testing.T) {
 		context.Background(),
 		auth.AuthenticateTokenParams{Token: "testtok.secret"},
 	)
-	require.EqualError(t, err, "auth store is not configured")
+	require.EqualError(t, err, "auth service is not configured")
 }
 
 func TestServicePreservesUnexpectedStoreErrors(t *testing.T) {
@@ -162,4 +188,16 @@ func tokenFixture() auth.Token {
 		Name:        "test",
 		TokenPrefix: "testtok",
 	}
+}
+
+type staticAuthenticator struct {
+	principal auth.Principal
+	err       error
+}
+
+func (authenticator staticAuthenticator) AuthenticateToken(
+	context.Context,
+	auth.AuthenticateTokenParams,
+) (auth.Principal, error) {
+	return authenticator.principal, authenticator.err
 }

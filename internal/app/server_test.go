@@ -230,6 +230,72 @@ func TestConfigWithDefaultsPreservesProcessIdentity(t *testing.T) {
 	assert.Equal(t, "run-b", got.RunID)
 }
 
+func TestNewAuthServiceValidatesOIDCConfigPair(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{
+			name: "issuer only",
+			cfg: Config{
+				OIDCIssuerURL: "https://issuer.example",
+			},
+			want: "must be set together",
+		},
+		{
+			name: "audience only",
+			cfg: Config{
+				OIDCAudience: "imgsrv-api",
+			},
+			want: "must be set together",
+		},
+		{
+			name: "scope only",
+			cfg: Config{
+				OIDCRequiredScope: "imgsrv.write",
+			},
+			want: "must be set together",
+		},
+		{
+			name: "issuer and audience only",
+			cfg: Config{
+				OIDCIssuerURL: "https://issuer.example",
+				OIDCAudience:  "imgsrv-api",
+			},
+			want: "must be set together",
+		},
+		{
+			name: "relative issuer",
+			cfg: Config{
+				OIDCIssuerURL:     "issuer.example",
+				OIDCAudience:      "imgsrv-api",
+				OIDCRequiredScope: "imgsrv.write",
+			},
+			want: "must be an absolute URL",
+		},
+		{
+			name: "http issuer",
+			cfg: Config{
+				OIDCIssuerURL:     "http://issuer.example",
+				OIDCAudience:      "imgsrv-api",
+				OIDCRequiredScope: "imgsrv.write",
+			},
+			want: "must use https",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := newAuthService(context.Background(), tt.cfg, nil)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+			assert.Nil(t, got.service)
+		})
+	}
+}
+
 func TestNewUploadServiceRequiresPostgresWhenS3Configured(t *testing.T) {
 	got, err := newUploadService(Config{
 		S3Endpoint:        "garage.local:3900",

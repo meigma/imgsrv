@@ -72,15 +72,14 @@ func startServer(
 
 	listener, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+	authService := newAuthService(ctx, t, options, store)
 
 	server, err := app.NewServer(app.Config{
 		Listen:          listener.Addr().String(),
 		ShutdownTimeout: serverShutdownTimeout,
 	}, app.Dependencies{
 		Logger: options.logger,
-		Auth: auth.NewService(auth.ServiceConfig{
-			Store: store.Auth(),
-		}),
+		Auth:   authService,
 		Uploads: uploads.NewService(uploads.ServiceConfig{
 			Store:        store.Uploads(),
 			Objects:      objects,
@@ -113,6 +112,32 @@ func startServer(
 	waitForServer(ctx, t, baseURL, errCh)
 
 	return baseURL
+}
+
+// newAuthService constructs the chained auth service used by integration servers.
+func newAuthService(
+	ctx context.Context,
+	t testing.TB,
+	options options,
+	store *postgres.Store,
+) *auth.Service {
+	t.Helper()
+
+	var authenticators []auth.Authenticator
+	if options.oidcIssuerURL != "" || options.oidcAudience != "" || options.oidcRequiredScope != "" {
+		oidcAuthenticator, err := auth.NewOIDCAuthenticator(ctx, auth.OIDCConfig{
+			IssuerURL:     options.oidcIssuerURL,
+			Audience:      options.oidcAudience,
+			RequiredScope: options.oidcRequiredScope,
+		})
+		require.NoError(t, err)
+		authenticators = append(authenticators, oidcAuthenticator)
+	}
+
+	return auth.NewService(auth.ServiceConfig{
+		Store:          store.Auth(),
+		Authenticators: authenticators,
+	})
 }
 
 // waitForServer polls the server health endpoint until it returns 204, the

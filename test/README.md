@@ -6,7 +6,7 @@ consumers of the imgsrv API.
 Use this package from another project when that project wants to start a
 disposable imgsrv environment for its own functional or integration tests. The
 package owns convenience wiring for server lifecycle, dependencies, API tokens,
-CAS promotion, and SDK client construction.
+OIDC bearer tokens, CAS promotion, and SDK client construction.
 
 This package is not imgsrv's own integration test suite. Repository-owned API
 behavior coverage belongs under `internal/integration`, where tests can assert

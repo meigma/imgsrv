@@ -36,6 +36,20 @@ func WithAPIToken(rawToken string) Option {
 	}
 }
 
+// WithOIDC configures generic OIDC JWT bearer authentication for the test server.
+func WithOIDC(issuerURL string, audience string, requiredScope string) Option {
+	return func(options *options) {
+		options.harness = append(options.harness, harness.WithOIDC(issuerURL, audience, requiredScope))
+	}
+}
+
+// WithBearerToken configures Env.Client to send rawToken as a bearer token without seeding it.
+func WithBearerToken(rawToken string) Option {
+	return func(options *options) {
+		options.bearerToken = rawToken
+	}
+}
+
 // Env owns a running imgsrv functional-test environment.
 type Env struct {
 	// harness is the underlying internal integration harness that drives the
