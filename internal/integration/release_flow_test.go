@@ -56,12 +56,12 @@ func TestReleaseFlowPublishesDraft(t *testing.T) {
 		ctx,
 		image.Name,
 		version.Version,
-		artifactRequest(primaryBlob),
+		rawGZArtifactRequest(primaryBlob),
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "linux", artifact.OperatingSystem)
 	assert.Equal(t, "x86_64", artifact.Architecture)
-	assert.Equal(t, imgsrv.ArtifactFormatQCOW2, artifact.Format)
+	assert.Equal(t, imgsrv.ArtifactFormatRawGZ, artifact.Format)
 	assert.Equal(t, primaryBlob.Digest, artifact.PrimaryBlobDigest)
 	assert.Equal(t, primaryBlob.SizeBytes, artifact.PrimaryBlobSizeBytes)
 
@@ -102,10 +102,12 @@ func TestReleaseFlowPublishesDraft(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, artifacts, 1)
 	assert.Equal(t, artifact.ID, artifacts[0].ID)
+	assert.Equal(t, imgsrv.ArtifactFormatRawGZ, artifacts[0].Format)
 
 	gotArtifact, err := catalog.GetArtifact(ctx, image.Name, version.Version, artifact.ID.String())
 	require.NoError(t, err)
 	assert.Equal(t, artifact.ID, gotArtifact.ID)
+	assert.Equal(t, imgsrv.ArtifactFormatRawGZ, gotArtifact.Format)
 
 	artifactDownload, err := catalog.OpenArtifactDownload(
 		ctx,
@@ -121,14 +123,14 @@ func TestReleaseFlowPublishesDraft(t *testing.T) {
 	assert.Equal(t, primaryPayload, artifactBody)
 	assert.Equal(t, primaryBlob.Digest, artifactDownload.Metadata.Digest)
 	assert.Equal(t, primaryBlob.SizeBytes, artifactDownload.Metadata.SizeBytes)
-	assert.Equal(t, "application/x-qcow2", artifactDownload.Metadata.ContentType)
+	assert.Equal(t, "application/gzip", artifactDownload.Metadata.ContentType)
 	assertCatalogDownloadHead(
 		ctx,
 		t,
 		env,
 		catalogArtifactDownloadPath(image.Name, version.Version, artifact.ID.String()),
 		primaryBlob,
-		"application/x-qcow2",
+		"application/gzip",
 	)
 
 	suffixRange, err := imgsrv.BlobRangeSuffix(4)
@@ -654,6 +656,14 @@ func artifactRequest(blob catalogBlob) imgsrv.AddArtifactRequest {
 	return artifactRequestForArchitecture("x86_64", blob)
 }
 
+func rawGZArtifactRequest(blob catalogBlob) imgsrv.AddArtifactRequest {
+	request := artifactRequest(blob)
+	request.Format = imgsrv.ArtifactFormatRawGZ
+	request.PrimaryMediaType = "application/gzip"
+
+	return request
+}
+
 func artifactRequestForArchitecture(
 	architecture string,
 	blob catalogBlob,
@@ -736,6 +746,8 @@ func assertManifest(
 	assert.Equal(t, state, manifest.Version.State)
 	require.Len(t, manifest.Artifacts, 1)
 	artifact := manifest.Artifacts[0].Artifact
+	assert.Equal(t, imgsrv.ArtifactFormatRawGZ, artifact.Format)
+	assert.Equal(t, "application/gzip", artifact.PrimaryMediaType)
 	assert.Equal(t, primaryBlob.Digest, artifact.PrimaryBlobDigest)
 	assert.Equal(t, primaryBlob.SizeBytes, artifact.PrimaryBlobSizeBytes)
 	require.Len(t, manifest.Artifacts[0].Attachments, 1)

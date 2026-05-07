@@ -330,6 +330,40 @@ func TestCatalogPublishedArtifactReadsArePublishedAndPathScoped(t *testing.T) {
 	assert.ErrorIs(t, err, domain.ErrNotFound)
 }
 
+func TestCatalogAddsRawGZArtifact(t *testing.T) {
+	ctx := t.Context()
+	store := startCatalogIntegrationStore(t)
+	catalogStore := store.Catalog()
+
+	createImage(t, ctx, catalogStore, "raw-gz-artifact")
+	createVersion(t, ctx, catalogStore, "raw-gz-artifact", "v1.0.0")
+	primaryDigest := catalogDigest("9")
+	insertTrustedBlob(t, store, primaryDigest, 1024)
+
+	artifact, err := catalogStore.AddArtifact(ctx, domain.AddArtifactParams{
+		ImageName:            "raw-gz-artifact",
+		Version:              "v1.0.0",
+		OperatingSystem:      "incusos",
+		Architecture:         "x86_64",
+		Format:               domain.ArtifactFormatRawGZ,
+		PrimaryBlobDigest:    primaryDigest,
+		PrimaryBlobSizeBytes: 1024,
+		PrimaryMediaType:     "application/gzip",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, domain.ArtifactFormatRawGZ, artifact.Format)
+	assert.Equal(t, "application/gzip", artifact.PrimaryMediaType)
+
+	manifest, err := catalogStore.GetVersionManifest(ctx, domain.GetVersionManifestParams{
+		ImageName: "raw-gz-artifact",
+		Version:   "v1.0.0",
+	})
+	require.NoError(t, err)
+	require.Len(t, manifest.Artifacts, 1)
+	assert.Equal(t, domain.ArtifactFormatRawGZ, manifest.Artifacts[0].Artifact.Format)
+	assert.Equal(t, primaryDigest, manifest.Artifacts[0].Artifact.PrimaryBlobDigest)
+}
+
 func startCatalogIntegrationStore(t *testing.T) *Store {
 	t.Helper()
 

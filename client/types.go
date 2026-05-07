@@ -23,6 +23,9 @@ const (
 	// ArtifactFormatRaw is a raw disk image artifact.
 	ArtifactFormatRaw ArtifactFormat = "raw"
 
+	// ArtifactFormatRawGZ is a gzip-compressed raw disk image artifact.
+	ArtifactFormatRawGZ ArtifactFormat = "raw.gz"
+
 	// ArtifactFormatQCOW2 is a qcow2 disk image artifact.
 	ArtifactFormatQCOW2 ArtifactFormat = "qcow2"
 )

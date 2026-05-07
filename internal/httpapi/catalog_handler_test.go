@@ -218,7 +218,7 @@ func TestGetPublishedArtifactReturnsArtifact(t *testing.T) {
 	var got artifactResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	assert.Equal(t, catalogArtifactIDFixture().String(), got.ID)
-	assert.Equal(t, "application/x-qcow2", got.PrimaryMediaType)
+	assert.Equal(t, "application/gzip", got.PrimaryMediaType)
 }
 
 func TestDownloadPublishedArtifactStreamsBlobWithCatalogMediaType(t *testing.T) {
@@ -249,7 +249,7 @@ func TestDownloadPublishedArtifactStreamsBlobWithCatalogMediaType(t *testing.T) 
 	tc.handler.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "application/x-qcow2", rec.Header().Get("Content-Type"))
+	assert.Equal(t, "application/gzip", rec.Header().Get("Content-Type"))
 	assert.Equal(t, blobETag(blob), rec.Header().Get("ETag"))
 	assert.Equal(t, "14", rec.Header().Get("Content-Length"))
 	assert.Equal(t, body, rec.Body.String())
@@ -425,20 +425,20 @@ func TestAddArtifactCreatesPrimaryArtifact(t *testing.T) {
 			Version:              "v1.0.0",
 			OperatingSystem:      "linux",
 			Architecture:         "x86_64",
-			Format:               catalog.ArtifactFormatQCOW2,
+			Format:               catalog.ArtifactFormatRawGZ,
 			PrimaryBlobDigest:    catalogDigestFixture(),
 			PrimaryBlobSizeBytes: 1024,
-			PrimaryMediaType:     "application/x-qcow2",
+			PrimaryMediaType:     "application/gzip",
 		}).
 		Return(wantArtifact, nil)
 
 	req := newHTTPAPIRequest(http.MethodPost, "/v1/images/debian/versions/v1.0.0/artifacts", strings.NewReader(`{
 		"operating_system": "linux",
 		"architecture": "x86_64",
-		"format": "qcow2",
+		"format": "raw.gz",
 		"primary_blob_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		"primary_blob_size_bytes": 1024,
-		"primary_media_type": "application/x-qcow2"
+		"primary_media_type": "application/gzip"
 	}`))
 	rec := httptest.NewRecorder()
 
@@ -450,7 +450,7 @@ func TestAddArtifactCreatesPrimaryArtifact(t *testing.T) {
 	assert.Equal(t, catalogArtifactIDFixture().String(), got.ID)
 	assert.Equal(t, "linux", got.OperatingSystem)
 	assert.Equal(t, "x86_64", got.Architecture)
-	assert.Equal(t, catalog.ArtifactFormatQCOW2, got.Format)
+	assert.Equal(t, catalog.ArtifactFormatRawGZ, got.Format)
 	assert.Equal(t, catalogDigestFixture().String(), got.PrimaryBlobDigest)
 }
 
@@ -914,10 +914,10 @@ func catalogArtifactFixture() catalog.Artifact {
 		VersionID:            catalogVersionIDFixture(),
 		OperatingSystem:      "linux",
 		Architecture:         "x86_64",
-		Format:               catalog.ArtifactFormatQCOW2,
+		Format:               catalog.ArtifactFormatRawGZ,
 		PrimaryBlobDigest:    catalogDigestFixture(),
 		PrimaryBlobSizeBytes: 1024,
-		PrimaryMediaType:     "application/x-qcow2",
+		PrimaryMediaType:     "application/gzip",
 		CreatedAt:            catalogCreatedAtFixture(),
 		UpdatedAt:            catalogUpdatedAtFixture(),
 	}

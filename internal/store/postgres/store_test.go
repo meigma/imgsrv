@@ -35,9 +35,11 @@ func TestEmbeddedMigrationsAreDiscoverable(t *testing.T) {
 
 	require.NoError(t, err)
 	sources := provider.ListSources()
-	require.Len(t, sources, 1)
+	require.Len(t, sources, 2)
 	assert.Equal(t, int64(1), sources[0].Version)
 	assert.Equal(t, "000001_initial_schema.sql", sources[0].Path)
+	assert.Equal(t, int64(2), sources[1].Version)
+	assert.Equal(t, "000002_allow_raw_gz_artifacts.sql", sources[1].Path)
 }
 
 func TestSchemaVersionRequiresOpenStore(t *testing.T) {
