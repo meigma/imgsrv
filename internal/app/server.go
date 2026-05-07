@@ -35,7 +35,7 @@ type Dependencies struct {
 	// Readiness reports whether the service can accept operational traffic.
 	Readiness httpapi.ReadinessChecker
 
-	// Auth coordinates API-token authentication for write operations.
+	// Auth coordinates bearer authentication for write operations.
 	Auth httpapi.AuthService
 
 	// Uploads coordinates client-facing upload writes.
@@ -107,9 +107,17 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
+	authDependency, err := newAuthService(ctx, cfg, store)
+	if err != nil {
+		if store != nil {
+			return joinError(err, store.Close())
+		}
+		return err
+	}
+
 	server, err := NewServer(cfg, Dependencies{
 		Logger:         logger,
-		Auth:           newAuthService(store),
+		Auth:           authDependency.service,
 		Uploads:        uploadDependency.service,
 		Catalog:        newCatalogService(store),
 		Blobs:          uploadDependency.blobs,
@@ -184,15 +192,43 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 	return server, nil
 }
 
-// newAuthService builds the auth service from the shared Postgres store.
-func newAuthService(store *postgres.Store) httpapi.AuthService {
-	if store == nil {
-		return nil
+type authDependency struct {
+	service httpapi.AuthService
+}
+
+// newAuthService builds the auth service from the shared Postgres store and configured issuers.
+func newAuthService(ctx context.Context, cfg Config, store *postgres.Store) (authDependency, error) {
+	if err := cfg.validateOIDCConfig(); err != nil {
+		return authDependency{}, err
 	}
 
-	return auth.NewService(auth.ServiceConfig{
-		Store: store.Auth(),
-	})
+	var apiTokenStore auth.Store
+	if store != nil {
+		apiTokenStore = store.Auth()
+	}
+
+	var authenticators []auth.Authenticator
+	if cfg.hasOIDCConfig() {
+		oidcAuthenticator, err := auth.NewOIDCAuthenticator(ctx, auth.OIDCConfig{
+			IssuerURL:     cfg.OIDCIssuerURL,
+			Audience:      cfg.OIDCAudience,
+			RequiredScope: cfg.OIDCRequiredScope,
+		})
+		if err != nil {
+			return authDependency{}, err
+		}
+		authenticators = append(authenticators, oidcAuthenticator)
+	}
+	if apiTokenStore == nil && len(authenticators) == 0 {
+		return authDependency{}, nil
+	}
+
+	return authDependency{
+		service: auth.NewService(auth.ServiceConfig{
+			Store:          apiTokenStore,
+			Authenticators: authenticators,
+		}),
+	}, nil
 }
 
 // newCatalogService builds the catalog service from the shared Postgres store.

@@ -42,6 +42,9 @@ type PrincipalKind string
 const (
 	// PrincipalKindAPIToken identifies principals authenticated by stored API tokens.
 	PrincipalKindAPIToken PrincipalKind = "api_token"
+
+	// PrincipalKindOIDC identifies principals authenticated by a configured OIDC issuer.
+	PrincipalKindOIDC PrincipalKind = "oidc"
 )
 
 // Action identifies an operation an authenticated principal may perform.
@@ -65,6 +68,12 @@ type Principal struct {
 
 	// Actions are the operations this principal may perform.
 	Actions []Action
+}
+
+// Authenticator authenticates one bearer-token format.
+type Authenticator interface {
+	// AuthenticateToken validates a raw bearer token and returns the resulting principal.
+	AuthenticateToken(context.Context, AuthenticateTokenParams) (Principal, error)
 }
 
 // HasAction reports whether principal has action.

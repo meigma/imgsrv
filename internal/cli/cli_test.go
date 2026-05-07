@@ -47,6 +47,9 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"IMGSRV_METRICS_LISTEN":                         "127.0.0.1:9091",
 				"IMGSRV_METRICS_PATH":                           "/internal/metrics",
 				"IMGSRV_POSTGRES_URL":                           "postgres://env",
+				"IMGSRV_OIDC_ISSUER_URL":                        "https://issuer.env",
+				"IMGSRV_OIDC_AUDIENCE":                          "imgsrv-env",
+				"IMGSRV_OIDC_REQUIRED_SCOPE":                    "imgsrv.write.env",
 				"IMGSRV_S3_ENDPOINT":                            "garage.env:3900",
 				"IMGSRV_S3_BUCKET":                              "imgsrv-env",
 				"IMGSRV_S3_ACCESS_KEY_ID":                       "env-access",
@@ -72,6 +75,9 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				MetricsListen:                      "127.0.0.1:9091",
 				MetricsPath:                        "/internal/metrics",
 				PostgresURL:                        "postgres://env",
+				OIDCIssuerURL:                      "https://issuer.env",
+				OIDCAudience:                       "imgsrv-env",
+				OIDCRequiredScope:                  "imgsrv.write.env",
 				S3Endpoint:                         "garage.env:3900",
 				S3Bucket:                           "imgsrv-env",
 				S3AccessKeyID:                      "env-access",
@@ -100,6 +106,9 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"IMGSRV_METRICS_LISTEN":                         "127.0.0.1:9091",
 				"IMGSRV_METRICS_PATH":                           "/internal/metrics",
 				"IMGSRV_POSTGRES_URL":                           "postgres://env",
+				"IMGSRV_OIDC_ISSUER_URL":                        "https://issuer.env",
+				"IMGSRV_OIDC_AUDIENCE":                          "imgsrv-env",
+				"IMGSRV_OIDC_REQUIRED_SCOPE":                    "imgsrv.write.env",
 				"IMGSRV_S3_ENDPOINT":                            "garage.env:3900",
 				"IMGSRV_S3_BUCKET":                              "imgsrv-env",
 				"IMGSRV_S3_ACCESS_KEY_ID":                       "env-access",
@@ -125,6 +134,9 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"--metrics-listen=",
 				"--metrics-path=/scrape",
 				"--postgres-url=postgres://flag",
+				"--oidc-issuer-url=https://issuer.flag",
+				"--oidc-audience=imgsrv-flag",
+				"--oidc-required-scope=imgsrv.write.flag",
 				"--s3-endpoint=garage.flag:3900",
 				"--s3-bucket=imgsrv-flag",
 				"--s3-access-key-id=flag-access",
@@ -150,6 +162,9 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				MetricsListen:                      "",
 				MetricsPath:                        "/scrape",
 				PostgresURL:                        "postgres://flag",
+				OIDCIssuerURL:                      "https://issuer.flag",
+				OIDCAudience:                       "imgsrv-flag",
+				OIDCRequiredScope:                  "imgsrv.write.flag",
 				S3Endpoint:                         "garage.flag:3900",
 				S3Bucket:                           "imgsrv-flag",
 				S3AccessKeyID:                      "flag-access",
@@ -245,6 +260,9 @@ func TestExecuteContextPrintsHelpWithoutStartingServer(t *testing.T) {
 	assert.Contains(t, stdout.String(), "--metrics-listen")
 	assert.Contains(t, stdout.String(), "--metrics-path")
 	assert.Contains(t, stdout.String(), "--postgres-url")
+	assert.Contains(t, stdout.String(), "--oidc-issuer-url")
+	assert.Contains(t, stdout.String(), "--oidc-audience")
+	assert.Contains(t, stdout.String(), "--oidc-required-scope")
 	assert.Contains(t, stdout.String(), "--s3-endpoint")
 	assert.Contains(t, stdout.String(), "--upload-ttl")
 	assert.Contains(t, stdout.String(), "--cas-promotion-enabled")
@@ -287,6 +305,9 @@ func unsetConfigEnv(t *testing.T) {
 		"IMGSRV_METRICS_LISTEN",
 		"IMGSRV_METRICS_PATH",
 		"IMGSRV_POSTGRES_URL",
+		"IMGSRV_OIDC_ISSUER_URL",
+		"IMGSRV_OIDC_AUDIENCE",
+		"IMGSRV_OIDC_REQUIRED_SCOPE",
 		"IMGSRV_S3_ENDPOINT",
 		"IMGSRV_S3_BUCKET",
 		"IMGSRV_S3_ACCESS_KEY_ID",

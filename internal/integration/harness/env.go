@@ -53,6 +53,15 @@ func WithAPIToken(rawToken string) Option {
 	}
 }
 
+// WithOIDC configures generic OIDC JWT bearer authentication for the test server.
+func WithOIDC(issuerURL string, audience string, requiredScope string) Option {
+	return func(options *options) {
+		options.oidcIssuerURL = issuerURL
+		options.oidcAudience = audience
+		options.oidcRequiredScope = requiredScope
+	}
+}
+
 // Env owns a running imgsrv integration-test environment.
 type Env struct {
 	// baseURL is the root URL for the in-process imgsrv HTTP server.
@@ -128,9 +137,12 @@ func (env *Env) S3Config() s3.Config {
 }
 
 type options struct {
-	logger       *slog.Logger
-	casPromotion bool
-	apiToken     string
+	logger            *slog.Logger
+	casPromotion      bool
+	apiToken          string
+	oidcIssuerURL     string
+	oidcAudience      string
+	oidcRequiredScope string
 }
 
 // newOptions applies opts to a zero options value and returns the resolved
