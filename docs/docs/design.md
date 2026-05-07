@@ -223,7 +223,8 @@ CAS correctness.
 ## Reads and Downloads
 
 Published query and download surfaces are anonymous in v0. Write, draft, upload,
-publish, and alias mutation APIs require API-token authorization.
+publish, and alias mutation APIs require a bearer principal authorized for
+`content.write`, currently from API tokens or configured OIDC publishers.
 
 Downloads are proxied through `imgsrv` by default. This keeps Garage hidden,
 keeps clients on stable `imgsrv` URLs, and avoids surprising compatibility
@@ -318,7 +319,7 @@ The following are intentionally outside v0:
 - other protocol-specific materializations
 - `tus` upload support
 - direct pre-signed upload/download optimization
-- multiple authentication methods
+- DB-backed publisher trust-rule management
 - private download policy
 - transparency log integration
 - advanced deduplication beyond digest-addressed CAS

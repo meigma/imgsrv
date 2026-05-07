@@ -45,6 +45,9 @@ const (
 
 	// PrincipalKindOIDC identifies principals authenticated by a configured OIDC issuer.
 	PrincipalKindOIDC PrincipalKind = "oidc"
+
+	// PrincipalKindGitHubActions identifies principals authenticated by GitHub Actions OIDC.
+	PrincipalKindGitHubActions PrincipalKind = "github_actions"
 )
 
 // Action identifies an operation an authenticated principal may perform.

@@ -201,6 +201,9 @@ func newAuthService(ctx context.Context, cfg Config, store *postgres.Store) (aut
 	if err := cfg.validateOIDCConfig(); err != nil {
 		return authDependency{}, err
 	}
+	if err := cfg.validateGitHubOIDCConfig(); err != nil {
+		return authDependency{}, err
+	}
 
 	var apiTokenStore auth.Store
 	if store != nil {
@@ -208,6 +211,20 @@ func newAuthService(ctx context.Context, cfg Config, store *postgres.Store) (aut
 	}
 
 	var authenticators []auth.Authenticator
+	if cfg.hasGitHubOIDCConfig() {
+		githubAuthenticator, err := auth.NewGitHubActionsOIDCAuthenticator(
+			ctx,
+			auth.GitHubActionsOIDCConfig{
+				Audience:     cfg.GitHubOIDCAudience,
+				RepositoryID: cfg.GitHubOIDCRepositoryID,
+				WorkflowRef:  cfg.GitHubOIDCWorkflowRef,
+			},
+		)
+		if err != nil {
+			return authDependency{}, err
+		}
+		authenticators = append(authenticators, githubAuthenticator)
+	}
 	if cfg.hasOIDCConfig() {
 		oidcAuthenticator, err := auth.NewOIDCAuthenticator(ctx, auth.OIDCConfig{
 			IssuerURL:     cfg.OIDCIssuerURL,

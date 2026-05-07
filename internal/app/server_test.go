@@ -296,6 +296,49 @@ func TestNewAuthServiceValidatesOIDCConfigPair(t *testing.T) {
 	}
 }
 
+func TestNewAuthServiceValidatesGitHubOIDCConfigPair(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+	}{
+		{
+			name: "audience only",
+			cfg: Config{
+				GitHubOIDCAudience: "imgsrv-github",
+			},
+		},
+		{
+			name: "repository id only",
+			cfg: Config{
+				GitHubOIDCRepositoryID: "123456789",
+			},
+		},
+		{
+			name: "workflow ref only",
+			cfg: Config{
+				GitHubOIDCWorkflowRef: "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main",
+			},
+		},
+		{
+			name: "audience and repository id only",
+			cfg: Config{
+				GitHubOIDCAudience:     "imgsrv-github",
+				GitHubOIDCRepositoryID: "123456789",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := newAuthService(context.Background(), tt.cfg, nil)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "must be set together")
+			assert.Nil(t, got.service)
+		})
+	}
+}
+
 func TestNewUploadServiceRequiresPostgresWhenS3Configured(t *testing.T) {
 	got, err := newUploadService(Config{
 		S3Endpoint:        "garage.local:3900",

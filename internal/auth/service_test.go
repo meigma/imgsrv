@@ -104,6 +104,32 @@ func TestServiceAuthenticateTokenFallsThroughToAdditionalAuthenticators(t *testi
 	assert.Equal(t, want, got)
 }
 
+func TestServiceAuthenticateTokenFallsThroughToGitHubActionsAuthenticator(t *testing.T) {
+	store := mocks.NewMockStore(t)
+	want := auth.Principal{
+		Kind:    auth.PrincipalKindGitHubActions,
+		ID:      "https://token.actions.githubusercontent.com#repo:meigma/imgsrv:ref:refs/heads/main",
+		Actions: []auth.Action{auth.ActionContentWrite},
+	}
+	service := auth.NewService(auth.ServiceConfig{
+		Store: store,
+		Authenticators: []auth.Authenticator{
+			staticAuthenticator{principal: want},
+		},
+	})
+
+	store.EXPECT().
+		LookupActiveToken(mock.Anything, mock.Anything).
+		Return(auth.Token{}, auth.ErrNotFound)
+
+	got, err := service.AuthenticateToken(context.Background(), auth.AuthenticateTokenParams{
+		Token: "testtok.secret",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+}
+
 func TestServiceAuthenticateTokenReturnsMarkUsedError(t *testing.T) {
 	store := mocks.NewMockStore(t)
 	service := auth.NewService(auth.ServiceConfig{Store: store})

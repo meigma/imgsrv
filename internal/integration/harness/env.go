@@ -62,6 +62,21 @@ func WithOIDC(issuerURL string, audience string, requiredScope string) Option {
 	}
 }
 
+// WithGitHubActionsOIDC configures GitHub Actions OIDC publisher authentication.
+func WithGitHubActionsOIDC(
+	issuerURL string,
+	audience string,
+	repositoryID string,
+	workflowRef string,
+) Option {
+	return func(options *options) {
+		options.githubOIDCIssuerURL = issuerURL
+		options.githubOIDCAudience = audience
+		options.githubOIDCRepositoryID = repositoryID
+		options.githubOIDCWorkflowRef = workflowRef
+	}
+}
+
 // Env owns a running imgsrv integration-test environment.
 type Env struct {
 	// baseURL is the root URL for the in-process imgsrv HTTP server.
@@ -137,12 +152,16 @@ func (env *Env) S3Config() s3.Config {
 }
 
 type options struct {
-	logger            *slog.Logger
-	casPromotion      bool
-	apiToken          string
-	oidcIssuerURL     string
-	oidcAudience      string
-	oidcRequiredScope string
+	logger                 *slog.Logger
+	casPromotion           bool
+	apiToken               string
+	oidcIssuerURL          string
+	oidcAudience           string
+	oidcRequiredScope      string
+	githubOIDCIssuerURL    string
+	githubOIDCAudience     string
+	githubOIDCRepositoryID string
+	githubOIDCWorkflowRef  string
 }
 
 // newOptions applies opts to a zero options value and returns the resolved
