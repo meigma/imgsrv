@@ -18,6 +18,8 @@ const (
 	testGitHubRepositoryID     = "123456789"
 	testGitHubWorkflowRef      = "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main"
 	testOtherGitHubWorkflowRef = "meigma/imgsrv/.github/workflows/ci.yml@refs/heads/main"
+	testGitHubSubject          = "repo:meigma/imgsrv:ref:refs/heads/main"
+	testPullRequestSubject     = "repo:meigma/imgsrv:pull_request"
 )
 
 func TestGitHubActionsOIDCAuthenticatorAuthenticatesTrustedWorkflow(t *testing.T) {
@@ -34,7 +36,7 @@ func TestGitHubActionsOIDCAuthenticatorAuthenticatesTrustedWorkflow(t *testing.T
 	require.NoError(t, err)
 	assert.Equal(t, auth.Principal{
 		Kind:    auth.PrincipalKindGitHubActions,
-		ID:      issuer.URL() + "#subject-1",
+		ID:      issuer.URL() + "#" + testGitHubSubject,
 		Actions: []auth.Action{auth.ActionContentWrite},
 	}, got)
 	assert.True(t, got.HasAction(auth.ActionContentWrite))
@@ -52,6 +54,13 @@ func TestGitHubActionsOIDCAuthenticatorAuthenticatesUntrustedWorkflowWithoutActi
 		},
 		"wrong workflow ref": func(claims map[string]any) {
 			claims["workflow_ref"] = testOtherGitHubWorkflowRef
+		},
+		"wrong subject": func(claims map[string]any) {
+			claims["sub"] = "repo:meigma/imgsrv:ref:refs/heads/release"
+		},
+		"pull request subject": func(claims map[string]any) {
+			claims["sub"] = testPullRequestSubject
+			claims["event_name"] = "pull_request_target"
 		},
 	}
 
@@ -171,6 +180,7 @@ func newTestGitHubActionsOIDCAuthenticator(
 			Audience:     testGitHubOIDCAudience,
 			RepositoryID: testGitHubRepositoryID,
 			WorkflowRef:  testGitHubWorkflowRef,
+			Subject:      testGitHubSubject,
 			Now: func() time.Time {
 				return now
 			},
@@ -194,6 +204,7 @@ func signGitHubActionsToken(
 func githubActionsTokenClaimsPatch(patchClaims func(map[string]any)) func(map[string]any) {
 	return func(claims map[string]any) {
 		claims["aud"] = []string{testGitHubOIDCAudience}
+		claims["sub"] = testGitHubSubject
 		claims["repository_id"] = testGitHubRepositoryID
 		claims["workflow_ref"] = testGitHubWorkflowRef
 		delete(claims, "scope")

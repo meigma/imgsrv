@@ -127,7 +127,8 @@ func newAuthService(
 	if options.githubOIDCIssuerURL != "" ||
 		options.githubOIDCAudience != "" ||
 		options.githubOIDCRepositoryID != "" ||
-		options.githubOIDCWorkflowRef != "" {
+		options.githubOIDCWorkflowRef != "" ||
+		options.githubOIDCSubject != "" {
 		githubAuthenticator, err := auth.NewGitHubActionsOIDCAuthenticator(
 			ctx,
 			auth.GitHubActionsOIDCConfig{
@@ -135,6 +136,7 @@ func newAuthService(
 				Audience:     options.githubOIDCAudience,
 				RepositoryID: options.githubOIDCRepositoryID,
 				WorkflowRef:  options.githubOIDCWorkflowRef,
+				Subject:      options.githubOIDCSubject,
 			},
 		)
 		require.NoError(t, err)

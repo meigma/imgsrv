@@ -320,6 +320,12 @@ func TestNewAuthServiceValidatesGitHubOIDCConfigPair(t *testing.T) {
 			},
 		},
 		{
+			name: "subject only",
+			cfg: Config{
+				GitHubOIDCSubject: "repo:meigma/imgsrv:ref:refs/heads/main",
+			},
+		},
+		{
 			name: "audience and repository id only",
 			cfg: Config{
 				GitHubOIDCAudience:     "imgsrv-github",

@@ -23,6 +23,9 @@ type GitHubActionsOIDCConfig struct {
 	// WorkflowRef is the exact GitHub workflow_ref claim allowed to write content.
 	WorkflowRef string
 
+	// Subject is the exact GitHub OIDC sub claim allowed to write content.
+	Subject string
+
 	// Now returns the current time for token lifetime validation. Nil selects time.Now.
 	Now func() time.Time
 }
@@ -31,6 +34,7 @@ type GitHubActionsOIDCConfig struct {
 type GitHubActionsOIDCAuthenticator struct {
 	repositoryID string
 	workflowRef  string
+	subject      string
 	verifier     *oidcVerifier
 }
 
@@ -46,9 +50,10 @@ func NewGitHubActionsOIDCAuthenticator(
 	audience := strings.TrimSpace(config.Audience)
 	repositoryID := strings.TrimSpace(config.RepositoryID)
 	workflowRef := strings.TrimSpace(config.WorkflowRef)
-	if audience == "" || repositoryID == "" || workflowRef == "" {
+	subject := strings.TrimSpace(config.Subject)
+	if audience == "" || repositoryID == "" || workflowRef == "" || subject == "" {
 		return nil, fmt.Errorf(
-			"%w: github oidc audience, repository id, and workflow ref are required",
+			"%w: github oidc audience, repository id, workflow ref, and subject are required",
 			ErrInvalid,
 		)
 	}
@@ -65,6 +70,7 @@ func NewGitHubActionsOIDCAuthenticator(
 	return &GitHubActionsOIDCAuthenticator{
 		repositoryID: repositoryID,
 		workflowRef:  workflowRef,
+		subject:      subject,
 		verifier:     verifier,
 	}, nil
 }
@@ -93,7 +99,9 @@ func (authenticator *GitHubActionsOIDCAuthenticator) AuthenticateToken(
 	}
 
 	var actions []Action
-	if claims.RepositoryID == authenticator.repositoryID && claims.WorkflowRef == authenticator.workflowRef {
+	if claims.RepositoryID == authenticator.repositoryID &&
+		claims.WorkflowRef == authenticator.workflowRef &&
+		claims.Subject == authenticator.subject {
 		actions = append(actions, ActionContentWrite)
 	}
 

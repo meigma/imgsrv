@@ -218,6 +218,7 @@ func newAuthService(ctx context.Context, cfg Config, store *postgres.Store) (aut
 				Audience:     cfg.GitHubOIDCAudience,
 				RepositoryID: cfg.GitHubOIDCRepositoryID,
 				WorkflowRef:  cfg.GitHubOIDCWorkflowRef,
+				Subject:      cfg.GitHubOIDCSubject,
 			},
 		)
 		if err != nil {

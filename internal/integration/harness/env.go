@@ -68,12 +68,14 @@ func WithGitHubActionsOIDC(
 	audience string,
 	repositoryID string,
 	workflowRef string,
+	subject string,
 ) Option {
 	return func(options *options) {
 		options.githubOIDCIssuerURL = issuerURL
 		options.githubOIDCAudience = audience
 		options.githubOIDCRepositoryID = repositoryID
 		options.githubOIDCWorkflowRef = workflowRef
+		options.githubOIDCSubject = subject
 	}
 }
 
@@ -162,6 +164,7 @@ type options struct {
 	githubOIDCAudience     string
 	githubOIDCRepositoryID string
 	githubOIDCWorkflowRef  string
+	githubOIDCSubject      string
 }
 
 // newOptions applies opts to a zero options value and returns the resolved

@@ -20,6 +20,8 @@ const (
 	githubRepositoryID     = "123456789"
 	githubWorkflowRef      = "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main"
 	otherGitHubWorkflowRef = "meigma/imgsrv/.github/workflows/ci.yml@refs/heads/main"
+	githubOIDCSubject      = "repo:meigma/imgsrv:ref:refs/heads/main"
+	pullRequestSubject     = "repo:meigma/imgsrv:pull_request"
 )
 
 func TestGitHubActionsOIDCWriteFlow(t *testing.T) {
@@ -29,6 +31,7 @@ func TestGitHubActionsOIDCWriteFlow(t *testing.T) {
 		githubOIDCAudience,
 		githubRepositoryID,
 		githubWorkflowRef,
+		githubOIDCSubject,
 	))
 	ctx := t.Context()
 	trustedClient := newBearerClient(t, env, issuer.SignToken(t, githubActionsClaims(nil)))
@@ -50,6 +53,18 @@ func TestGitHubActionsOIDCWriteFlow(t *testing.T) {
 		Name: "github-oidc-flow-untrusted",
 	})
 	assertProblemStatus(t, err, http.StatusForbidden)
+
+	prClient := newBearerClient(t, env, issuer.SignToken(t, githubActionsClaims(
+		func(claims map[string]any) {
+			claims["sub"] = pullRequestSubject
+			claims["event_name"] = "pull_request_target"
+		},
+	)))
+
+	_, err = prClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "github-oidc-flow-pr",
+	})
+	assertProblemStatus(t, err, http.StatusForbidden)
 }
 
 func newBearerClient(t testing.TB, env *harness.Env, token string) *imgsrv.Client {
@@ -68,6 +83,7 @@ func newBearerClient(t testing.TB, env *harness.Env, token string) *imgsrv.Clien
 func githubActionsClaims(patchClaims func(map[string]any)) func(map[string]any) {
 	return func(claims map[string]any) {
 		claims["aud"] = []string{githubOIDCAudience}
+		claims["sub"] = githubOIDCSubject
 		claims["repository_id"] = githubRepositoryID
 		claims["workflow_ref"] = githubWorkflowRef
 		delete(claims, "scope")

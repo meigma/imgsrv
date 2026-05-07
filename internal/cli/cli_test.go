@@ -53,6 +53,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"IMGSRV_GITHUB_OIDC_AUDIENCE":                   "imgsrv-github-env",
 				"IMGSRV_GITHUB_OIDC_REPOSITORY_ID":              "123456789",
 				"IMGSRV_GITHUB_OIDC_WORKFLOW_REF":               "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main",
+				"IMGSRV_GITHUB_OIDC_SUBJECT":                    "repo:meigma/imgsrv:ref:refs/heads/main",
 				"IMGSRV_S3_ENDPOINT":                            "garage.env:3900",
 				"IMGSRV_S3_BUCKET":                              "imgsrv-env",
 				"IMGSRV_S3_ACCESS_KEY_ID":                       "env-access",
@@ -84,6 +85,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				GitHubOIDCAudience:                 "imgsrv-github-env",
 				GitHubOIDCRepositoryID:             "123456789",
 				GitHubOIDCWorkflowRef:              "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main",
+				GitHubOIDCSubject:                  "repo:meigma/imgsrv:ref:refs/heads/main",
 				S3Endpoint:                         "garage.env:3900",
 				S3Bucket:                           "imgsrv-env",
 				S3AccessKeyID:                      "env-access",
@@ -118,6 +120,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"IMGSRV_GITHUB_OIDC_AUDIENCE":                   "imgsrv-github-env",
 				"IMGSRV_GITHUB_OIDC_REPOSITORY_ID":              "123456789",
 				"IMGSRV_GITHUB_OIDC_WORKFLOW_REF":               "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main",
+				"IMGSRV_GITHUB_OIDC_SUBJECT":                    "repo:meigma/imgsrv:ref:refs/heads/main",
 				"IMGSRV_S3_ENDPOINT":                            "garage.env:3900",
 				"IMGSRV_S3_BUCKET":                              "imgsrv-env",
 				"IMGSRV_S3_ACCESS_KEY_ID":                       "env-access",
@@ -149,6 +152,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"--github-oidc-audience=imgsrv-github-flag",
 				"--github-oidc-repository-id=987654321",
 				"--github-oidc-workflow-ref=meigma/imgsrv/.github/workflows/release.yml@refs/heads/main",
+				"--github-oidc-subject=repo:meigma/imgsrv:environment:production",
 				"--s3-endpoint=garage.flag:3900",
 				"--s3-bucket=imgsrv-flag",
 				"--s3-access-key-id=flag-access",
@@ -180,6 +184,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				GitHubOIDCAudience:                 "imgsrv-github-flag",
 				GitHubOIDCRepositoryID:             "987654321",
 				GitHubOIDCWorkflowRef:              "meigma/imgsrv/.github/workflows/release.yml@refs/heads/main",
+				GitHubOIDCSubject:                  "repo:meigma/imgsrv:environment:production",
 				S3Endpoint:                         "garage.flag:3900",
 				S3Bucket:                           "imgsrv-flag",
 				S3AccessKeyID:                      "flag-access",
@@ -281,6 +286,7 @@ func TestExecuteContextPrintsHelpWithoutStartingServer(t *testing.T) {
 	assert.Contains(t, stdout.String(), "--github-oidc-audience")
 	assert.Contains(t, stdout.String(), "--github-oidc-repository-id")
 	assert.Contains(t, stdout.String(), "--github-oidc-workflow-ref")
+	assert.Contains(t, stdout.String(), "--github-oidc-subject")
 	assert.Contains(t, stdout.String(), "--s3-endpoint")
 	assert.Contains(t, stdout.String(), "--upload-ttl")
 	assert.Contains(t, stdout.String(), "--cas-promotion-enabled")
@@ -329,6 +335,7 @@ func unsetConfigEnv(t *testing.T) {
 		"IMGSRV_GITHUB_OIDC_AUDIENCE",
 		"IMGSRV_GITHUB_OIDC_REPOSITORY_ID",
 		"IMGSRV_GITHUB_OIDC_WORKFLOW_REF",
+		"IMGSRV_GITHUB_OIDC_SUBJECT",
 		"IMGSRV_S3_ENDPOINT",
 		"IMGSRV_S3_BUCKET",
 		"IMGSRV_S3_ACCESS_KEY_ID",

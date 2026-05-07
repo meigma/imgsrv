@@ -88,6 +88,9 @@ type Config struct {
 	// GitHubOIDCWorkflowRef is the trusted GitHub workflow_ref claim.
 	GitHubOIDCWorkflowRef string
 
+	// GitHubOIDCSubject is the trusted GitHub OIDC sub claim.
+	GitHubOIDCSubject string
+
 	// S3Endpoint is the S3-compatible API endpoint without a URL scheme.
 	S3Endpoint string
 
@@ -236,7 +239,8 @@ func (c Config) hasOIDCConfig() bool {
 func (c Config) hasGitHubOIDCConfig() bool {
 	return strings.TrimSpace(c.GitHubOIDCAudience) != "" ||
 		strings.TrimSpace(c.GitHubOIDCRepositoryID) != "" ||
-		strings.TrimSpace(c.GitHubOIDCWorkflowRef) != ""
+		strings.TrimSpace(c.GitHubOIDCWorkflowRef) != "" ||
+		strings.TrimSpace(c.GitHubOIDCSubject) != ""
 }
 
 // validateOIDCConfig enforces all-or-nothing generic OIDC configuration.
@@ -266,12 +270,13 @@ func (c Config) validateGitHubOIDCConfig() error {
 	audience := strings.TrimSpace(c.GitHubOIDCAudience)
 	repositoryID := strings.TrimSpace(c.GitHubOIDCRepositoryID)
 	workflowRef := strings.TrimSpace(c.GitHubOIDCWorkflowRef)
-	if audience == "" && repositoryID == "" && workflowRef == "" {
+	subject := strings.TrimSpace(c.GitHubOIDCSubject)
+	if audience == "" && repositoryID == "" && workflowRef == "" && subject == "" {
 		return nil
 	}
-	if audience == "" || repositoryID == "" || workflowRef == "" {
+	if audience == "" || repositoryID == "" || workflowRef == "" || subject == "" {
 		return errors.New(
-			"github oidc audience, repository id, and workflow ref must be set together",
+			"github oidc audience, repository id, workflow ref, and subject must be set together",
 		)
 	}
 
