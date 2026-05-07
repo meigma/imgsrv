@@ -34,11 +34,8 @@ type OIDCConfig struct {
 
 // OIDCAuthenticator validates signed JWT bearer tokens from one OIDC issuer.
 type OIDCAuthenticator struct {
-	issuerURL string
-	audience  string
-	scope     string
-	verifier  *oidc.IDTokenVerifier
-	now       func() time.Time
+	scope    string
+	verifier *oidcVerifier
 }
 
 // NewOIDCAuthenticator discovers the configured issuer and constructs an OIDC authenticator.
@@ -48,6 +45,70 @@ func NewOIDCAuthenticator(ctx context.Context, config OIDCConfig) (*OIDCAuthenti
 	scope := strings.TrimSpace(config.RequiredScope)
 	if issuerURL == "" || audience == "" || scope == "" {
 		return nil, fmt.Errorf("%w: oidc issuer URL, audience, and required scope are required", ErrInvalid)
+	}
+
+	verifier, err := newOIDCVerifier(ctx, oidcVerifierConfig{
+		IssuerURL: issuerURL,
+		Audience:  audience,
+		Now:       config.Now,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &OIDCAuthenticator{
+		scope:    scope,
+		verifier: verifier,
+	}, nil
+}
+
+// AuthenticateToken verifies a JWT access token and returns a content-write principal.
+func (authenticator *OIDCAuthenticator) AuthenticateToken(
+	ctx context.Context,
+	params AuthenticateTokenParams,
+) (Principal, error) {
+	if authenticator == nil || authenticator.verifier == nil {
+		return Principal{}, fmt.Errorf("%w: oidc authenticator is not configured", ErrInvalid)
+	}
+
+	var claims oidcJWTClaims
+	if err := authenticator.verifier.verifyClaims(ctx, params, &claims); err != nil {
+		return Principal{}, err
+	}
+	if err := authenticator.verifier.validateCommonClaims(claims); err != nil {
+		return Principal{}, err
+	}
+
+	var actions []Action
+	if scopeContains(claims.Scope, authenticator.scope) {
+		actions = append(actions, ActionContentWrite)
+	}
+
+	return Principal{
+		Kind:    PrincipalKindOIDC,
+		ID:      authenticator.verifier.principalID(claims.Subject),
+		Actions: actions,
+	}, nil
+}
+
+type oidcVerifierConfig struct {
+	IssuerURL string
+	Audience  string
+	Now       func() time.Time
+}
+
+type oidcVerifier struct {
+	issuerURL string
+	audience  string
+	verifier  *oidc.IDTokenVerifier
+	now       func() time.Time
+}
+
+func newOIDCVerifier(ctx context.Context, config oidcVerifierConfig) (*oidcVerifier, error) {
+	issuerURL := strings.TrimSpace(config.IssuerURL)
+	audience := strings.TrimSpace(config.Audience)
+	if issuerURL == "" || audience == "" {
+		return nil, fmt.Errorf("%w: oidc issuer URL and audience are required", ErrInvalid)
 	}
 
 	oidcHTTPClient := &http.Client{Timeout: defaultOIDCHTTPTimeout}
@@ -72,70 +133,66 @@ func NewOIDCAuthenticator(ctx context.Context, config OIDCConfig) (*OIDCAuthenti
 	if now == nil {
 		now = time.Now
 	}
-	verifier := provider.VerifierContext(oidcCtx, &oidc.Config{
-		ClientID: audience,
-		Now:      now,
-	})
 
-	return &OIDCAuthenticator{
+	return &oidcVerifier{
 		issuerURL: issuerURL,
 		audience:  audience,
-		scope:     scope,
-		verifier:  verifier,
-		now:       now,
+		verifier: provider.VerifierContext(oidcCtx, &oidc.Config{
+			ClientID: audience,
+			Now:      now,
+		}),
+		now: now,
 	}, nil
 }
 
-// AuthenticateToken verifies a JWT access token and returns a content-write principal.
-func (authenticator *OIDCAuthenticator) AuthenticateToken(
+func (verifier *oidcVerifier) verifyClaims(
 	ctx context.Context,
 	params AuthenticateTokenParams,
-) (Principal, error) {
-	if authenticator == nil || authenticator.verifier == nil {
-		return Principal{}, fmt.Errorf("%w: oidc authenticator is not configured", ErrInvalid)
+	claims any,
+) error {
+	if verifier == nil || verifier.verifier == nil {
+		return fmt.Errorf("%w: oidc verifier is not configured", ErrInvalid)
 	}
 	rawToken := strings.TrimSpace(params.Token)
 	if rawToken == "" {
-		return Principal{}, fmt.Errorf("%w: oidc token is required", ErrInvalid)
+		return fmt.Errorf("%w: oidc token is required", ErrInvalid)
 	}
 
-	verifiedToken, err := authenticator.verifier.Verify(ctx, rawToken)
+	verifiedToken, err := verifier.verifier.Verify(ctx, rawToken)
 	if err != nil {
-		return Principal{}, fmt.Errorf("%w: oidc token verification failed", ErrInvalid)
+		return fmt.Errorf("%w: oidc token verification failed", ErrInvalid)
+	}
+	if err := verifiedToken.Claims(claims); err != nil {
+		return fmt.Errorf("%w: oidc token claims are invalid", ErrInvalid)
 	}
 
-	var claims oidcJWTClaims
-	if err := verifiedToken.Claims(&claims); err != nil {
-		return Principal{}, fmt.Errorf("%w: oidc token claims are invalid", ErrInvalid)
+	return nil
+}
+
+func (verifier *oidcVerifier) validateCommonClaims(claims oidcJWTClaims) error {
+	if claims.Issuer != verifier.issuerURL {
+		return fmt.Errorf("%w: oidc issuer mismatch", ErrInvalid)
 	}
-	if claims.Issuer != authenticator.issuerURL {
-		return Principal{}, fmt.Errorf("%w: oidc issuer mismatch", ErrInvalid)
-	}
-	if !slices.Contains(claims.Audience, authenticator.audience) {
-		return Principal{}, fmt.Errorf("%w: oidc audience mismatch", ErrInvalid)
+	if !slices.Contains(claims.Audience, verifier.audience) {
+		return fmt.Errorf("%w: oidc audience mismatch", ErrInvalid)
 	}
 	if strings.TrimSpace(claims.Subject) == "" {
-		return Principal{}, fmt.Errorf("%w: oidc subject is required", ErrInvalid)
+		return fmt.Errorf("%w: oidc subject is required", ErrInvalid)
 	}
 
-	nowUnix := authenticator.now().Unix()
+	nowUnix := verifier.now().Unix()
 	if claims.ExpiresAt == 0 || nowUnix >= claims.ExpiresAt {
-		return Principal{}, fmt.Errorf("%w: oidc token is expired", ErrInvalid)
+		return fmt.Errorf("%w: oidc token is expired", ErrInvalid)
 	}
 	if claims.NotBefore != nil && nowUnix < *claims.NotBefore {
-		return Principal{}, fmt.Errorf("%w: oidc token is not yet valid", ErrInvalid)
+		return fmt.Errorf("%w: oidc token is not yet valid", ErrInvalid)
 	}
 
-	var actions []Action
-	if scopeContains(claims.Scope, authenticator.scope) {
-		actions = append(actions, ActionContentWrite)
-	}
+	return nil
+}
 
-	return Principal{
-		Kind:    PrincipalKindOIDC,
-		ID:      authenticator.issuerURL + "#" + claims.Subject,
-		Actions: actions,
-	}, nil
+func (verifier *oidcVerifier) principalID(subject string) string {
+	return verifier.issuerURL + "#" + subject
 }
 
 type oidcProviderClaims struct {

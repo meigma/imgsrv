@@ -124,6 +124,24 @@ func newAuthService(
 	t.Helper()
 
 	var authenticators []auth.Authenticator
+	if options.githubOIDCIssuerURL != "" ||
+		options.githubOIDCAudience != "" ||
+		options.githubOIDCRepositoryID != "" ||
+		options.githubOIDCWorkflowRef != "" ||
+		options.githubOIDCSubject != "" {
+		githubAuthenticator, err := auth.NewGitHubActionsOIDCAuthenticator(
+			ctx,
+			auth.GitHubActionsOIDCConfig{
+				IssuerURL:    options.githubOIDCIssuerURL,
+				Audience:     options.githubOIDCAudience,
+				RepositoryID: options.githubOIDCRepositoryID,
+				WorkflowRef:  options.githubOIDCWorkflowRef,
+				Subject:      options.githubOIDCSubject,
+			},
+		)
+		require.NoError(t, err)
+		authenticators = append(authenticators, githubAuthenticator)
+	}
 	if options.oidcIssuerURL != "" || options.oidcAudience != "" || options.oidcRequiredScope != "" {
 		oidcAuthenticator, err := auth.NewOIDCAuthenticator(ctx, auth.OIDCConfig{
 			IssuerURL:     options.oidcIssuerURL,

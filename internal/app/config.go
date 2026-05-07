@@ -79,6 +79,18 @@ type Config struct {
 	// OIDCRequiredScope is the token scope required before OIDC principals may write content.
 	OIDCRequiredScope string
 
+	// GitHubOIDCAudience is the required audience for GitHub Actions OIDC tokens.
+	GitHubOIDCAudience string
+
+	// GitHubOIDCRepositoryID is the trusted GitHub repository_id claim.
+	GitHubOIDCRepositoryID string
+
+	// GitHubOIDCWorkflowRef is the trusted GitHub workflow_ref claim.
+	GitHubOIDCWorkflowRef string
+
+	// GitHubOIDCSubject is the trusted GitHub OIDC sub claim.
+	GitHubOIDCSubject string
+
 	// S3Endpoint is the S3-compatible API endpoint without a URL scheme.
 	S3Endpoint string
 
@@ -223,6 +235,14 @@ func (c Config) hasOIDCConfig() bool {
 		strings.TrimSpace(c.OIDCRequiredScope) != ""
 }
 
+// hasGitHubOIDCConfig reports whether any GitHub Actions OIDC configuration field is populated.
+func (c Config) hasGitHubOIDCConfig() bool {
+	return strings.TrimSpace(c.GitHubOIDCAudience) != "" ||
+		strings.TrimSpace(c.GitHubOIDCRepositoryID) != "" ||
+		strings.TrimSpace(c.GitHubOIDCWorkflowRef) != "" ||
+		strings.TrimSpace(c.GitHubOIDCSubject) != ""
+}
+
 // validateOIDCConfig enforces all-or-nothing generic OIDC configuration.
 func (c Config) validateOIDCConfig() error {
 	issuerURL := strings.TrimSpace(c.OIDCIssuerURL)
@@ -240,6 +260,24 @@ func (c Config) validateOIDCConfig() error {
 	}
 	if issuer.Scheme != "https" {
 		return errors.New("oidc issuer url must use https")
+	}
+
+	return nil
+}
+
+// validateGitHubOIDCConfig enforces all-or-nothing GitHub Actions OIDC configuration.
+func (c Config) validateGitHubOIDCConfig() error {
+	audience := strings.TrimSpace(c.GitHubOIDCAudience)
+	repositoryID := strings.TrimSpace(c.GitHubOIDCRepositoryID)
+	workflowRef := strings.TrimSpace(c.GitHubOIDCWorkflowRef)
+	subject := strings.TrimSpace(c.GitHubOIDCSubject)
+	if audience == "" && repositoryID == "" && workflowRef == "" && subject == "" {
+		return nil
+	}
+	if audience == "" || repositoryID == "" || workflowRef == "" || subject == "" {
+		return errors.New(
+			"github oidc audience, repository id, workflow ref, and subject must be set together",
+		)
 	}
 
 	return nil

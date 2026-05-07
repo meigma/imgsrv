@@ -41,6 +41,14 @@ type rootCommand struct {
 	OIDCAudience string `name:"oidc-audience" env:"IMGSRV_OIDC_AUDIENCE" help:"Required OIDC JWT audience."`
 	// OIDCRequiredScope is the token scope required before OIDC principals may write content.
 	OIDCRequiredScope string `name:"oidc-required-scope" env:"IMGSRV_OIDC_REQUIRED_SCOPE" help:"Required OIDC scope for content writes."`
+	// GitHubOIDCAudience is the required audience for GitHub Actions OIDC tokens.
+	GitHubOIDCAudience string `name:"github-oidc-audience" env:"IMGSRV_GITHUB_OIDC_AUDIENCE" help:"Required GitHub Actions OIDC audience."`
+	// GitHubOIDCRepositoryID is the trusted GitHub repository_id claim.
+	GitHubOIDCRepositoryID string `name:"github-oidc-repository-id" env:"IMGSRV_GITHUB_OIDC_REPOSITORY_ID" help:"Trusted GitHub Actions OIDC repository_id claim."`
+	// GitHubOIDCWorkflowRef is the trusted GitHub workflow_ref claim.
+	GitHubOIDCWorkflowRef string `name:"github-oidc-workflow-ref" env:"IMGSRV_GITHUB_OIDC_WORKFLOW_REF" help:"Trusted GitHub Actions OIDC workflow_ref claim."`
+	// GitHubOIDCSubject is the trusted GitHub OIDC sub claim.
+	GitHubOIDCSubject string `name:"github-oidc-subject" env:"IMGSRV_GITHUB_OIDC_SUBJECT" help:"Trusted GitHub Actions OIDC sub claim."`
 	// S3Endpoint is the S3-compatible API endpoint without a URL scheme.
 	S3Endpoint string `name:"s3-endpoint" env:"IMGSRV_S3_ENDPOINT" help:"S3-compatible endpoint without a URL scheme."`
 	// S3Bucket is the bucket used for imgsrv object storage.
@@ -124,6 +132,10 @@ func ExecuteContext(ctx context.Context, args []string, run Runner, stdout io.Wr
 		OIDCIssuerURL:                      command.OIDCIssuerURL,
 		OIDCAudience:                       command.OIDCAudience,
 		OIDCRequiredScope:                  command.OIDCRequiredScope,
+		GitHubOIDCAudience:                 command.GitHubOIDCAudience,
+		GitHubOIDCRepositoryID:             command.GitHubOIDCRepositoryID,
+		GitHubOIDCWorkflowRef:              command.GitHubOIDCWorkflowRef,
+		GitHubOIDCSubject:                  command.GitHubOIDCSubject,
 		S3Endpoint:                         command.S3Endpoint,
 		S3Bucket:                           command.S3Bucket,
 		S3AccessKeyID:                      command.S3AccessKeyID,
