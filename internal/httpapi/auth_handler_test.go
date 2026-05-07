@@ -16,7 +16,7 @@ import (
 	"github.com/meigma/imgsrv/internal/uploads"
 )
 
-func TestRequireAuthRejectsMissingServiceFailClosed(t *testing.T) {
+func TestRequireActionRejectsMissingServiceFailClosed(t *testing.T) {
 	handler := New(Dependencies{})
 	req := newHTTPAPIRequest(http.MethodPost, "/v1/uploads", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
@@ -27,7 +27,7 @@ func TestRequireAuthRejectsMissingServiceFailClosed(t *testing.T) {
 	assertProblem(t, rec, http.StatusServiceUnavailable, errAuthServiceUnavailable.Error())
 }
 
-func TestRequireAuthRejectsMissingAndMalformedBearerTokens(t *testing.T) {
+func TestRequireActionRejectsMissingAndMalformedBearerTokens(t *testing.T) {
 	tests := []struct {
 		name          string
 		authorization string
@@ -43,10 +43,13 @@ func TestRequireAuthRejectsMissingAndMalformedBearerTokens(t *testing.T) {
 			called := false
 			authService := httpmocks.NewMockAuthService(t)
 			api := &api{auth: authService}
-			handler := api.requireAuth(func(w http.ResponseWriter, _ *http.Request) {
-				called = true
-				w.WriteHeader(http.StatusNoContent)
-			})
+			handler := api.requireAction(
+				auth.ActionContentWrite,
+				func(w http.ResponseWriter, _ *http.Request) {
+					called = true
+					w.WriteHeader(http.StatusNoContent)
+				},
+			)
 			req := httptest.NewRequest(http.MethodPost, "/v1/uploads", nil)
 			if tt.authorization != "" {
 				req.Header.Set("Authorization", tt.authorization)
@@ -62,18 +65,21 @@ func TestRequireAuthRejectsMissingAndMalformedBearerTokens(t *testing.T) {
 	}
 }
 
-func TestRequireAuthRejectsUnknownTokenBeforeCallingNext(t *testing.T) {
+func TestRequireActionRejectsUnknownTokenBeforeCallingNext(t *testing.T) {
 	authService := httpmocks.NewMockAuthService(t)
 	authService.EXPECT().
 		AuthenticateToken(mock.Anything, auth.AuthenticateTokenParams{Token: testBearerToken}).
-		Return(auth.Token{}, auth.ErrNotFound)
+		Return(auth.Principal{}, auth.ErrNotFound)
 
 	called := false
 	api := &api{auth: authService}
-	handler := api.requireAuth(func(w http.ResponseWriter, _ *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusNoContent)
-	})
+	handler := api.requireAction(
+		auth.ActionContentWrite,
+		func(w http.ResponseWriter, _ *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusNoContent)
+		},
+	)
 	req := newHTTPAPIRequest(http.MethodPost, "/v1/uploads", nil)
 	rec := httptest.NewRecorder()
 
@@ -84,18 +90,65 @@ func TestRequireAuthRejectsUnknownTokenBeforeCallingNext(t *testing.T) {
 	assert.False(t, called)
 }
 
-func TestRequireAuthCallsNextForValidToken(t *testing.T) {
+func TestRequireActionRejectsPrincipalMissingAction(t *testing.T) {
 	authService := httpmocks.NewMockAuthService(t)
 	authService.EXPECT().
 		AuthenticateToken(mock.Anything, auth.AuthenticateTokenParams{Token: testBearerToken}).
-		Return(auth.Token{ID: uuid.New(), TokenPrefix: "testtok"}, nil)
+		Return(auth.Principal{
+			Kind: auth.PrincipalKindAPIToken,
+			ID:   uuid.NewString(),
+		}, nil)
 
 	called := false
 	api := &api{auth: authService}
-	handler := api.requireAuth(func(w http.ResponseWriter, _ *http.Request) {
-		called = true
-		w.WriteHeader(http.StatusNoContent)
-	})
+	handler := api.requireAction(
+		auth.ActionContentWrite,
+		func(w http.ResponseWriter, _ *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusNoContent)
+		},
+	)
+	req := newHTTPAPIRequest(http.MethodPost, "/v1/uploads", nil)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	assertProblem(
+		t,
+		rec,
+		http.StatusForbidden,
+		"principal is not authorized for action content.write",
+	)
+	assert.Empty(t, rec.Header().Get("WWW-Authenticate"))
+	assert.False(t, called)
+}
+
+func TestRequireActionCallsNextForPrincipalWithAction(t *testing.T) {
+	principal := auth.Principal{
+		Kind: auth.PrincipalKindAPIToken,
+		ID:   uuid.NewString(),
+		Actions: []auth.Action{
+			auth.ActionContentWrite,
+		},
+	}
+	authService := httpmocks.NewMockAuthService(t)
+	authService.EXPECT().
+		AuthenticateToken(mock.Anything, auth.AuthenticateTokenParams{Token: testBearerToken}).
+		Return(principal, nil)
+
+	called := false
+	api := &api{auth: authService}
+	handler := api.requireAction(
+		auth.ActionContentWrite,
+		func(w http.ResponseWriter, r *http.Request) {
+			called = true
+			got, ok := auth.PrincipalFromContext(r.Context())
+			assert.True(t, ok)
+			assert.Equal(t, principal, got)
+			w.WriteHeader(http.StatusNoContent)
+		},
+	)
 	req := newHTTPAPIRequest(http.MethodPost, "/v1/uploads", nil)
 	rec := httptest.NewRecorder()
 

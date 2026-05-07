@@ -43,22 +43,22 @@ func (_m *MockAuthService) EXPECT() *MockAuthService_Expecter {
 }
 
 // AuthenticateToken provides a mock function for the type MockAuthService
-func (_mock *MockAuthService) AuthenticateToken(context1 context.Context, authenticateTokenParams auth.AuthenticateTokenParams) (auth.Token, error) {
+func (_mock *MockAuthService) AuthenticateToken(context1 context.Context, authenticateTokenParams auth.AuthenticateTokenParams) (auth.Principal, error) {
 	ret := _mock.Called(context1, authenticateTokenParams)
 
 	if len(ret) == 0 {
 		panic("no return value specified for AuthenticateToken")
 	}
 
-	var r0 auth.Token
+	var r0 auth.Principal
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, auth.AuthenticateTokenParams) (auth.Token, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, auth.AuthenticateTokenParams) (auth.Principal, error)); ok {
 		return returnFunc(context1, authenticateTokenParams)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, auth.AuthenticateTokenParams) auth.Token); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, auth.AuthenticateTokenParams) auth.Principal); ok {
 		r0 = returnFunc(context1, authenticateTokenParams)
 	} else {
-		r0 = ret.Get(0).(auth.Token)
+		r0 = ret.Get(0).(auth.Principal)
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, auth.AuthenticateTokenParams) error); ok {
 		r1 = returnFunc(context1, authenticateTokenParams)
@@ -98,12 +98,12 @@ func (_c *MockAuthService_AuthenticateToken_Call) Run(run func(context1 context.
 	return _c
 }
 
-func (_c *MockAuthService_AuthenticateToken_Call) Return(token auth.Token, err error) *MockAuthService_AuthenticateToken_Call {
-	_c.Call.Return(token, err)
+func (_c *MockAuthService_AuthenticateToken_Call) Return(principal auth.Principal, err error) *MockAuthService_AuthenticateToken_Call {
+	_c.Call.Return(principal, err)
 	return _c
 }
 
-func (_c *MockAuthService_AuthenticateToken_Call) RunAndReturn(run func(context1 context.Context, authenticateTokenParams auth.AuthenticateTokenParams) (auth.Token, error)) *MockAuthService_AuthenticateToken_Call {
+func (_c *MockAuthService_AuthenticateToken_Call) RunAndReturn(run func(context1 context.Context, authenticateTokenParams auth.AuthenticateTokenParams) (auth.Principal, error)) *MockAuthService_AuthenticateToken_Call {
 	_c.Call.Return(run)
 	return _c
 }

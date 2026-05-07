@@ -12,8 +12,10 @@ const bearerAuthScheme = "Bearer"
 
 var errAuthServiceUnavailable = errors.New("auth service is not configured")
 
-// requireAuth authenticates one write route before invoking next.
-func (a *api) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+// requireAction authenticates one protected route, authorizes action, and invokes next.
+//
+//nolint:unparam // Upcoming auth-policy routes will use actions beyond content.write.
+func (a *api) requireAction(action auth.Action, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		service := a.auth
 		if service == nil {
@@ -26,12 +28,20 @@ func (a *api) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			writeAuthProblem(w, "missing or malformed bearer token")
 			return
 		}
-		if _, err := service.AuthenticateToken(r.Context(), auth.AuthenticateTokenParams{Token: token}); err != nil {
+		principal, err := service.AuthenticateToken(
+			r.Context(),
+			auth.AuthenticateTokenParams{Token: token},
+		)
+		if err != nil {
 			writeAuthError(w, err)
 			return
 		}
+		if !principal.HasAction(action) {
+			writeAuthorizationProblem(w, action)
+			return
+		}
 
-		next(w, r)
+		next(w, r.WithContext(auth.ContextWithPrincipal(r.Context(), principal)))
 	}
 }
 
@@ -62,4 +72,9 @@ func writeAuthError(w http.ResponseWriter, err error) {
 func writeAuthProblem(w http.ResponseWriter, detail string) {
 	w.Header().Set("WWW-Authenticate", bearerAuthScheme)
 	writeProblem(w, http.StatusUnauthorized, detail)
+}
+
+// writeAuthorizationProblem writes an authorization failure for an authenticated principal.
+func writeAuthorizationProblem(w http.ResponseWriter, action auth.Action) {
+	writeProblem(w, http.StatusForbidden, "principal is not authorized for action "+string(action))
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -34,6 +35,55 @@ const (
 	// ErrNotFound means the requested auth resource does not exist.
 	ErrNotFound Error = "auth not found"
 )
+
+// PrincipalKind identifies the authentication mechanism that produced a principal.
+type PrincipalKind string
+
+const (
+	// PrincipalKindAPIToken identifies principals authenticated by stored API tokens.
+	PrincipalKindAPIToken PrincipalKind = "api_token"
+)
+
+// Action identifies an operation an authenticated principal may perform.
+type Action string
+
+const (
+	// ActionContentWrite permits upload, draft, publish, and alias mutation operations.
+	ActionContentWrite Action = "content.write"
+
+	// ActionAuthManage permits authentication policy management operations.
+	ActionAuthManage Action = "auth.manage"
+)
+
+// Principal is an authenticated caller plus the actions granted to it.
+type Principal struct {
+	// Kind identifies the authentication mechanism that produced the principal.
+	Kind PrincipalKind
+
+	// ID is the mechanism-scoped stable principal identifier.
+	ID string
+
+	// Actions are the operations this principal may perform.
+	Actions []Action
+}
+
+// HasAction reports whether principal has action.
+func (principal Principal) HasAction(action Action) bool {
+	return slices.Contains(principal.Actions, action)
+}
+
+type principalContextKey struct{}
+
+// ContextWithPrincipal stores principal in ctx for downstream handlers.
+func ContextWithPrincipal(ctx context.Context, principal Principal) context.Context {
+	return context.WithValue(ctx, principalContextKey{}, principal)
+}
+
+// PrincipalFromContext returns the authenticated principal stored in ctx.
+func PrincipalFromContext(ctx context.Context) (Principal, bool) {
+	principal, ok := ctx.Value(principalContextKey{}).(Principal)
+	return principal, ok
+}
 
 // Store persists API-token authentication state.
 type Store interface {
