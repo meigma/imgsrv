@@ -4,11 +4,14 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -74,6 +77,28 @@ func TestCatalogBrowsingReadsImagesAndVersions(t *testing.T) {
 
 	_, err = catalogStore.ListVersions(ctx, domain.ListVersionsParams{ImageName: "missing"})
 	assert.ErrorIs(t, err, domain.ErrNotFound)
+}
+
+func TestCatalogRejectsDirectPublishedVersionInsert(t *testing.T) {
+	ctx := t.Context()
+	store := startCatalogIntegrationStore(t)
+	catalogStore := store.Catalog()
+	image := createImage(t, ctx, catalogStore, "direct-published-insert")
+
+	_, err := store.pool.Exec(
+		ctx,
+		`INSERT INTO image_versions (id, image_id, version, state, published_at)
+		VALUES ($1, $2, $3, 'published', now())`,
+		uuid.New(),
+		image.ID,
+		"v1.0.0",
+	)
+	require.Error(t, err)
+
+	var pgErr *pgconn.PgError
+	require.ErrorAs(t, err, &pgErr)
+	assert.Equal(t, "23514", pgErr.Code)
+	assert.Contains(t, pgErr.Message, "image_versions must be inserted as drafts")
 }
 
 func TestCatalogDraftDeletesArePathScopedAndDraftOnly(t *testing.T) {
@@ -344,13 +369,52 @@ func insertDraftCatalogVersion(t *testing.T, store *Store, imageID uuid.UUID, ve
 func insertPublishedCatalogVersion(t *testing.T, store *Store, imageID uuid.UUID, version string, createdAt time.Time) {
 	t.Helper()
 
+	ctx := t.Context()
+	versionID := uuid.New()
+	digest := publishedCatalogDigest(imageID, version)
+
 	_, err := store.pool.Exec(
-		t.Context(),
-		`INSERT INTO image_versions (id, image_id, version, state, published_at, created_at, updated_at)
-		VALUES ($1, $2, $3, 'published', $4, $4, $4)`,
-		uuid.New(),
+		ctx,
+		`INSERT INTO image_versions (id, image_id, version, state, created_at, updated_at)
+		VALUES ($1, $2, $3, 'draft', $4, $4)`,
+		versionID,
 		imageID,
 		version,
+		createdAt,
+	)
+	require.NoError(t, err)
+
+	insertTrustedBlob(t, store, digest, 4096)
+	_, err = store.pool.Exec(
+		ctx,
+		`INSERT INTO release_artifacts (
+			id,
+			version_id,
+			operating_system,
+			architecture,
+			format,
+			primary_blob_digest,
+			primary_blob_size_bytes,
+			primary_media_type,
+			created_at,
+			updated_at
+		)
+		VALUES ($1, $2, 'linux', 'amd64', 'raw', $3, 4096, 'application/octet-stream', $4, $4)`,
+		uuid.New(),
+		versionID,
+		digest,
+		createdAt,
+	)
+	require.NoError(t, err)
+
+	_, err = store.pool.Exec(
+		ctx,
+		`UPDATE image_versions
+		SET state = 'published',
+			published_at = $2,
+			updated_at = $2
+		WHERE id = $1`,
+		versionID,
 		createdAt,
 	)
 	require.NoError(t, err)
@@ -517,4 +581,9 @@ func artifactIDs(artifacts []domain.Artifact) []uuid.UUID {
 
 func catalogDigest(hexChar string) domain.Digest {
 	return domain.Digest("sha256:" + strings.Repeat(hexChar, 64))
+}
+
+func publishedCatalogDigest(imageID uuid.UUID, version string) domain.Digest {
+	sum := sha256.Sum256([]byte(imageID.String() + ":" + version))
+	return domain.Digest("sha256:" + hex.EncodeToString(sum[:]))
 }
