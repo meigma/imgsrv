@@ -34,20 +34,23 @@ func (service *Service) CreateToken(ctx context.Context, params CreateTokenParam
 	return store.CreateToken(ctx, params)
 }
 
-// AuthenticateToken validates token, records successful use, and returns token metadata.
-func (service *Service) AuthenticateToken(ctx context.Context, params AuthenticateTokenParams) (Token, error) {
+// AuthenticateToken validates token, records successful use, and returns an API-token principal.
+func (service *Service) AuthenticateToken(
+	ctx context.Context,
+	params AuthenticateTokenParams,
+) (Principal, error) {
 	store, err := service.dependencies()
 	if err != nil {
-		return Token{}, err
+		return Principal{}, err
 	}
 
 	prefix, err := ParseTokenPrefix(params.Token)
 	if err != nil {
-		return Token{}, err
+		return Principal{}, err
 	}
 	tokenHash, err := HashToken(params.Token)
 	if err != nil {
-		return Token{}, err
+		return Principal{}, err
 	}
 
 	token, err := store.LookupActiveToken(ctx, LookupActiveTokenParams{
@@ -55,10 +58,22 @@ func (service *Service) AuthenticateToken(ctx context.Context, params Authentica
 		TokenHash:   tokenHash,
 	})
 	if err != nil {
-		return Token{}, err
+		return Principal{}, err
 	}
 
-	return store.MarkTokenUsed(ctx, MarkTokenUsedParams{ID: token.ID})
+	usedToken, err := store.MarkTokenUsed(ctx, MarkTokenUsedParams{ID: token.ID})
+	if err != nil {
+		return Principal{}, err
+	}
+
+	return Principal{
+		Kind: PrincipalKindAPIToken,
+		ID:   usedToken.ID.String(),
+		Actions: []Action{
+			ActionContentWrite,
+			ActionAuthManage,
+		},
+	}, nil
 }
 
 // dependencies returns configured service dependencies or a sentinel error.

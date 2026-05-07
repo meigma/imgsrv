@@ -29,7 +29,7 @@ type Dependencies struct {
 	// Readiness reports whether the service can accept operational traffic.
 	Readiness ReadinessChecker
 
-	// Auth coordinates API-token authentication for write operations. Nil leaves protected routes unavailable.
+	// Auth coordinates bearer authentication and action authorization. Nil leaves protected routes unavailable.
 	Auth AuthService
 
 	// Uploads coordinates client-facing upload operations. Nil leaves upload routes unavailable.
@@ -62,10 +62,10 @@ func (f ReadinessFunc) CheckReady(ctx context.Context) error {
 	return f(ctx)
 }
 
-// AuthService coordinates API-token authentication for HTTP callers.
+// AuthService coordinates bearer authentication for HTTP callers.
 type AuthService interface {
-	// AuthenticateToken validates a raw bearer token and records successful use.
-	AuthenticateToken(context.Context, auth.AuthenticateTokenParams) (auth.Token, error)
+	// AuthenticateToken validates a raw bearer token, records successful use, and returns a principal.
+	AuthenticateToken(context.Context, auth.AuthenticateTokenParams) (auth.Principal, error)
 }
 
 // UploadService coordinates upload operations for HTTP callers.
@@ -104,13 +104,22 @@ type CatalogService interface {
 	ListVersions(context.Context, catalog.ListVersionsParams) ([]catalog.Version, error)
 
 	// ListPublishedArtifacts returns artifacts for an exact published image version.
-	ListPublishedArtifacts(context.Context, catalog.ListPublishedArtifactsParams) ([]catalog.Artifact, error)
+	ListPublishedArtifacts(
+		context.Context,
+		catalog.ListPublishedArtifactsParams,
+	) ([]catalog.Artifact, error)
 
 	// GetPublishedArtifact returns one artifact for an exact published image version.
-	GetPublishedArtifact(context.Context, catalog.GetPublishedArtifactParams) (catalog.Artifact, error)
+	GetPublishedArtifact(
+		context.Context,
+		catalog.GetPublishedArtifactParams,
+	) (catalog.Artifact, error)
 
 	// GetPublishedAttachment returns one attachment for an exact published image version artifact.
-	GetPublishedAttachment(context.Context, catalog.GetPublishedAttachmentParams) (catalog.Attachment, error)
+	GetPublishedAttachment(
+		context.Context,
+		catalog.GetPublishedAttachmentParams,
+	) (catalog.Attachment, error)
 
 	// AddArtifact adds a primary artifact on a draft version.
 	AddArtifact(context.Context, catalog.AddArtifactParams) (catalog.Artifact, error)
@@ -200,54 +209,83 @@ func New(deps Dependencies) http.Handler {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", api.healthz)
-	mux.HandleFunc("GET /readyz", api.readyz)
-	mux.HandleFunc("POST /v1/uploads", api.requireAuth(api.beginUpload))
-	mux.HandleFunc("GET /v1/uploads/{upload_id}", api.getUpload)
-	mux.HandleFunc("PUT /v1/uploads/{upload_id}/parts/{part_number}", api.requireAuth(api.putUploadPart))
-	mux.HandleFunc("POST /v1/uploads/{upload_id}/complete", api.requireAuth(api.completeUpload))
-	mux.HandleFunc("POST /v1/uploads/{upload_id}/abort", api.requireAuth(api.abortUpload))
-	mux.HandleFunc("GET /v1/blobs/{digest}", api.getBlob)
-	mux.HandleFunc("POST /v1/images", api.requireAuth(api.createImage))
-	mux.HandleFunc("GET /v1/images", api.listImages)
-	mux.HandleFunc("GET /v1/images/{name}", api.getImage)
-	mux.HandleFunc("POST /v1/images/{name}/versions", api.requireAuth(api.createDraftVersion))
-	mux.HandleFunc("GET /v1/images/{name}/versions", api.listVersions)
-	mux.HandleFunc("GET /v1/images/{name}/versions/{version}", api.getVersionManifest)
-	mux.HandleFunc("GET /v1/images/{name}/versions/{version}/artifacts", api.listPublishedArtifacts)
+	api.registerRoutes(mux)
+
+	return deps.Telemetry.WrapHTTPHandler(Chain(mux, logRequests(logger)))
+}
+
+// registerRoutes attaches API route handlers to mux.
+func (a *api) registerRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /healthz", a.healthz)
+	mux.HandleFunc("GET /readyz", a.readyz)
+	mux.HandleFunc("POST /v1/uploads", a.requireAction(auth.ActionContentWrite, a.beginUpload))
+	mux.HandleFunc("GET /v1/uploads/{upload_id}", a.getUpload)
+	mux.HandleFunc(
+		"PUT /v1/uploads/{upload_id}/parts/{part_number}",
+		a.requireAction(auth.ActionContentWrite, a.putUploadPart),
+	)
+	mux.HandleFunc(
+		"POST /v1/uploads/{upload_id}/complete",
+		a.requireAction(auth.ActionContentWrite, a.completeUpload),
+	)
+	mux.HandleFunc(
+		"POST /v1/uploads/{upload_id}/abort",
+		a.requireAction(auth.ActionContentWrite, a.abortUpload),
+	)
+	mux.HandleFunc("GET /v1/blobs/{digest}", a.getBlob)
+	mux.HandleFunc("POST /v1/images", a.requireAction(auth.ActionContentWrite, a.createImage))
+	mux.HandleFunc("GET /v1/images", a.listImages)
+	mux.HandleFunc("GET /v1/images/{name}", a.getImage)
+	mux.HandleFunc(
+		"POST /v1/images/{name}/versions",
+		a.requireAction(auth.ActionContentWrite, a.createDraftVersion),
+	)
+	mux.HandleFunc("GET /v1/images/{name}/versions", a.listVersions)
+	mux.HandleFunc("GET /v1/images/{name}/versions/{version}", a.getVersionManifest)
+	mux.HandleFunc("GET /v1/images/{name}/versions/{version}/artifacts", a.listPublishedArtifacts)
 	mux.HandleFunc(
 		"GET /v1/images/{name}/versions/{version}/artifacts/{artifact_id}",
-		api.getPublishedArtifact,
+		a.getPublishedArtifact,
 	)
 	mux.HandleFunc(
 		"GET /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/download",
-		api.downloadPublishedArtifact,
+		a.downloadPublishedArtifact,
 	)
-	mux.HandleFunc("POST /v1/images/{name}/versions/{version}/artifacts", api.requireAuth(api.addArtifact))
+	mux.HandleFunc(
+		"POST /v1/images/{name}/versions/{version}/artifacts",
+		a.requireAction(auth.ActionContentWrite, a.addArtifact),
+	)
 	mux.HandleFunc(
 		"DELETE /v1/images/{name}/versions/{version}/artifacts/{artifact_id}",
-		api.requireAuth(api.deleteArtifact),
+		a.requireAction(auth.ActionContentWrite, a.deleteArtifact),
 	)
 	mux.HandleFunc(
 		"POST /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments",
-		api.requireAuth(api.addAttachment),
+		a.requireAction(auth.ActionContentWrite, a.addAttachment),
 	)
 	mux.HandleFunc(
 		"DELETE /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments/{attachment_id}",
-		api.requireAuth(api.deleteAttachment),
+		a.requireAction(auth.ActionContentWrite, a.deleteAttachment),
 	)
 	mux.HandleFunc(
 		"GET /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments/{attachment_id}/download",
-		api.downloadPublishedAttachment,
+		a.downloadPublishedAttachment,
 	)
-	mux.HandleFunc("POST /v1/images/{name}/versions/{version}/publish", api.requireAuth(api.publishVersion))
-	mux.HandleFunc("PUT /v1/images/{name}/aliases/{alias}", api.requireAuth(api.putAlias))
-	mux.HandleFunc("GET /v1/images/{name}/aliases", api.listAliases)
-	mux.HandleFunc("GET /v1/images/{name}/aliases/{alias}", api.getAlias)
-	mux.HandleFunc("DELETE /v1/images/{name}/aliases/{alias}", api.requireAuth(api.deleteAlias))
-	mux.HandleFunc("GET /v1/images/{name}/refs/{ref}", api.resolveManifest)
-
-	return deps.Telemetry.WrapHTTPHandler(Chain(mux, logRequests(logger)))
+	mux.HandleFunc(
+		"POST /v1/images/{name}/versions/{version}/publish",
+		a.requireAction(auth.ActionContentWrite, a.publishVersion),
+	)
+	mux.HandleFunc(
+		"PUT /v1/images/{name}/aliases/{alias}",
+		a.requireAction(auth.ActionContentWrite, a.putAlias),
+	)
+	mux.HandleFunc("GET /v1/images/{name}/aliases", a.listAliases)
+	mux.HandleFunc("GET /v1/images/{name}/aliases/{alias}", a.getAlias)
+	mux.HandleFunc(
+		"DELETE /v1/images/{name}/aliases/{alias}",
+		a.requireAction(auth.ActionContentWrite, a.deleteAlias),
+	)
+	mux.HandleFunc("GET /v1/images/{name}/refs/{ref}", a.resolveManifest)
 }
 
 // healthz handles GET /healthz and reports liveness with no body.

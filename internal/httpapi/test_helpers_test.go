@@ -38,10 +38,13 @@ func newAcceptingAuthService(t testing.TB) *httpmocks.MockAuthService {
 	authService := httpmocks.NewMockAuthService(t)
 	authService.EXPECT().
 		AuthenticateToken(mock.Anything, auth.AuthenticateTokenParams{Token: testBearerToken}).
-		Return(auth.Token{
-			ID:          uuid.MustParse("11111111-2222-3333-4444-555555555555"),
-			Name:        "test",
-			TokenPrefix: "testtok",
+		Return(auth.Principal{
+			Kind: auth.PrincipalKindAPIToken,
+			ID:   uuid.MustParse("11111111-2222-3333-4444-555555555555").String(),
+			Actions: []auth.Action{
+				auth.ActionContentWrite,
+				auth.ActionAuthManage,
+			},
 		}, nil).
 		Maybe()
 

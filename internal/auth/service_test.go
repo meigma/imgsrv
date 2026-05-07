@@ -14,7 +14,7 @@ import (
 	"github.com/meigma/imgsrv/internal/auth/mocks"
 )
 
-func TestServiceAuthenticateTokenLooksUpAndMarksTokenUsed(t *testing.T) {
+func TestServiceAuthenticateTokenLooksUpMarksTokenUsedAndReturnsPrincipal(t *testing.T) {
 	store := mocks.NewMockStore(t)
 	service := auth.NewService(auth.ServiceConfig{Store: store})
 	token := tokenFixture()
@@ -37,17 +37,29 @@ func TestServiceAuthenticateTokenLooksUpAndMarksTokenUsed(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, usedToken, got)
+	assert.Equal(t, auth.Principal{
+		Kind: auth.PrincipalKindAPIToken,
+		ID:   usedToken.ID.String(),
+		Actions: []auth.Action{
+			auth.ActionContentWrite,
+			auth.ActionAuthManage,
+		},
+	}, got)
+	assert.True(t, got.HasAction(auth.ActionContentWrite))
+	assert.True(t, got.HasAction(auth.ActionAuthManage))
 }
 
 func TestServiceAuthenticateTokenRejectsInvalidTokenBeforeStore(t *testing.T) {
 	store := mocks.NewMockStore(t)
 	service := auth.NewService(auth.ServiceConfig{Store: store})
 
-	got, err := service.AuthenticateToken(context.Background(), auth.AuthenticateTokenParams{Token: "bad"})
+	got, err := service.AuthenticateToken(
+		context.Background(),
+		auth.AuthenticateTokenParams{Token: "bad"},
+	)
 
 	require.ErrorIs(t, err, auth.ErrInvalid)
-	assert.Equal(t, auth.Token{}, got)
+	assert.Equal(t, auth.Principal{}, got)
 }
 
 func TestServiceAuthenticateTokenReturnsLookupErrorWithoutMarkingUsed(t *testing.T) {
@@ -63,7 +75,7 @@ func TestServiceAuthenticateTokenReturnsLookupErrorWithoutMarkingUsed(t *testing
 	})
 
 	require.ErrorIs(t, err, auth.ErrNotFound)
-	assert.Equal(t, auth.Token{}, got)
+	assert.Equal(t, auth.Principal{}, got)
 }
 
 func TestServiceAuthenticateTokenReturnsMarkUsedError(t *testing.T) {
@@ -83,7 +95,7 @@ func TestServiceAuthenticateTokenReturnsMarkUsedError(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, auth.ErrNotFound)
-	assert.Equal(t, auth.Token{}, got)
+	assert.Equal(t, auth.Principal{}, got)
 }
 
 func TestServiceCreateTokenDelegatesToStore(t *testing.T) {
@@ -110,14 +122,20 @@ func TestServiceCreateTokenDelegatesToStore(t *testing.T) {
 func TestServiceReturnsUnavailableWhenStoreMissing(t *testing.T) {
 	service := auth.NewService(auth.ServiceConfig{})
 
-	_, err := service.AuthenticateToken(context.Background(), auth.AuthenticateTokenParams{Token: "testtok.secret"})
+	_, err := service.AuthenticateToken(
+		context.Background(),
+		auth.AuthenticateTokenParams{Token: "testtok.secret"},
+	)
 	require.EqualError(t, err, "auth store is not configured")
 
 	_, err = service.CreateToken(context.Background(), auth.CreateTokenParams{})
 	require.EqualError(t, err, "auth store is not configured")
 
 	var nilService *auth.Service
-	_, err = nilService.AuthenticateToken(context.Background(), auth.AuthenticateTokenParams{Token: "testtok.secret"})
+	_, err = nilService.AuthenticateToken(
+		context.Background(),
+		auth.AuthenticateTokenParams{Token: "testtok.secret"},
+	)
 	require.EqualError(t, err, "auth store is not configured")
 }
 
@@ -130,7 +148,10 @@ func TestServicePreservesUnexpectedStoreErrors(t *testing.T) {
 		LookupActiveToken(mock.Anything, mock.Anything).
 		Return(auth.Token{}, wantErr)
 
-	_, err := service.AuthenticateToken(context.Background(), auth.AuthenticateTokenParams{Token: "testtok.secret"})
+	_, err := service.AuthenticateToken(
+		context.Background(),
+		auth.AuthenticateTokenParams{Token: "testtok.secret"},
+	)
 
 	require.ErrorIs(t, err, wantErr)
 }
