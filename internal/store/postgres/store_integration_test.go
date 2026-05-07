@@ -22,13 +22,13 @@ func TestOpenAppliesEmbeddedMigrations(t *testing.T) {
 	version, err := store.SchemaVersion(ctx)
 
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), version)
+	assert.Equal(t, int64(2), version)
 
 	store = openIntegrationStore(t, ctx, databaseURL)
 	version, err = store.SchemaVersion(ctx)
 
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), version)
+	assert.Equal(t, int64(2), version)
 }
 
 func openIntegrationStore(t *testing.T, ctx context.Context, databaseURL string) *Store {

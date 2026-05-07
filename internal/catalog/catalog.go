@@ -128,6 +128,9 @@ const (
 	// ArtifactFormatRaw is a raw disk image artifact.
 	ArtifactFormatRaw ArtifactFormat = "raw"
 
+	// ArtifactFormatRawGZ is a gzip-compressed raw disk image artifact.
+	ArtifactFormatRawGZ ArtifactFormat = "raw.gz"
+
 	// ArtifactFormatQCOW2 is a qcow2 disk image artifact.
 	ArtifactFormatQCOW2 ArtifactFormat = "qcow2"
 )
@@ -516,7 +519,7 @@ func ValidateAlias(alias string) error {
 // ValidateArtifactFormat validates an artifact format.
 func ValidateArtifactFormat(format ArtifactFormat) error {
 	switch format {
-	case ArtifactFormatRaw, ArtifactFormatQCOW2:
+	case ArtifactFormatRaw, ArtifactFormatRawGZ, ArtifactFormatQCOW2:
 		return nil
 	default:
 		return fmt.Errorf("%w: unsupported artifact format %q", ErrInvalid, format)

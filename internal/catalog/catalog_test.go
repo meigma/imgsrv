@@ -91,6 +91,7 @@ func TestNameVersionAndAliasValidation(t *testing.T) {
 
 func TestArtifactValidation(t *testing.T) {
 	require.NoError(t, ValidateArtifactFormat(ArtifactFormatRaw))
+	require.NoError(t, ValidateArtifactFormat(ArtifactFormatRawGZ))
 	require.NoError(t, ValidateArtifactFormat(ArtifactFormatQCOW2))
 
 	err := ValidateArtifactFormat("vmdk")

@@ -276,10 +276,10 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	artifact, err := catalog.AddArtifact(ctx, image.Name, version.Version, AddArtifactRequest{
 		OperatingSystem:      "linux",
 		Architecture:         "x86_64",
-		Format:               ArtifactFormatQCOW2,
+		Format:               ArtifactFormatRawGZ,
 		PrimaryBlobDigest:    testDigest,
 		PrimaryBlobSizeBytes: 12,
-		PrimaryMediaType:     "application/x-qcow2",
+		PrimaryMediaType:     "application/gzip",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, ArtifactID(testArtifactID), artifact.ID)
@@ -368,7 +368,7 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	require.NoError(t, artifactDownload.Body.Close())
 	assert.Equal(t, "artifact-bytes", string(artifactBody))
 	assert.Equal(t, testDigest, artifactDownload.Metadata.Digest)
-	assert.Equal(t, "application/x-qcow2", artifactDownload.Metadata.ContentType)
+	assert.Equal(t, "application/gzip", artifactDownload.Metadata.ContentType)
 
 	downloadRange, err := BlobRangeSpan(1, 3)
 	require.NoError(t, err)
@@ -505,10 +505,10 @@ func registerCatalogArtifactHandlers(t *testing.T, mux *http.ServeMux) {
 				}
 				assert.Equal(t, "linux", got.OperatingSystem)
 				assert.Equal(t, "x86_64", got.Architecture)
-				assert.Equal(t, ArtifactFormatQCOW2, got.Format)
+				assert.Equal(t, ArtifactFormatRawGZ, got.Format)
 				assert.Equal(t, testDigest, got.PrimaryBlobDigest)
 				assert.Equal(t, int64(12), got.PrimaryBlobSizeBytes)
-				assert.Equal(t, "application/x-qcow2", got.PrimaryMediaType)
+				assert.Equal(t, "application/gzip", got.PrimaryMediaType)
 				writeJSON(t, w, http.StatusCreated, artifactFixture())
 			case http.MethodGet:
 				writeJSON(
@@ -536,7 +536,7 @@ func registerCatalogArtifactHandlers(t *testing.T, mux *http.ServeMux) {
 	})
 	mux.HandleFunc(artifactPath+"/download", func(w http.ResponseWriter, r *http.Request) {
 		assertBlobDownloadRequest(t, r, "")
-		writeDownload(t, w, http.StatusOK, "application/x-qcow2", "14", "", "artifact-bytes")
+		writeDownload(t, w, http.StatusOK, "application/gzip", "14", "", "artifact-bytes")
 	})
 	mux.HandleFunc(artifactPath+"/attachments", func(w http.ResponseWriter, r *http.Request) {
 		assertRequestBasics(t, r, http.MethodPost)
@@ -887,10 +887,10 @@ func artifactFixture() Artifact {
 		VersionID:            testVersionID,
 		OperatingSystem:      "linux",
 		Architecture:         "x86_64",
-		Format:               ArtifactFormatQCOW2,
+		Format:               ArtifactFormatRawGZ,
 		PrimaryBlobDigest:    testDigest,
 		PrimaryBlobSizeBytes: 12,
-		PrimaryMediaType:     "application/x-qcow2",
+		PrimaryMediaType:     "application/gzip",
 		CreatedAt:            "2026-05-05T12:00:00Z",
 		UpdatedAt:            "2026-05-05T12:00:00Z",
 	}

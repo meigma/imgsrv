@@ -1123,6 +1123,7 @@ components:
       type: string
       enum:
         - raw
+        - raw.gz
         - qcow2
     BeginUploadRequest:
       type: object
