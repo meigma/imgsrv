@@ -253,10 +253,20 @@ $$;
 -- +goose StatementEnd
 
 -- +goose StatementBegin
-CREATE FUNCTION image_versions_guard_update() RETURNS trigger
+CREATE FUNCTION image_versions_guard_write() RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.state IS DISTINCT FROM 'draft'
+            OR NEW.published_at IS NOT NULL
+        THEN
+            RAISE EXCEPTION 'image_versions must be inserted as drafts' USING ERRCODE = '23514';
+        END IF;
+
+        RETURN NEW;
+    END IF;
+
     IF OLD.id IS DISTINCT FROM NEW.id
         OR OLD.image_id IS DISTINCT FROM NEW.image_id
         OR OLD.version IS DISTINCT FROM NEW.version
@@ -326,10 +336,10 @@ END;
 $$;
 -- +goose StatementEnd
 
-CREATE TRIGGER image_versions_guard_update
-BEFORE UPDATE ON image_versions
+CREATE TRIGGER image_versions_guard_write
+BEFORE INSERT OR UPDATE ON image_versions
 FOR EACH ROW
-EXECUTE FUNCTION image_versions_guard_update();
+EXECUTE FUNCTION image_versions_guard_write();
 
 -- +goose StatementBegin
 CREATE FUNCTION release_artifacts_require_draft() RETURNS trigger
@@ -450,7 +460,7 @@ DROP TABLE api_tokens;
 DROP FUNCTION aliases_guard_write();
 DROP FUNCTION artifact_attachments_require_draft();
 DROP FUNCTION release_artifacts_require_draft();
-DROP FUNCTION image_versions_guard_update();
+DROP FUNCTION image_versions_guard_write();
 DROP FUNCTION imgsrv_require_version_draft(UUID);
 DROP FUNCTION imgsrv_reject_change();
 
