@@ -118,8 +118,8 @@ github.com/mattn/go-isatty v0.0.21 h1:xYae+lCNBP7QuW4PUnNG61ffM4hVIfm+zUzDuSzYLG
 github.com/mattn/go-isatty v0.0.21/go.mod h1:ZXfXG4SQHsB/w3ZeOYbR0PrPwLy+n6xiMrJlRFqopa4=
 github.com/mdelapenya/tlscert v0.2.0 h1:7H81W6Z/4weDvZBNOfQte5GpIMo0lGYEeWbkGp5LJHI=
 github.com/mdelapenya/tlscert v0.2.0/go.mod h1:O4njj3ELLnJjGdkN7M/vIVCpZ+Cf0L6muqOG4tLSl8o=
-github.com/meigma/authkit v0.1.1-0.20260510195840-46b0ec3b4a5f h1:SdUvV9rXUQIplpVbGXBItD8TgZxJ5737UnponrHND+E=
-github.com/meigma/authkit v0.1.1-0.20260510195840-46b0ec3b4a5f/go.mod h1:1BYKxIGBuofA5fnjUipx4VexecXykoclytwB7ODouFY=
+github.com/meigma/authkit v0.1.1-0.20260510200924-7fc18bce2913 h1:ffWAxB4k/VhHgosjWa8AWlYdXxzrp+oBwz2AmlNZfRg=
+github.com/meigma/authkit v0.1.1-0.20260510200924-7fc18bce2913/go.mod h1:1BYKxIGBuofA5fnjUipx4VexecXykoclytwB7ODouFY=
 github.com/mfridman/interpolate v0.0.2 h1:pnuTK7MQIxxFz1Gr+rjSIx9u7qVjf5VOoM/u6BbAxPY=
 github.com/mfridman/interpolate v0.0.2/go.mod h1:p+7uk6oE07mpE/Ik1b8EckO0O4ZXiGAfshKBWLUM9Xg=
 github.com/minio/crc64nvme v1.1.1 h1:8dwx/Pz49suywbO+auHCBpCtlW1OfpcLN7wYgVR6wAI=

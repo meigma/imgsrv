@@ -8,7 +8,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2
-	github.com/meigma/authkit v0.1.1-0.20260510195840-46b0ec3b4a5f
+	github.com/meigma/authkit v0.1.1-0.20260510200924-7fc18bce2913
 	github.com/minio/minio-go/v7 v7.1.0
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/prometheus/client_golang v1.23.2
