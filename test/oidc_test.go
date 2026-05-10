@@ -21,7 +21,7 @@ func TestOIDCBearerTokenCanUseWriteFlow(t *testing.T) {
 	token := issuer.SignToken(t, nil)
 	env := imgsrvtest.Start(
 		t,
-		imgsrvtest.WithOIDC(issuer.URL(), "imgsrv-api", "imgsrv.write"),
+		imgsrvtest.WithOIDC(issuer.URL(), "imgsrv-api", "imgsrv.write", issuer.HTTPClient()),
 		imgsrvtest.WithBearerToken(token),
 	)
 

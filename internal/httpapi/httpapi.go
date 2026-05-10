@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/meigma/imgsrv/internal/auth"
+	"github.com/meigma/authkit/httpauth"
+
+	"github.com/meigma/imgsrv/internal/authz"
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
 	"github.com/meigma/imgsrv/internal/objectstore"
@@ -30,7 +32,7 @@ type Dependencies struct {
 	Readiness ReadinessChecker
 
 	// Auth coordinates bearer authentication and action authorization. Nil leaves protected routes unavailable.
-	Auth AuthService
+	Auth *httpauth.Middleware
 
 	// Uploads coordinates client-facing upload operations. Nil leaves upload routes unavailable.
 	Uploads UploadService
@@ -60,12 +62,6 @@ type ReadinessFunc func(context.Context) error
 // CheckReady calls f(ctx).
 func (f ReadinessFunc) CheckReady(ctx context.Context) error {
 	return f(ctx)
-}
-
-// AuthService coordinates bearer authentication for HTTP callers.
-type AuthService interface {
-	// AuthenticateToken validates a raw bearer token, records successful use, and returns a principal.
-	AuthenticateToken(context.Context, auth.AuthenticateTokenParams) (auth.Principal, error)
 }
 
 // UploadService coordinates upload operations for HTTP callers.
@@ -168,7 +164,7 @@ type BlobService interface {
 type api struct {
 	logger    *slog.Logger
 	readiness ReadinessChecker
-	auth      AuthService
+	auth      *httpauth.Middleware
 	uploads   UploadService
 	catalog   CatalogService
 	blobs     BlobService
@@ -218,27 +214,27 @@ func New(deps Dependencies) http.Handler {
 func (a *api) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.HandleFunc("GET /readyz", a.readyz)
-	mux.HandleFunc("POST /v1/uploads", a.requireAction(auth.ActionContentWrite, a.beginUpload))
+	mux.HandleFunc("POST /v1/uploads", a.requireAction(authz.ActionContentWrite, a.beginUpload))
 	mux.HandleFunc("GET /v1/uploads/{upload_id}", a.getUpload)
 	mux.HandleFunc(
 		"PUT /v1/uploads/{upload_id}/parts/{part_number}",
-		a.requireAction(auth.ActionContentWrite, a.putUploadPart),
+		a.requireAction(authz.ActionContentWrite, a.putUploadPart),
 	)
 	mux.HandleFunc(
 		"POST /v1/uploads/{upload_id}/complete",
-		a.requireAction(auth.ActionContentWrite, a.completeUpload),
+		a.requireAction(authz.ActionContentWrite, a.completeUpload),
 	)
 	mux.HandleFunc(
 		"POST /v1/uploads/{upload_id}/abort",
-		a.requireAction(auth.ActionContentWrite, a.abortUpload),
+		a.requireAction(authz.ActionContentWrite, a.abortUpload),
 	)
 	mux.HandleFunc("GET /v1/blobs/{digest}", a.getBlob)
-	mux.HandleFunc("POST /v1/images", a.requireAction(auth.ActionContentWrite, a.createImage))
+	mux.HandleFunc("POST /v1/images", a.requireAction(authz.ActionContentWrite, a.createImage))
 	mux.HandleFunc("GET /v1/images", a.listImages)
 	mux.HandleFunc("GET /v1/images/{name}", a.getImage)
 	mux.HandleFunc(
 		"POST /v1/images/{name}/versions",
-		a.requireAction(auth.ActionContentWrite, a.createDraftVersion),
+		a.requireAction(authz.ActionContentWrite, a.createDraftVersion),
 	)
 	mux.HandleFunc("GET /v1/images/{name}/versions", a.listVersions)
 	mux.HandleFunc("GET /v1/images/{name}/versions/{version}", a.getVersionManifest)
@@ -253,19 +249,19 @@ func (a *api) registerRoutes(mux *http.ServeMux) {
 	)
 	mux.HandleFunc(
 		"POST /v1/images/{name}/versions/{version}/artifacts",
-		a.requireAction(auth.ActionContentWrite, a.addArtifact),
+		a.requireAction(authz.ActionContentWrite, a.addArtifact),
 	)
 	mux.HandleFunc(
 		"DELETE /v1/images/{name}/versions/{version}/artifacts/{artifact_id}",
-		a.requireAction(auth.ActionContentWrite, a.deleteArtifact),
+		a.requireAction(authz.ActionContentWrite, a.deleteArtifact),
 	)
 	mux.HandleFunc(
 		"POST /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments",
-		a.requireAction(auth.ActionContentWrite, a.addAttachment),
+		a.requireAction(authz.ActionContentWrite, a.addAttachment),
 	)
 	mux.HandleFunc(
 		"DELETE /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments/{attachment_id}",
-		a.requireAction(auth.ActionContentWrite, a.deleteAttachment),
+		a.requireAction(authz.ActionContentWrite, a.deleteAttachment),
 	)
 	mux.HandleFunc(
 		"GET /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments/{attachment_id}/download",
@@ -273,17 +269,17 @@ func (a *api) registerRoutes(mux *http.ServeMux) {
 	)
 	mux.HandleFunc(
 		"POST /v1/images/{name}/versions/{version}/publish",
-		a.requireAction(auth.ActionContentWrite, a.publishVersion),
+		a.requireAction(authz.ActionContentWrite, a.publishVersion),
 	)
 	mux.HandleFunc(
 		"PUT /v1/images/{name}/aliases/{alias}",
-		a.requireAction(auth.ActionContentWrite, a.putAlias),
+		a.requireAction(authz.ActionContentWrite, a.putAlias),
 	)
 	mux.HandleFunc("GET /v1/images/{name}/aliases", a.listAliases)
 	mux.HandleFunc("GET /v1/images/{name}/aliases/{alias}", a.getAlias)
 	mux.HandleFunc(
 		"DELETE /v1/images/{name}/aliases/{alias}",
-		a.requireAction(auth.ActionContentWrite, a.deleteAlias),
+		a.requireAction(authz.ActionContentWrite, a.deleteAlias),
 	)
 	mux.HandleFunc("GET /v1/images/{name}/refs/{ref}", a.resolveManifest)
 }

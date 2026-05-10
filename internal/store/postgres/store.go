@@ -12,10 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
-	"github.com/meigma/imgsrv/internal/auth"
+	authkitpostgres "github.com/meigma/authkit/store/postgres"
+
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
-	postgresauth "github.com/meigma/imgsrv/internal/store/postgres/auth"
 	postgrescatalog "github.com/meigma/imgsrv/internal/store/postgres/catalog"
 	postgresuploads "github.com/meigma/imgsrv/internal/store/postgres/uploads"
 	"github.com/meigma/imgsrv/internal/uploads"
@@ -45,8 +45,8 @@ type Config struct {
 
 // Store owns the Postgres database connection.
 type Store struct {
-	// auth is the API-token auth adapter backed by the shared pool.
-	auth auth.Store
+	// authkit is the authkit adapter backed by the shared pool.
+	authkit *authkitpostgres.Store
 	// cas is the CAS blob and ingest-job adapter backed by the shared pool.
 	cas cas.Store
 	// pool is the underlying pgx connection pool shared by all adapters.
@@ -63,32 +63,40 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 		return nil, errors.New("postgres url is required")
 	}
 
-	pool, err := pgxpool.New(ctx, config.URL)
-	if err != nil {
-		return nil, fmt.Errorf("open postgres database: %w", err)
+	pool, openErr := pgxpool.New(ctx, config.URL)
+	if openErr != nil {
+		return nil, fmt.Errorf("open postgres database: %w", openErr)
 	}
 
-	if err := pool.Ping(ctx); err != nil {
-		return nil, closePoolAfterError(pool, fmt.Errorf("ping postgres database: %w", err))
+	if pingErr := pool.Ping(ctx); pingErr != nil {
+		return nil, closePoolAfterError(pool, fmt.Errorf("ping postgres database: %w", pingErr))
 	}
 
 	migrationDB := stdlib.OpenDBFromPool(pool)
-	if err := ApplyMigrations(ctx, migrationDB); err != nil {
+	if migrateErr := ApplyMigrations(ctx, migrationDB); migrateErr != nil {
 		return nil, closeMigrationAfterError(
 			pool,
 			migrationDB,
-			fmt.Errorf("apply database migrations: %w", err),
+			fmt.Errorf("apply database migrations: %w", migrateErr),
 		)
 	}
 
-	if err := migrationDB.Close(); err != nil {
-		return nil, closePoolAfterError(pool, fmt.Errorf("close migration database: %w", err))
+	if closeErr := migrationDB.Close(); closeErr != nil {
+		return nil, closePoolAfterError(pool, fmt.Errorf("close migration database: %w", closeErr))
+	}
+
+	if migrateErr := authkitpostgres.Migrate(ctx, pool); migrateErr != nil {
+		return nil, closePoolAfterError(pool, fmt.Errorf("apply authkit database migrations: %w", migrateErr))
+	}
+	authkitStore, authkitErr := authkitpostgres.NewStore(pool)
+	if authkitErr != nil {
+		return nil, closePoolAfterError(pool, fmt.Errorf("create authkit store: %w", authkitErr))
 	}
 
 	uploadStore := postgresuploads.New(pool)
 
 	return &Store{
-		auth:    postgresauth.New(pool),
+		authkit: authkitStore,
 		cas:     uploadStore,
 		pool:    pool,
 		catalog: postgrescatalog.New(pool),
@@ -124,7 +132,7 @@ func (store *Store) Close() error {
 
 	store.pool.Close()
 	store.pool = nil
-	store.auth = nil
+	store.authkit = nil
 	store.cas = nil
 	store.catalog = nil
 	store.uploads = nil
@@ -132,13 +140,13 @@ func (store *Store) Close() error {
 	return nil
 }
 
-// Auth returns the API-token auth adapter.
-func (store *Store) Auth() auth.Store {
+// Authkit returns the authkit Postgres adapter.
+func (store *Store) Authkit() *authkitpostgres.Store {
 	if store == nil {
 		return nil
 	}
 
-	return store.auth
+	return store.authkit
 }
 
 // Catalog returns the image catalog adapter.

@@ -26,8 +26,6 @@ import (
 	"github.com/meigma/imgsrv/internal/uploads"
 )
 
-const integrationAPIToken = "testtok.integration-secret"
-
 func TestUploadFlowStagesCompletedObject(t *testing.T) {
 	env := startIntegrationEnv(t)
 	ctx := t.Context()
@@ -143,7 +141,7 @@ func TestUploadFlowSkipsTrustedDigestAndLeavesNoQueuedJob(t *testing.T) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, env.URL("/v1/uploads"), body)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+integrationAPIToken)
+	req.Header.Set("Authorization", "Bearer "+env.APIToken())
 
 	resp, err := env.HTTPClient().Do(req)
 	require.NoError(t, err)
@@ -277,7 +275,7 @@ func newClient(t *testing.T, env *harness.Env) *imgsrv.Client {
 
 	client, err := imgsrv.New(imgsrv.Options{
 		BaseURL:     env.BaseURL(),
-		BearerToken: integrationAPIToken,
+		BearerToken: env.APIToken(),
 		HTTPClient:  env.HTTPClient(),
 		UserAgent:   "imgsrv-integration-test",
 	})
@@ -289,7 +287,7 @@ func newClient(t *testing.T, env *harness.Env) *imgsrv.Client {
 func startIntegrationEnv(t testing.TB) *harness.Env {
 	t.Helper()
 
-	return harness.Start(t, harness.WithAPIToken(integrationAPIToken))
+	return harness.Start(t, harness.WithAPIToken())
 }
 
 func readObject(ctx context.Context, t *testing.T, env *harness.Env, key string) stagedObject {

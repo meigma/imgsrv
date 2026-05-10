@@ -28,18 +28,26 @@ func WithCASPromotion() Option {
 	}
 }
 
-// WithAPIToken seeds rawToken and configures Env.Client to send it as a bearer token.
-func WithAPIToken(rawToken string) Option {
+// WithAPIToken seeds a generated API token and configures Env.Client to send it as a bearer token.
+func WithAPIToken() Option {
 	return func(options *options) {
-		options.harness = append(options.harness, harness.WithAPIToken(rawToken))
-		options.bearerToken = rawToken
+		options.harness = append(options.harness, harness.WithAPIToken())
+		options.useSeededAPIToken = true
 	}
 }
 
 // WithOIDC configures generic OIDC JWT bearer authentication for the test server.
-func WithOIDC(issuerURL string, audience string, requiredScope string) Option {
+func WithOIDC(
+	issuerURL string,
+	audience string,
+	requiredScope string,
+	httpClients ...*http.Client,
+) Option {
 	return func(options *options) {
-		options.harness = append(options.harness, harness.WithOIDC(issuerURL, audience, requiredScope))
+		options.harness = append(
+			options.harness,
+			harness.WithOIDC(issuerURL, audience, requiredScope, httpClients...),
+		)
 	}
 }
 
@@ -65,10 +73,15 @@ func Start(t testing.TB, opts ...Option) *Env {
 	t.Helper()
 
 	startupOptions := newOptions(opts...)
+	harnessEnv := harness.Start(t, startupOptions.harness...)
+	bearerToken := startupOptions.bearerToken
+	if startupOptions.useSeededAPIToken {
+		bearerToken = harnessEnv.APIToken()
+	}
 
 	return &Env{
-		harness:     harness.Start(t, startupOptions.harness...),
-		bearerToken: startupOptions.bearerToken,
+		harness:     harnessEnv,
+		bearerToken: bearerToken,
 	}
 }
 
@@ -111,8 +124,9 @@ func (env *Env) Client(t testing.TB) *imgsrv.Client {
 // options holds the resolved startup configuration produced by applying the
 // caller-provided Option values.
 type options struct {
-	harness     []harness.Option
-	bearerToken string
+	harness           []harness.Option
+	bearerToken       string
+	useSeededAPIToken bool
 }
 
 // newOptions applies opts and returns the resolved startup configuration.

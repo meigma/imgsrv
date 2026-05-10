@@ -32,6 +32,7 @@ func TestGitHubActionsOIDCWriteFlow(t *testing.T) {
 		githubRepositoryID,
 		githubWorkflowRef,
 		githubOIDCSubject,
+		issuer.HTTPClient(),
 	))
 	ctx := t.Context()
 	trustedClient := newBearerClient(t, env, issuer.SignToken(t, githubActionsClaims(nil)))

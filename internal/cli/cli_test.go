@@ -50,6 +50,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"IMGSRV_OIDC_ISSUER_URL":                        "https://issuer.env",
 				"IMGSRV_OIDC_AUDIENCE":                          "imgsrv-env",
 				"IMGSRV_OIDC_REQUIRED_SCOPE":                    "imgsrv.write.env",
+				"IMGSRV_GITHUB_OIDC_ISSUER_URL":                 "https://github-issuer.env",
 				"IMGSRV_GITHUB_OIDC_AUDIENCE":                   "imgsrv-github-env",
 				"IMGSRV_GITHUB_OIDC_REPOSITORY_ID":              "123456789",
 				"IMGSRV_GITHUB_OIDC_WORKFLOW_REF":               "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main",
@@ -82,6 +83,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				OIDCIssuerURL:                      "https://issuer.env",
 				OIDCAudience:                       "imgsrv-env",
 				OIDCRequiredScope:                  "imgsrv.write.env",
+				GitHubOIDCIssuerURL:                "https://github-issuer.env",
 				GitHubOIDCAudience:                 "imgsrv-github-env",
 				GitHubOIDCRepositoryID:             "123456789",
 				GitHubOIDCWorkflowRef:              "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main",
@@ -117,6 +119,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"IMGSRV_OIDC_ISSUER_URL":                        "https://issuer.env",
 				"IMGSRV_OIDC_AUDIENCE":                          "imgsrv-env",
 				"IMGSRV_OIDC_REQUIRED_SCOPE":                    "imgsrv.write.env",
+				"IMGSRV_GITHUB_OIDC_ISSUER_URL":                 "https://github-issuer.env",
 				"IMGSRV_GITHUB_OIDC_AUDIENCE":                   "imgsrv-github-env",
 				"IMGSRV_GITHUB_OIDC_REPOSITORY_ID":              "123456789",
 				"IMGSRV_GITHUB_OIDC_WORKFLOW_REF":               "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main",
@@ -149,6 +152,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"--oidc-issuer-url=https://issuer.flag",
 				"--oidc-audience=imgsrv-flag",
 				"--oidc-required-scope=imgsrv.write.flag",
+				"--github-oidc-issuer-url=https://github-issuer.flag",
 				"--github-oidc-audience=imgsrv-github-flag",
 				"--github-oidc-repository-id=987654321",
 				"--github-oidc-workflow-ref=meigma/imgsrv/.github/workflows/release.yml@refs/heads/main",
@@ -181,6 +185,7 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				OIDCIssuerURL:                      "https://issuer.flag",
 				OIDCAudience:                       "imgsrv-flag",
 				OIDCRequiredScope:                  "imgsrv.write.flag",
+				GitHubOIDCIssuerURL:                "https://github-issuer.flag",
 				GitHubOIDCAudience:                 "imgsrv-github-flag",
 				GitHubOIDCRepositoryID:             "987654321",
 				GitHubOIDCWorkflowRef:              "meigma/imgsrv/.github/workflows/release.yml@refs/heads/main",
@@ -283,6 +288,7 @@ func TestExecuteContextPrintsHelpWithoutStartingServer(t *testing.T) {
 	assert.Contains(t, stdout.String(), "--oidc-issuer-url")
 	assert.Contains(t, stdout.String(), "--oidc-audience")
 	assert.Contains(t, stdout.String(), "--oidc-required-scope")
+	assert.Contains(t, stdout.String(), "--github-oidc-issuer-url")
 	assert.Contains(t, stdout.String(), "--github-oidc-audience")
 	assert.Contains(t, stdout.String(), "--github-oidc-repository-id")
 	assert.Contains(t, stdout.String(), "--github-oidc-workflow-ref")
@@ -332,6 +338,7 @@ func unsetConfigEnv(t *testing.T) {
 		"IMGSRV_OIDC_ISSUER_URL",
 		"IMGSRV_OIDC_AUDIENCE",
 		"IMGSRV_OIDC_REQUIRED_SCOPE",
+		"IMGSRV_GITHUB_OIDC_ISSUER_URL",
 		"IMGSRV_GITHUB_OIDC_AUDIENCE",
 		"IMGSRV_GITHUB_OIDC_REPOSITORY_ID",
 		"IMGSRV_GITHUB_OIDC_WORKFLOW_REF",
