@@ -11,12 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/meigma/authkit/httpauth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/meigma/imgsrv/internal/app"
-	"github.com/meigma/imgsrv/internal/auth"
+	"github.com/meigma/imgsrv/internal/authz"
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
+	"github.com/meigma/imgsrv/internal/httpapi"
 	"github.com/meigma/imgsrv/internal/jobs"
 	"github.com/meigma/imgsrv/internal/jobs/promote"
 	"github.com/meigma/imgsrv/internal/objectstore"
@@ -120,42 +122,29 @@ func newAuthService(
 	t testing.TB,
 	options options,
 	store *postgres.Store,
-) *auth.Service {
+) *httpauth.Middleware {
 	t.Helper()
 
-	var authenticators []auth.Authenticator
-	if options.githubOIDCIssuerURL != "" ||
-		options.githubOIDCAudience != "" ||
-		options.githubOIDCRepositoryID != "" ||
-		options.githubOIDCWorkflowRef != "" ||
-		options.githubOIDCSubject != "" {
-		githubAuthenticator, err := auth.NewGitHubActionsOIDCAuthenticator(
-			ctx,
-			auth.GitHubActionsOIDCConfig{
-				IssuerURL:    options.githubOIDCIssuerURL,
-				Audience:     options.githubOIDCAudience,
-				RepositoryID: options.githubOIDCRepositoryID,
-				WorkflowRef:  options.githubOIDCWorkflowRef,
-				Subject:      options.githubOIDCSubject,
-			},
-		)
-		require.NoError(t, err)
-		authenticators = append(authenticators, githubAuthenticator)
-	}
-	if options.oidcIssuerURL != "" || options.oidcAudience != "" || options.oidcRequiredScope != "" {
-		oidcAuthenticator, err := auth.NewOIDCAuthenticator(ctx, auth.OIDCConfig{
+	authMiddleware, err := authz.NewMiddleware(ctx, authz.Config{
+		Store: store.Authkit(),
+		OIDC: authz.OIDCConfig{
 			IssuerURL:     options.oidcIssuerURL,
 			Audience:      options.oidcAudience,
 			RequiredScope: options.oidcRequiredScope,
-		})
-		require.NoError(t, err)
-		authenticators = append(authenticators, oidcAuthenticator)
-	}
-
-	return auth.NewService(auth.ServiceConfig{
-		Store:          store.Auth(),
-		Authenticators: authenticators,
+		},
+		GitHubOIDC: authz.GitHubOIDCConfig{
+			IssuerURL:    options.githubOIDCIssuerURL,
+			Audience:     options.githubOIDCAudience,
+			RepositoryID: options.githubOIDCRepositoryID,
+			WorkflowRef:  options.githubOIDCWorkflowRef,
+			Subject:      options.githubOIDCSubject,
+		},
+		HTTPClient:    options.oidcHTTPClient,
+		ErrorRenderer: httpapi.WriteAuthError,
 	})
+	require.NoError(t, err)
+
+	return authMiddleware
 }
 
 // waitForServer polls the server health endpoint until it returns 204, the

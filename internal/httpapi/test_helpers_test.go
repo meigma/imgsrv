@@ -1,16 +1,18 @@
 package httpapi
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/mock"
-
-	"github.com/meigma/imgsrv/internal/auth"
-	httpmocks "github.com/meigma/imgsrv/internal/httpapi/mocks"
+	"github.com/meigma/authkit"
+	"github.com/meigma/authkit/httpauth"
+	"github.com/stretchr/testify/require"
 )
 
 const testBearerToken = "testtok.secret"
@@ -31,22 +33,82 @@ func authorizeWriteRequest(req *http.Request) {
 	}
 }
 
-// newAcceptingAuthService returns an auth mock that accepts the shared test bearer token.
-func newAcceptingAuthService(t testing.TB) *httpmocks.MockAuthService {
+// newAcceptingAuthService returns auth middleware that accepts the shared test bearer token.
+func newAcceptingAuthService(t testing.TB) *httpauth.Middleware {
 	t.Helper()
 
-	authService := httpmocks.NewMockAuthService(t)
-	authService.EXPECT().
-		AuthenticateToken(mock.Anything, auth.AuthenticateTokenParams{Token: testBearerToken}).
-		Return(auth.Principal{
-			Kind: auth.PrincipalKindAPIToken,
-			ID:   uuid.MustParse("11111111-2222-3333-4444-555555555555").String(),
-			Actions: []auth.Action{
-				auth.ActionContentWrite,
-				auth.ActionAuthManage,
-			},
-		}, nil).
-		Maybe()
+	return newTestAuthMiddleware(t, true)
+}
 
-	return authService
+func newDenyingAuthService(t testing.TB) *httpauth.Middleware {
+	t.Helper()
+
+	return newTestAuthMiddleware(t, false)
+}
+
+func newTestAuthMiddleware(t testing.TB, allowed bool) *httpauth.Middleware {
+	t.Helper()
+
+	pipeline, err := authkit.NewPipeline(authkit.PipelineOptions{
+		Authenticators: []authkit.Authenticator{testAuthenticator{}},
+		Resolver:       testResolver{},
+		Authorizer:     testAuthorizer{allowed: allowed},
+	})
+	require.NoError(t, err)
+	middleware, err := httpauth.NewMiddleware(pipeline, httpauth.WithErrorRenderer(WriteAuthError))
+	require.NoError(t, err)
+
+	return middleware
+}
+
+type testAuthenticator struct{}
+
+func (testAuthenticator) Name() string {
+	return "test"
+}
+
+func (testAuthenticator) Authenticate(_ context.Context, req *http.Request) (*authkit.Identity, error) {
+	fields := strings.Fields(req.Header.Get("Authorization"))
+	if len(fields) != 2 || !strings.EqualFold(fields[0], bearerAuthScheme) || fields[1] != testBearerToken {
+		return nil, authkit.ErrUnauthenticated
+	}
+
+	return &authkit.Identity{
+		Provider: "test",
+		Subject:  "subject-1",
+	}, nil
+}
+
+type testResolver struct{}
+
+func (testResolver) ResolveIdentity(
+	_ context.Context,
+	identity authkit.Identity,
+) (*authkit.Principal, error) {
+	if identity.Provider == "" || identity.Subject == "" {
+		return nil, authkit.ErrUnresolvedIdentity
+	}
+
+	return &authkit.Principal{
+		ID:   uuid.MustParse("11111111-2222-3333-4444-555555555555").String(),
+		Kind: authkit.PrincipalKindService,
+	}, nil
+}
+
+type testAuthorizer struct {
+	allowed bool
+}
+
+func (a testAuthorizer) Can(_ context.Context, check authkit.AuthorizationCheck) (authkit.Decision, error) {
+	if check.Action == "" {
+		return authkit.Decision{}, errors.New("action is required")
+	}
+	if !a.allowed {
+		return authkit.Decision{
+			Allowed: false,
+			Reason:  "principal is not authorized for action " + check.Action,
+		}, nil
+	}
+
+	return authkit.Decision{Allowed: true}, nil
 }

@@ -1,17 +1,19 @@
 package httpapi
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
+	"github.com/meigma/authkit"
+	"github.com/meigma/authkit/httpauth"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/meigma/imgsrv/internal/auth"
+	"github.com/meigma/imgsrv/internal/authz"
 	httpmocks "github.com/meigma/imgsrv/internal/httpapi/mocks"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
@@ -41,10 +43,9 @@ func TestRequireActionRejectsMissingAndMalformedBearerTokens(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false
-			authService := httpmocks.NewMockAuthService(t)
-			api := &api{auth: authService}
+			api := &api{auth: newAcceptingAuthService(t)}
 			handler := api.requireAction(
-				auth.ActionContentWrite,
+				authz.ActionContentWrite,
 				func(w http.ResponseWriter, _ *http.Request) {
 					called = true
 					w.WriteHeader(http.StatusNoContent)
@@ -66,21 +67,17 @@ func TestRequireActionRejectsMissingAndMalformedBearerTokens(t *testing.T) {
 }
 
 func TestRequireActionRejectsUnknownTokenBeforeCallingNext(t *testing.T) {
-	authService := httpmocks.NewMockAuthService(t)
-	authService.EXPECT().
-		AuthenticateToken(mock.Anything, auth.AuthenticateTokenParams{Token: testBearerToken}).
-		Return(auth.Principal{}, auth.ErrNotFound)
-
 	called := false
-	api := &api{auth: authService}
+	api := &api{auth: newAcceptingAuthService(t)}
 	handler := api.requireAction(
-		auth.ActionContentWrite,
+		authz.ActionContentWrite,
 		func(w http.ResponseWriter, _ *http.Request) {
 			called = true
 			w.WriteHeader(http.StatusNoContent)
 		},
 	)
-	req := newHTTPAPIRequest(http.MethodPost, "/v1/uploads", nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/uploads", nil)
+	req.Header.Set("Authorization", "Bearer unknown")
 	rec := httptest.NewRecorder()
 
 	handler(rec, req)
@@ -91,18 +88,10 @@ func TestRequireActionRejectsUnknownTokenBeforeCallingNext(t *testing.T) {
 }
 
 func TestRequireActionRejectsPrincipalMissingAction(t *testing.T) {
-	authService := httpmocks.NewMockAuthService(t)
-	authService.EXPECT().
-		AuthenticateToken(mock.Anything, auth.AuthenticateTokenParams{Token: testBearerToken}).
-		Return(auth.Principal{
-			Kind: auth.PrincipalKindAPIToken,
-			ID:   uuid.NewString(),
-		}, nil)
-
 	called := false
-	api := &api{auth: authService}
+	api := &api{auth: newDenyingAuthService(t)}
 	handler := api.requireAction(
-		auth.ActionContentWrite,
+		authz.ActionContentWrite,
 		func(w http.ResponseWriter, _ *http.Request) {
 			called = true
 			w.WriteHeader(http.StatusNoContent)
@@ -125,27 +114,15 @@ func TestRequireActionRejectsPrincipalMissingAction(t *testing.T) {
 }
 
 func TestRequireActionCallsNextForPrincipalWithAction(t *testing.T) {
-	principal := auth.Principal{
-		Kind: auth.PrincipalKindAPIToken,
-		ID:   uuid.NewString(),
-		Actions: []auth.Action{
-			auth.ActionContentWrite,
-		},
-	}
-	authService := httpmocks.NewMockAuthService(t)
-	authService.EXPECT().
-		AuthenticateToken(mock.Anything, auth.AuthenticateTokenParams{Token: testBearerToken}).
-		Return(principal, nil)
-
 	called := false
-	api := &api{auth: authService}
+	api := &api{auth: newAcceptingAuthService(t)}
 	handler := api.requireAction(
-		auth.ActionContentWrite,
+		authz.ActionContentWrite,
 		func(w http.ResponseWriter, r *http.Request) {
 			called = true
-			got, ok := auth.PrincipalFromContext(r.Context())
+			got, ok := httpauth.PrincipalFromContext(r.Context())
 			assert.True(t, ok)
-			assert.Equal(t, principal, got)
+			assert.NotEmpty(t, got.ID)
 			w.WriteHeader(http.StatusNoContent)
 		},
 	)
@@ -156,6 +133,49 @@ func TestRequireActionCallsNextForPrincipalWithAction(t *testing.T) {
 
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	assert.True(t, called)
+}
+
+func TestWriteAuthErrorMapsAuthkitErrorsToProblemResponses(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		header string
+		detail string
+	}{
+		{
+			name:   "unauthenticated",
+			err:    authkit.ErrUnauthenticated,
+			status: http.StatusUnauthorized,
+			header: bearerAuthScheme,
+			detail: "invalid bearer token",
+		},
+		{
+			name:   "unresolved",
+			err:    authkit.ErrUnresolvedIdentity,
+			status: http.StatusUnauthorized,
+			header: bearerAuthScheme,
+			detail: "invalid bearer token",
+		},
+		{
+			name:   "unauthorized",
+			err:    fmt.Errorf("%w: principal is not authorized for action content.write", authkit.ErrUnauthorized),
+			status: http.StatusForbidden,
+			detail: "principal is not authorized for action content.write",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+
+			WriteAuthError(rec, httptest.NewRequest(http.MethodPost, "/v1/uploads", nil), tt.err)
+
+			require.Equal(t, tt.status, rec.Code)
+			assert.Equal(t, tt.header, rec.Header().Get("WWW-Authenticate"))
+			assertProblem(t, rec, tt.status, tt.detail)
+		})
+	}
 }
 
 func TestAnonymousReadRouteDoesNotRequireAuthDependency(t *testing.T) {

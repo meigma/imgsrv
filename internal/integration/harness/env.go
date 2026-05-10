@@ -12,10 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/meigma/authkit"
+	"github.com/meigma/authkit/apikey"
 	"github.com/stretchr/testify/require"
 
-	"github.com/meigma/imgsrv/internal/auth"
+	"github.com/meigma/imgsrv/internal/authz"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/objectstore/s3"
 	"github.com/meigma/imgsrv/internal/store/postgres"
@@ -24,6 +25,8 @@ import (
 const (
 	// defaultHTTPClientTimeout bounds requests issued by the harness HTTP client.
 	defaultHTTPClientTimeout = 10 * time.Second
+
+	integrationWriterRoleID = "integration-content-writer"
 )
 
 // Option customizes integration environment startup.
@@ -46,19 +49,25 @@ func WithCASPromotion() Option {
 	}
 }
 
-// WithAPIToken seeds rawToken as an active API token for write-route authentication.
-func WithAPIToken(rawToken string) Option {
+// WithAPIToken seeds a generated API token for write-route authentication.
+func WithAPIToken() Option {
 	return func(options *options) {
-		options.apiToken = rawToken
+		options.apiToken = true
 	}
 }
 
 // WithOIDC configures generic OIDC JWT bearer authentication for the test server.
-func WithOIDC(issuerURL string, audience string, requiredScope string) Option {
+func WithOIDC(
+	issuerURL string,
+	audience string,
+	requiredScope string,
+	httpClients ...*http.Client,
+) Option {
 	return func(options *options) {
 		options.oidcIssuerURL = issuerURL
 		options.oidcAudience = audience
 		options.oidcRequiredScope = requiredScope
+		options.useOIDCHTTPClient(httpClients...)
 	}
 }
 
@@ -69,6 +78,7 @@ func WithGitHubActionsOIDC(
 	repositoryID string,
 	workflowRef string,
 	subject string,
+	httpClients ...*http.Client,
 ) Option {
 	return func(options *options) {
 		options.githubOIDCIssuerURL = issuerURL
@@ -76,6 +86,7 @@ func WithGitHubActionsOIDC(
 		options.githubOIDCRepositoryID = repositoryID
 		options.githubOIDCWorkflowRef = workflowRef
 		options.githubOIDCSubject = subject
+		options.useOIDCHTTPClient(httpClients...)
 	}
 }
 
@@ -95,6 +106,9 @@ type Env struct {
 
 	// s3Config holds the S3-compatible storage configuration for Garage.
 	s3Config s3.Config
+
+	// apiToken is the plaintext generated authkit API token seeded for this environment.
+	apiToken string
 }
 
 // Start creates a full imgsrv integration-test environment.
@@ -106,7 +120,7 @@ func Start(t testing.TB, opts ...Option) *Env {
 	postgresURL := startPostgres(ctx, t)
 	s3Config := startGarage(ctx, t)
 	store := openStore(ctx, t, postgresURL)
-	seedAPIToken(ctx, t, store, startupOptions.apiToken)
+	apiToken := seedAPIToken(ctx, t, store, startupOptions.apiToken)
 	objectStore := openObjectStore(t, s3Config)
 	baseURL := startServer(ctx, t, startupOptions, store, objectStore)
 
@@ -116,6 +130,7 @@ func Start(t testing.TB, opts ...Option) *Env {
 		store:       store,
 		objectStore: objectStore,
 		s3Config:    s3Config,
+		apiToken:    apiToken,
 	}
 }
 
@@ -153,10 +168,15 @@ func (env *Env) S3Config() s3.Config {
 	return env.s3Config
 }
 
+// APIToken returns the generated plaintext API token seeded for this environment.
+func (env *Env) APIToken() string {
+	return env.apiToken
+}
+
 type options struct {
 	logger                 *slog.Logger
 	casPromotion           bool
-	apiToken               string
+	apiToken               bool
 	oidcIssuerURL          string
 	oidcAudience           string
 	oidcRequiredScope      string
@@ -165,6 +185,7 @@ type options struct {
 	githubOIDCRepositoryID string
 	githubOIDCWorkflowRef  string
 	githubOIDCSubject      string
+	oidcHTTPClient         *http.Client
 }
 
 // newOptions applies opts to a zero options value and returns the resolved
@@ -180,25 +201,55 @@ func newOptions(opts ...Option) options {
 	return result
 }
 
-// seedAPIToken inserts a test API token when configured.
-func seedAPIToken(ctx context.Context, t testing.TB, store *postgres.Store, rawToken string) {
-	t.Helper()
-	if strings.TrimSpace(rawToken) == "" {
+func (options *options) useOIDCHTTPClient(httpClients ...*http.Client) {
+	if len(httpClients) == 0 || httpClients[0] == nil {
 		return
 	}
+	options.oidcHTTPClient = httpClients[0]
+}
 
-	prefix, err := auth.ParseTokenPrefix(rawToken)
-	require.NoError(t, err)
-	tokenHash, err := auth.HashToken(rawToken)
-	require.NoError(t, err)
+// seedAPIToken inserts a generated authkit API token when configured.
+func seedAPIToken(ctx context.Context, t testing.TB, store *postgres.Store, enabled bool) string {
+	t.Helper()
+	if !enabled {
+		return ""
+	}
 
-	_, err = store.Auth().CreateToken(ctx, auth.CreateTokenParams{
-		ID:          uuid.New(),
-		Name:        "integration test",
-		TokenPrefix: prefix,
-		TokenHash:   tokenHash,
+	authStore := store.Authkit()
+	role, err := authStore.CreateRole(ctx, authkit.CreateRoleRequest{
+		ID:          integrationWriterRoleID,
+		DisplayName: "Integration content writer",
+		Description: "Allows integration tests to write imgsrv content.",
 	})
 	require.NoError(t, err)
+	require.NoError(t, authStore.GrantRoleAction(ctx, authkit.GrantRoleActionRequest{
+		RoleID: role.ID,
+		Action: authz.ActionContentWrite,
+	}))
+	principal, err := authStore.CreatePrincipal(ctx, authkit.CreatePrincipalRequest{
+		Kind:        authkit.PrincipalKindService,
+		DisplayName: "integration-test",
+		Attributes: map[string]any{
+			"source": "integration",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, authStore.AssignPrincipalRole(ctx, authkit.AssignPrincipalRoleRequest{
+		PrincipalID: principal.ID,
+		RoleID:      role.ID,
+	}))
+	apiTokens, err := apikey.NewService(authStore)
+	require.NoError(t, err)
+	issued, err := apiTokens.IssueToken(ctx, apikey.IssueRequest{
+		PrincipalID: principal.ID,
+		Name:        "integration test",
+		ExpiresAt:   time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+	_, err = authStore.LinkIdentity(ctx, issued.IdentityLink)
+	require.NoError(t, err)
+
+	return issued.Plaintext
 }
 
 // newHTTPClient builds the HTTP client integration tests use to talk to the

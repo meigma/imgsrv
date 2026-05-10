@@ -41,6 +41,8 @@ type rootCommand struct {
 	OIDCAudience string `name:"oidc-audience" env:"IMGSRV_OIDC_AUDIENCE" help:"Required OIDC JWT audience."`
 	// OIDCRequiredScope is the token scope required before OIDC principals may write content.
 	OIDCRequiredScope string `name:"oidc-required-scope" env:"IMGSRV_OIDC_REQUIRED_SCOPE" help:"Required OIDC scope for content writes."`
+	// GitHubOIDCIssuerURL is the GitHub Actions OIDC issuer.
+	GitHubOIDCIssuerURL string `name:"github-oidc-issuer-url" env:"IMGSRV_GITHUB_OIDC_ISSUER_URL" help:"GitHub Actions OIDC issuer URL. Empty uses GitHub's public issuer."`
 	// GitHubOIDCAudience is the required audience for GitHub Actions OIDC tokens.
 	GitHubOIDCAudience string `name:"github-oidc-audience" env:"IMGSRV_GITHUB_OIDC_AUDIENCE" help:"Required GitHub Actions OIDC audience."`
 	// GitHubOIDCRepositoryID is the trusted GitHub repository_id claim.
@@ -132,6 +134,7 @@ func ExecuteContext(ctx context.Context, args []string, run Runner, stdout io.Wr
 		OIDCIssuerURL:                      command.OIDCIssuerURL,
 		OIDCAudience:                       command.OIDCAudience,
 		OIDCRequiredScope:                  command.OIDCRequiredScope,
+		GitHubOIDCIssuerURL:                command.GitHubOIDCIssuerURL,
 		GitHubOIDCAudience:                 command.GitHubOIDCAudience,
 		GitHubOIDCRepositoryID:             command.GitHubOIDCRepositoryID,
 		GitHubOIDCWorkflowRef:              command.GitHubOIDCWorkflowRef,

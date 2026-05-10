@@ -37,7 +37,7 @@ func Start(t testing.TB, now time.Time) *Issuer {
 		now:   now,
 	}
 	mux := http.NewServeMux()
-	issuer.server = httptest.NewServer(mux)
+	issuer.server = httptest.NewTLSServer(mux)
 	t.Cleanup(issuer.server.Close)
 
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
@@ -66,6 +66,11 @@ func Start(t testing.TB, now time.Time) *Issuer {
 // URL returns the issuer URL.
 func (issuer *Issuer) URL() string {
 	return issuer.server.URL
+}
+
+// HTTPClient returns a client that trusts the issuer's TLS certificate.
+func (issuer *Issuer) HTTPClient() *http.Client {
+	return issuer.server.Client()
 }
 
 // SignToken signs a JWT access token.

@@ -11,7 +11,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/meigma/imgsrv/internal/auth"
+	"github.com/meigma/authkit/httpauth"
+
+	"github.com/meigma/imgsrv/internal/authz"
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
 	"github.com/meigma/imgsrv/internal/httpapi"
@@ -36,7 +38,7 @@ type Dependencies struct {
 	Readiness httpapi.ReadinessChecker
 
 	// Auth coordinates bearer authentication for write operations.
-	Auth httpapi.AuthService
+	Auth *httpauth.Middleware
 
 	// Uploads coordinates client-facing upload writes.
 	Uploads httpapi.UploadService
@@ -193,10 +195,10 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 }
 
 type authDependency struct {
-	service httpapi.AuthService
+	service *httpauth.Middleware
 }
 
-// newAuthService builds the auth service from the shared Postgres store and configured issuers.
+// newAuthService builds authkit middleware from the shared Postgres store and configured issuers.
 func newAuthService(ctx context.Context, cfg Config, store *postgres.Store) (authDependency, error) {
 	if err := cfg.validateOIDCConfig(); err != nil {
 		return authDependency{}, err
@@ -204,48 +206,35 @@ func newAuthService(ctx context.Context, cfg Config, store *postgres.Store) (aut
 	if err := cfg.validateGitHubOIDCConfig(); err != nil {
 		return authDependency{}, err
 	}
-
-	var apiTokenStore auth.Store
-	if store != nil {
-		apiTokenStore = store.Auth()
-	}
-
-	var authenticators []auth.Authenticator
-	if cfg.hasGitHubOIDCConfig() {
-		githubAuthenticator, err := auth.NewGitHubActionsOIDCAuthenticator(
-			ctx,
-			auth.GitHubActionsOIDCConfig{
-				Audience:     cfg.GitHubOIDCAudience,
-				RepositoryID: cfg.GitHubOIDCRepositoryID,
-				WorkflowRef:  cfg.GitHubOIDCWorkflowRef,
-				Subject:      cfg.GitHubOIDCSubject,
-			},
-		)
-		if err != nil {
-			return authDependency{}, err
+	if store == nil {
+		if cfg.hasAuthConfig() {
+			return authDependency{}, errors.New("postgres url is required when auth is configured")
 		}
-		authenticators = append(authenticators, githubAuthenticator)
-	}
-	if cfg.hasOIDCConfig() {
-		oidcAuthenticator, err := auth.NewOIDCAuthenticator(ctx, auth.OIDCConfig{
-			IssuerURL:     cfg.OIDCIssuerURL,
-			Audience:      cfg.OIDCAudience,
-			RequiredScope: cfg.OIDCRequiredScope,
-		})
-		if err != nil {
-			return authDependency{}, err
-		}
-		authenticators = append(authenticators, oidcAuthenticator)
-	}
-	if apiTokenStore == nil && len(authenticators) == 0 {
 		return authDependency{}, nil
 	}
 
+	service, err := authz.NewMiddleware(ctx, authz.Config{
+		Store: store.Authkit(),
+		OIDC: authz.OIDCConfig{
+			IssuerURL:     cfg.OIDCIssuerURL,
+			Audience:      cfg.OIDCAudience,
+			RequiredScope: cfg.OIDCRequiredScope,
+		},
+		GitHubOIDC: authz.GitHubOIDCConfig{
+			IssuerURL:    cfg.GitHubOIDCIssuerURL,
+			Audience:     cfg.GitHubOIDCAudience,
+			RepositoryID: cfg.GitHubOIDCRepositoryID,
+			WorkflowRef:  cfg.GitHubOIDCWorkflowRef,
+			Subject:      cfg.GitHubOIDCSubject,
+		},
+		ErrorRenderer: httpapi.WriteAuthError,
+	})
+	if err != nil {
+		return authDependency{}, err
+	}
+
 	return authDependency{
-		service: auth.NewService(auth.ServiceConfig{
-			Store:          apiTokenStore,
-			Authenticators: authenticators,
-		}),
+		service: service,
 	}, nil
 }
 

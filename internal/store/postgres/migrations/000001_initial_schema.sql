@@ -2,28 +2,6 @@
 CREATE DOMAIN imgsrv_sha256_digest AS TEXT
     CHECK (VALUE ~ '^sha256:[0-9a-f]{64}$');
 
-CREATE TABLE api_tokens (
-    id UUID PRIMARY KEY,
-    name TEXT NOT NULL CHECK (length(btrim(name)) > 0),
-    token_prefix TEXT NOT NULL CHECK (token_prefix ~ '^[A-Za-z0-9_-]{6,64}$'),
-    token_hash TEXT NOT NULL CHECK (length(btrim(token_hash)) > 0),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_used_at TIMESTAMPTZ,
-    revoked_at TIMESTAMPTZ,
-    CHECK (last_used_at IS NULL OR last_used_at >= created_at),
-    CHECK (revoked_at IS NULL OR revoked_at >= created_at)
-);
-
-CREATE UNIQUE INDEX api_tokens_token_prefix_unique_idx
-    ON api_tokens (token_prefix);
-
-CREATE UNIQUE INDEX api_tokens_token_hash_unique_idx
-    ON api_tokens (token_hash);
-
-CREATE INDEX api_tokens_active_lookup_idx
-    ON api_tokens (token_prefix)
-    WHERE revoked_at IS NULL;
-
 CREATE TABLE cas_blobs (
     digest imgsrv_sha256_digest PRIMARY KEY,
     size_bytes BIGINT NOT NULL CHECK (size_bytes >= 0),
@@ -455,7 +433,6 @@ DROP TABLE cas_ingest_jobs;
 DROP TABLE upload_parts;
 DROP TABLE upload_sessions;
 DROP TABLE cas_blobs;
-DROP TABLE api_tokens;
 
 DROP FUNCTION aliases_guard_write();
 DROP FUNCTION artifact_attachments_require_draft();
