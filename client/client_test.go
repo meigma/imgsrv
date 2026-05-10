@@ -74,6 +74,90 @@ func TestNewValidatesBaseURL(t *testing.T) {
 	}
 }
 
+func TestClientAuthFlowBuildsRequests(t *testing.T) {
+	ctx := context.Background()
+	enabled := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/auth/oidc-provisioning-rules", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, r.Method)
+		switch r.Method {
+		case http.MethodPost:
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			var got SaveOIDCProvisioningRuleRequest
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+				return
+			}
+			assert.Equal(t, "rule-1", got.ID)
+			assert.Equal(t, []string{"repository_id", "workflow_ref"}, got.ForwardedClaims)
+			writeJSON(t, w, http.StatusCreated, oidcRuleFixture(true))
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, oidcProvisioningRuleList{
+				Rules: []OIDCProvisioningRule{oidcRuleFixture(true)},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	mux.HandleFunc("/api/v1/auth/oidc-provisioning-rules/rule-1", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, r.Method)
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, oidcRuleFixture(true))
+		case http.MethodPut:
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			var got SaveOIDCProvisioningRuleRequest
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+				return
+			}
+			assert.Equal(t, &enabled, got.Enabled)
+			writeJSON(t, w, http.StatusOK, oidcRuleFixture(false))
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	client, err := New(Options{
+		BaseURL:     server.URL + "/api",
+		BearerToken: "test-token",
+		UserAgent:   "imgsrv-test-client",
+	})
+	require.NoError(t, err)
+
+	created, err := client.Auth().CreateOIDCProvisioningRule(ctx, SaveOIDCProvisioningRuleRequest{
+		ID:              "rule-1",
+		DisplayName:     "GitHub main publisher",
+		IssuerURL:       "https://issuer.example",
+		Audience:        "imgsrv-github",
+		ForwardedClaims: []string{"repository_id", "workflow_ref"},
+		Condition:       "claims.repository_id == '123456789'",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, oidcRuleFixture(true), created)
+
+	listed, err := client.Auth().ListOIDCProvisioningRules(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []OIDCProvisioningRule{oidcRuleFixture(true)}, listed)
+
+	got, err := client.Auth().GetOIDCProvisioningRule(ctx, "rule-1")
+	require.NoError(t, err)
+	assert.Equal(t, oidcRuleFixture(true), got)
+
+	updated, err := client.Auth().UpdateOIDCProvisioningRule(ctx, "rule-1", SaveOIDCProvisioningRuleRequest{
+		DisplayName: "GitHub main publisher",
+		IssuerURL:   "https://issuer.example",
+		Audience:    "imgsrv-github",
+		Condition:   "claims.repository_id == '123456789'",
+		Enabled:     &enabled,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, oidcRuleFixture(false), updated)
+
+	require.NoError(t, client.Auth().DeleteOIDCProvisioningRule(ctx, "rule-1"))
+}
+
 func TestClientUploadFlowBuildsRequests(t *testing.T) {
 	ctx := context.Background()
 	mediaType := "application/octet-stream"
@@ -929,6 +1013,19 @@ func manifestFixture(state ImageVersionState) Manifest {
 			Artifact:    artifactFixture(),
 			Attachments: []Attachment{attachmentFixture()},
 		}},
+	}
+}
+
+func oidcRuleFixture(enabled bool) OIDCProvisioningRule {
+	return OIDCProvisioningRule{
+		ID:              "rule-1",
+		DisplayName:     "GitHub main publisher",
+		IssuerURL:       "https://issuer.example",
+		Audience:        "imgsrv-github",
+		ForwardedClaims: []string{"repository_id", "workflow_ref"},
+		Condition:       "claims.repository_id == '123456789'",
+		AssignRoleIDs:   []string{"content-writer"},
+		Enabled:         enabled,
 	}
 }
 

@@ -6,6 +6,122 @@ info:
 servers:
   - url: /
 paths:
+  /v1/auth/oidc-provisioning-rules:
+    get:
+      operationId: listOIDCProvisioningRules
+      summary: List OIDC provisioning rules.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OIDC provisioning rules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OIDCProvisioningRuleList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createOIDCProvisioningRule
+      summary: Create an OIDC provisioning rule.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveOIDCProvisioningRuleRequest'
+      responses:
+        '201':
+          description: OIDC provisioning rule created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OIDCProvisioningRule'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/auth/oidc-provisioning-rules/{rule_id}:
+    get:
+      operationId: getOIDCProvisioningRule
+      summary: Get one OIDC provisioning rule.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OIDCProvisioningRuleID'
+      responses:
+        '200':
+          description: OIDC provisioning rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OIDCProvisioningRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: updateOIDCProvisioningRule
+      summary: Replace one OIDC provisioning rule.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OIDCProvisioningRuleID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveOIDCProvisioningRuleRequest'
+      responses:
+        '200':
+          description: OIDC provisioning rule updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OIDCProvisioningRule'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteOIDCProvisioningRule
+      summary: Delete one OIDC provisioning rule.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OIDCProvisioningRuleID'
+      responses:
+        '204':
+          description: OIDC provisioning rule deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /v1/uploads:
     post:
       operationId: beginUpload
@@ -924,6 +1040,13 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/UploadID'
+    OIDCProvisioningRuleID:
+      name: rule_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
     BlobDigest:
       name: digest
       in: path
@@ -1136,6 +1259,80 @@ components:
     AttachmentID:
       type: string
       format: uuid
+    SaveOIDCProvisioningRuleRequest:
+      type: object
+      required:
+        - display_name
+        - issuer_url
+        - audience
+        - condition
+      properties:
+        id:
+          type: string
+          minLength: 1
+        display_name:
+          type: string
+        issuer_url:
+          type: string
+          format: uri
+        audience:
+          type: string
+          minLength: 1
+        forwarded_claims:
+          type: array
+          items:
+            type: string
+            minLength: 1
+        condition:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        enabled:
+          type: boolean
+      additionalProperties: false
+    OIDCProvisioningRule:
+      type: object
+      required:
+        - id
+        - display_name
+        - issuer_url
+        - audience
+        - condition
+        - assign_role_ids
+        - enabled
+      properties:
+        id:
+          type: string
+        display_name:
+          type: string
+        issuer_url:
+          type: string
+          format: uri
+        audience:
+          type: string
+        forwarded_claims:
+          type: array
+          items:
+            type: string
+        condition:
+          type: string
+        assign_role_ids:
+          type: array
+          items:
+            type: string
+        enabled:
+          type: boolean
+      additionalProperties: false
+    OIDCProvisioningRuleList:
+      type: object
+      required:
+        - rules
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/OIDCProvisioningRule'
+      additionalProperties: false
     UploadState:
       type: string
       enum:

@@ -20,33 +20,51 @@ type Authorizer struct {
 
 // Can decides whether check.Principal can perform check.Action.
 func (a *Authorizer) Can(ctx context.Context, check authkit.AuthorizationCheck) (authkit.Decision, error) {
+	provider := factString(check.Facts, factIdentityProvider)
+	if provider == apikey.Provider || (a.roles != nil && !isTransientPrincipal(check.Principal)) {
+		decision, err := a.authorizeWithRoles(ctx, check)
+		if err != nil {
+			return authkit.Decision{}, err
+		}
+		if decision.Allowed {
+			return decision, nil
+		}
+		if check.Action == ActionAuthManage {
+			return denied("principal is not authorized for action " + ActionAuthManage), nil
+		}
+	}
+
 	if check.Action != ActionContentWrite {
 		return denied("unsupported action"), nil
 	}
 
-	provider := factString(check.Facts, factIdentityProvider)
-	switch provider {
-	case apikey.Provider:
-		return a.authorizeAPIKey(ctx, check)
-	default:
-		identity := identityFromFacts(check.Facts)
-		if githubIdentityCanWrite(identity, a.githubOIDC) {
-			return authkit.Decision{Allowed: true}, nil
-		}
-		if oidcIdentityCanWrite(identity, a.oidc) {
-			return authkit.Decision{Allowed: true}, nil
-		}
-
+	if provider == apikey.Provider {
 		return denied(unauthorizedContentWrite), nil
 	}
+
+	identity := identityFromFacts(check.Facts)
+	if githubIdentityCanWrite(identity, a.githubOIDC) {
+		return authkit.Decision{Allowed: true}, nil
+	}
+	if oidcIdentityCanWrite(identity, a.oidc) {
+		return authkit.Decision{Allowed: true}, nil
+	}
+
+	return denied(unauthorizedContentWrite), nil
 }
 
-func (a *Authorizer) authorizeAPIKey(
+func isTransientPrincipal(principal authkit.Principal) bool {
+	transient, _ := principal.Attributes["transient"].(bool)
+
+	return transient
+}
+
+func (a *Authorizer) authorizeWithRoles(
 	ctx context.Context,
 	check authkit.AuthorizationCheck,
 ) (authkit.Decision, error) {
 	if a.roles == nil {
-		return denied(unauthorizedContentWrite), nil
+		return denied("principal is not authorized for action " + check.Action), nil
 	}
 
 	decision, err := a.roles.Can(ctx, check)
@@ -57,7 +75,7 @@ func (a *Authorizer) authorizeAPIKey(
 		return decision, nil
 	}
 
-	return denied(unauthorizedContentWrite), nil
+	return denied("principal is not authorized for action " + check.Action), nil
 }
 
 func oidcIdentityCanWrite(identity authkit.Identity, cfg OIDCConfig) bool {

@@ -34,6 +34,9 @@ type Dependencies struct {
 	// Auth coordinates bearer authentication and action authorization. Nil leaves protected routes unavailable.
 	Auth *httpauth.Middleware
 
+	// AuthManagement coordinates operator auth-management routes. Nil leaves those routes unavailable.
+	AuthManagement AuthManagementService
+
 	// Uploads coordinates client-facing upload operations. Nil leaves upload routes unavailable.
 	Uploads UploadService
 
@@ -160,11 +163,36 @@ type BlobService interface {
 	OpenBlob(context.Context, cas.OpenBlobParams) (objectstore.ObjectReader, error)
 }
 
+// AuthManagementService coordinates auth-management operations for HTTP callers.
+type AuthManagementService interface {
+	// CreateOIDCProvisioningRule creates an OIDC provisioning rule.
+	CreateOIDCProvisioningRule(
+		context.Context,
+		authz.SaveOIDCProvisioningRuleRequest,
+	) (authz.OIDCProvisioningRule, error)
+
+	// UpdateOIDCProvisioningRule replaces an OIDC provisioning rule.
+	UpdateOIDCProvisioningRule(
+		context.Context,
+		authz.SaveOIDCProvisioningRuleRequest,
+	) (authz.OIDCProvisioningRule, error)
+
+	// DeleteOIDCProvisioningRule deletes one OIDC provisioning rule.
+	DeleteOIDCProvisioningRule(context.Context, string) error
+
+	// FindOIDCProvisioningRule returns one OIDC provisioning rule.
+	FindOIDCProvisioningRule(context.Context, string) (authz.OIDCProvisioningRule, error)
+
+	// ListOIDCProvisioningRules returns OIDC provisioning rules.
+	ListOIDCProvisioningRules(context.Context) ([]authz.OIDCProvisioningRule, error)
+}
+
 // api carries the configured HTTP adapter state shared across handlers.
 type api struct {
 	logger    *slog.Logger
 	readiness ReadinessChecker
 	auth      *httpauth.Middleware
+	authMgmt  AuthManagementService
 	uploads   UploadService
 	catalog   CatalogService
 	blobs     BlobService
@@ -197,6 +225,7 @@ func New(deps Dependencies) http.Handler {
 		logger:    logger,
 		readiness: readiness,
 		auth:      deps.Auth,
+		authMgmt:  deps.AuthManagement,
 		uploads:   deps.Uploads,
 		catalog:   deps.Catalog,
 		blobs:     deps.Blobs,
@@ -214,6 +243,26 @@ func New(deps Dependencies) http.Handler {
 func (a *api) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.HandleFunc("GET /readyz", a.readyz)
+	mux.HandleFunc(
+		"GET /v1/auth/oidc-provisioning-rules",
+		a.requireAction(authz.ActionAuthManage, a.listOIDCProvisioningRules),
+	)
+	mux.HandleFunc(
+		"POST /v1/auth/oidc-provisioning-rules",
+		a.requireAction(authz.ActionAuthManage, a.createOIDCProvisioningRule),
+	)
+	mux.HandleFunc(
+		"GET /v1/auth/oidc-provisioning-rules/{rule_id}",
+		a.requireAction(authz.ActionAuthManage, a.getOIDCProvisioningRule),
+	)
+	mux.HandleFunc(
+		"PUT /v1/auth/oidc-provisioning-rules/{rule_id}",
+		a.requireAction(authz.ActionAuthManage, a.updateOIDCProvisioningRule),
+	)
+	mux.HandleFunc(
+		"DELETE /v1/auth/oidc-provisioning-rules/{rule_id}",
+		a.requireAction(authz.ActionAuthManage, a.deleteOIDCProvisioningRule),
+	)
 	mux.HandleFunc("POST /v1/uploads", a.requireAction(authz.ActionContentWrite, a.beginUpload))
 	mux.HandleFunc("GET /v1/uploads/{upload_id}", a.getUpload)
 	mux.HandleFunc(

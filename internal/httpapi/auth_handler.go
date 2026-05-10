@@ -16,8 +16,6 @@ const bearerAuthScheme = "Bearer"
 var errAuthServiceUnavailable = errors.New("auth service is not configured")
 
 // requireAction authenticates one protected route, authorizes action, and invokes next.
-//
-//nolint:unparam // Upcoming auth-policy routes will use actions beyond content.write.
 func (a *api) requireAction(action string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if a.auth == nil {
@@ -32,15 +30,26 @@ func (a *api) requireAction(action string, next http.HandlerFunc) http.HandlerFu
 			}
 
 			return authkit.AuthorizationRequest{
-				Action: action,
-				Resource: authkit.Resource{
-					Type: authz.ResourceContent,
-					ID:   authz.ResourceContent,
-				},
-				Facts: authz.FactsForAuthentication(authentication),
+				Action:   action,
+				Resource: resourceForAction(action),
+				Facts:    authz.FactsForAuthentication(authentication),
 			}, nil
 		})(next)
 		handler.ServeHTTP(w, r)
+	}
+}
+
+func resourceForAction(action string) authkit.Resource {
+	if action == authz.ActionAuthManage {
+		return authkit.Resource{
+			Type: authz.ResourceAuth,
+			ID:   authz.ResourceAuth,
+		}
+	}
+
+	return authkit.Resource{
+		Type: authz.ResourceContent,
+		ID:   authz.ResourceContent,
 	}
 }
 

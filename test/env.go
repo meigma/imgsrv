@@ -51,6 +51,13 @@ func WithOIDC(
 	}
 }
 
+// WithOIDCHTTPClient configures the HTTP client used for OIDC discovery and JWKS requests.
+func WithOIDCHTTPClient(httpClient *http.Client) Option {
+	return func(options *options) {
+		options.harness = append(options.harness, harness.WithOIDCHTTPClient(httpClient))
+	}
+}
+
 // WithBearerToken configures Env.Client to send rawToken as a bearer token without seeding it.
 func WithBearerToken(rawToken string) Option {
 	return func(options *options) {
