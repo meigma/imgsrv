@@ -57,6 +57,35 @@ func TestPolicyResolverProvisionsAllowedOIDCIdentity(t *testing.T) {
 	assert.Equal(t, "persisted-principal", principal.ID)
 }
 
+func TestPolicyResolverProvisionsManagedOIDCRuleWithInitialRoles(t *testing.T) {
+	store := &resolverStore{
+		resolveErr: authkit.ErrUnresolvedIdentity,
+		rules: []authkit.ProvisioningRule{
+			{
+				ID:            "github-main-publisher",
+				Provider:      "https://issuer.example",
+				Condition:     `identity.subject == "subject-1" && claims.repository_id == "123456789"`,
+				AssignRoleIDs: []string{RoleContentWriter},
+				Enabled:       true,
+			},
+		},
+	}
+	resolver := policyResolver{store: store}
+
+	principal, err := resolver.ResolveIdentity(context.Background(), authkit.Identity{
+		Provider: "https://issuer.example",
+		Subject:  "subject-1",
+		Claims: map[string]any{
+			"repository_id": "123456789",
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, store.provisionCalls)
+	assert.Equal(t, "persisted-principal", principal.ID)
+	assert.Equal(t, []string{RoleContentWriter}, store.provisionInitialRoleIDs)
+}
+
 func TestPolicyResolverDoesNotProvisionDeniedGitHubIdentity(t *testing.T) {
 	store := &resolverStore{resolveErr: authkit.ErrUnresolvedIdentity}
 	resolver := policyResolver{
@@ -99,8 +128,10 @@ func TestPolicyResolverLeavesAPITokensUnprovisioned(t *testing.T) {
 }
 
 type resolverStore struct {
-	resolveErr     error
-	provisionCalls int
+	resolveErr              error
+	rules                   []authkit.ProvisioningRule
+	provisionCalls          int
+	provisionInitialRoleIDs []string
 }
 
 func (s *resolverStore) ResolveIdentity(
@@ -119,6 +150,7 @@ func (s *resolverStore) ProvisionIdentity(
 	req authkit.ProvisionIdentityRequest,
 ) (authkit.ProvisionIdentityResult, error) {
 	s.provisionCalls++
+	s.provisionInitialRoleIDs = append([]string(nil), req.InitialRoleIDs...)
 
 	return authkit.ProvisionIdentityResult{
 		Principal: authkit.Principal{
@@ -129,4 +161,8 @@ func (s *resolverStore) ProvisionIdentity(
 		},
 		Created: true,
 	}, nil
+}
+
+func (s *resolverStore) ListProvisioningRules(context.Context) ([]authkit.ProvisioningRule, error) {
+	return append([]authkit.ProvisioningRule(nil), s.rules...), nil
 }

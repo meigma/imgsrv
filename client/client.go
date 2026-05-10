@@ -6,6 +6,9 @@ package client
 // Code that needs a mockable dependency should prefer narrow operation-group
 // interfaces such as UploadsClient instead of depending on Client directly.
 type Client struct {
+	// auth holds the HTTP-backed auth-management operation group.
+	auth *HTTPAuthClient
+
 	// blobs holds the HTTP-backed CAS blob operation group.
 	blobs *HTTPBlobsClient
 
@@ -24,10 +27,20 @@ func New(options Options) (*Client, error) {
 	}
 
 	return &Client{
+		auth:    newHTTPAuthClient(transport),
 		blobs:   newHTTPBlobsClient(transport),
 		catalog: newHTTPCatalogClient(transport),
 		uploads: newHTTPUploadsClient(transport),
 	}, nil
+}
+
+// Auth returns auth-management API operations.
+func (client *Client) Auth() AuthClient {
+	if client == nil {
+		return nil
+	}
+
+	return client.auth
 }
 
 // Blobs returns raw CAS blob API operations.

@@ -75,13 +75,18 @@ func startServer(
 	listener, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	authService := newAuthService(ctx, t, options, store)
+	authManagement := authz.NewManagementService(authz.ManagementConfig{
+		Store:      store.Authkit(),
+		HTTPClient: options.oidcHTTPClient,
+	})
 
 	server, err := app.NewServer(app.Config{
 		Listen:          listener.Addr().String(),
 		ShutdownTimeout: serverShutdownTimeout,
 	}, app.Dependencies{
-		Logger: options.logger,
-		Auth:   authService,
+		Logger:         options.logger,
+		Auth:           authService,
+		AuthManagement: authManagement,
 		Uploads: uploads.NewService(uploads.ServiceConfig{
 			Store:        store.Uploads(),
 			Objects:      objects,

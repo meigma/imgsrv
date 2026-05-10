@@ -3,14 +3,17 @@ package authz
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/meigma/authkit"
 	"github.com/meigma/authkit/apikey"
+	"github.com/meigma/authkit/provisioning"
 )
 
 type identityStore interface {
 	authkit.PrincipalResolver
 	authkit.IdentityProvisioner
+	authkit.ProvisioningRuleLister
 }
 
 type policyResolver struct {
@@ -31,25 +34,22 @@ func (r *policyResolver) ResolveIdentity(
 		return nil, err
 	}
 
-	switch {
-	case identity.Provider == apikey.Provider:
+	switch identity.Provider {
+	case apikey.Provider:
 		return nil, err
-	case r.oidc.configured() && identity.Provider == r.oidc.IssuerURL:
-		req := principalRequest("oidc", authkit.PrincipalKindUser, identity)
-		if oidcIdentityCanWrite(identity, r.oidc) {
-			return r.provision(ctx, identity, req)
-		}
-
-		return transientPrincipal(identity, req), nil
-	case r.githubOIDC.configured() && identity.Provider == r.githubOIDC.IssuerURL:
-		req := principalRequest("github-actions", authkit.PrincipalKindService, identity)
-		if githubIdentityCanWrite(identity, r.githubOIDC) {
-			return r.provision(ctx, identity, req)
-		}
-
-		return transientPrincipal(identity, req), nil
 	default:
-		return nil, err
+		prefix, kind := principalShape(identity)
+		req := principalRequest(prefix, kind, identity)
+		if roleIDs, ok, roleErr := r.managedInitialRoleIDs(ctx, identity); roleErr != nil {
+			return nil, roleErr
+		} else if ok {
+			return r.provision(ctx, identity, req, roleIDs)
+		}
+		if oidcIdentityCanWrite(identity, r.oidc) || githubIdentityCanWrite(identity, r.githubOIDC) {
+			return r.provision(ctx, identity, req, nil)
+		}
+
+		return transientPrincipal(identity, req), nil
 	}
 }
 
@@ -57,16 +57,42 @@ func (r *policyResolver) provision(
 	ctx context.Context,
 	identity authkit.Identity,
 	req authkit.CreatePrincipalRequest,
+	initialRoleIDs []string,
 ) (*authkit.Principal, error) {
 	result, err := r.store.ProvisionIdentity(ctx, authkit.ProvisionIdentityRequest{
-		Identity:  identity,
-		Principal: req,
+		Identity:       identity,
+		Principal:      req,
+		InitialRoleIDs: initialRoleIDs,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	return &result.Principal, nil
+}
+
+func (r *policyResolver) managedInitialRoleIDs(
+	ctx context.Context,
+	identity authkit.Identity,
+) ([]string, bool, error) {
+	rules, err := r.store.ListProvisioningRules(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	roleIDs := provisioning.MatchRules(identity, rules)
+	if !slices.Contains(roleIDs, RoleContentWriter) {
+		return nil, false, nil
+	}
+
+	return roleIDs, true, nil
+}
+
+func principalShape(identity authkit.Identity) (string, authkit.PrincipalKind) {
+	if identity.Provider == DefaultGitHubOIDCIssuerURL {
+		return "github-actions", authkit.PrincipalKindService
+	}
+
+	return "oidc", authkit.PrincipalKindUser
 }
 
 func principalRequest(

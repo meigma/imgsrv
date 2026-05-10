@@ -25,8 +25,6 @@ import (
 const (
 	// defaultHTTPClientTimeout bounds requests issued by the harness HTTP client.
 	defaultHTTPClientTimeout = 10 * time.Second
-
-	integrationWriterRoleID = "integration-content-writer"
 )
 
 // Option customizes integration environment startup.
@@ -68,6 +66,13 @@ func WithOIDC(
 		options.oidcAudience = audience
 		options.oidcRequiredScope = requiredScope
 		options.useOIDCHTTPClient(httpClients...)
+	}
+}
+
+// WithOIDCHTTPClient configures the HTTP client used for OIDC discovery and JWKS requests.
+func WithOIDCHTTPClient(httpClient *http.Client) Option {
+	return func(options *options) {
+		options.useOIDCHTTPClient(httpClient)
 	}
 }
 
@@ -216,16 +221,7 @@ func seedAPIToken(ctx context.Context, t testing.TB, store *postgres.Store, enab
 	}
 
 	authStore := store.Authkit()
-	role, err := authStore.CreateRole(ctx, authkit.CreateRoleRequest{
-		ID:          integrationWriterRoleID,
-		DisplayName: "Integration content writer",
-		Description: "Allows integration tests to write imgsrv content.",
-	})
-	require.NoError(t, err)
-	require.NoError(t, authStore.GrantRoleAction(ctx, authkit.GrantRoleActionRequest{
-		RoleID: role.ID,
-		Action: authz.ActionContentWrite,
-	}))
+	require.NoError(t, authz.EnsureBuiltinRoles(ctx, authStore))
 	principal, err := authStore.CreatePrincipal(ctx, authkit.CreatePrincipalRequest{
 		Kind:        authkit.PrincipalKindService,
 		DisplayName: "integration-test",
@@ -234,10 +230,12 @@ func seedAPIToken(ctx context.Context, t testing.TB, store *postgres.Store, enab
 		},
 	})
 	require.NoError(t, err)
-	require.NoError(t, authStore.AssignPrincipalRole(ctx, authkit.AssignPrincipalRoleRequest{
-		PrincipalID: principal.ID,
-		RoleID:      role.ID,
-	}))
+	for _, roleID := range []string{authz.RoleContentWriter, authz.RoleAuthManager} {
+		require.NoError(t, authStore.AssignPrincipalRole(ctx, authkit.AssignPrincipalRoleRequest{
+			PrincipalID: principal.ID,
+			RoleID:      roleID,
+		}))
+	}
 	apiTokens, err := apikey.NewService(authStore)
 	require.NoError(t, err)
 	issued, err := apiTokens.IssueToken(ctx, apikey.IssueRequest{

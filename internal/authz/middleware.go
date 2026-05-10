@@ -29,9 +29,11 @@ const (
 // Store is the authkit storage contract imgsrv needs at runtime.
 type Store interface {
 	apikey.TokenStore
+	authkitoidc.ProviderSource
 	authkit.PrincipalResolver
 	authkit.IdentityProvisioner
 	authkit.PrincipalActionResolver
+	authkit.ProvisioningRuleLister
 }
 
 // Config configures authkit HTTP middleware for imgsrv.
@@ -129,46 +131,48 @@ func authenticators(ctx context.Context, cfg Config) ([]authkit.Authenticator, e
 
 	var providers []authkitoidc.Provider
 	if cfg.OIDC.configured() {
-		provider, err := discoverProvider(
+		provider, discoverErr := discoverProvider(
 			ctx,
 			cfg.HTTPClient,
 			cfg.OIDC.IssuerURL,
 			[]string{cfg.OIDC.Audience},
 			[]authkit.ClaimPath{{claimScope}},
 		)
-		if err != nil {
-			return nil, err
+		if discoverErr != nil {
+			return nil, discoverErr
 		}
 		providers = append(providers, provider)
 	}
 	if cfg.GitHubOIDC.configured() {
 		github := cfg.GitHubOIDC.withDefaultIssuer()
-		provider, err := discoverProvider(
+		provider, discoverErr := discoverProvider(
 			ctx,
 			cfg.HTTPClient,
 			github.IssuerURL,
 			[]string{github.Audience},
 			[]authkit.ClaimPath{{claimRepositoryID}, {claimWorkflowRef}},
 		)
-		if err != nil {
-			return nil, err
+		if discoverErr != nil {
+			return nil, discoverErr
 		}
 		providers = append(providers, provider)
 	}
+	var staticSource authkitoidc.ProviderSource
 	if len(providers) > 0 {
-		source, err := authkitoidc.NewStaticProviderSource(mergeProviders(providers)...)
-		if err != nil {
-			return nil, err
+		static, staticErr := authkitoidc.NewStaticProviderSource(mergeProviders(providers)...)
+		if staticErr != nil {
+			return nil, staticErr
 		}
-		oidcAuthenticator, err := authkitoidc.NewAuthenticator(
-			source,
-			authkitoidc.WithHTTPClient(cfg.HTTPClient),
-		)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, oidcAuthenticator)
+		staticSource = static
 	}
+	oidcAuthenticator, err := authkitoidc.NewAuthenticator(
+		providerSource{dynamic: cfg.Store, static: staticSource},
+		authkitoidc.WithHTTPClient(cfg.HTTPClient),
+	)
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, oidcAuthenticator)
 
 	return result, nil
 }

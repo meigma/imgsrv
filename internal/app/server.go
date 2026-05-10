@@ -40,6 +40,9 @@ type Dependencies struct {
 	// Auth coordinates bearer authentication for write operations.
 	Auth *httpauth.Middleware
 
+	// AuthManagement coordinates operator auth-management routes.
+	AuthManagement httpapi.AuthManagementService
+
 	// Uploads coordinates client-facing upload writes.
 	Uploads httpapi.UploadService
 
@@ -120,6 +123,7 @@ func Run(ctx context.Context, cfg Config) error {
 	server, err := NewServer(cfg, Dependencies{
 		Logger:         logger,
 		Auth:           authDependency.service,
+		AuthManagement: authDependency.management,
 		Uploads:        uploadDependency.service,
 		Catalog:        newCatalogService(store),
 		Blobs:          uploadDependency.blobs,
@@ -162,14 +166,15 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 	}
 
 	handler := httpapi.New(httpapi.Dependencies{
-		Logger:    logger.With("component", "httpapi"),
-		Telemetry: telemetryProviders,
-		Readiness: deps.Readiness,
-		Auth:      deps.Auth,
-		Uploads:   deps.Uploads,
-		Catalog:   deps.Catalog,
-		Blobs:     deps.Blobs,
-		UploadTTL: cfg.UploadTTL,
+		Logger:         logger.With("component", "httpapi"),
+		Telemetry:      telemetryProviders,
+		Readiness:      deps.Readiness,
+		Auth:           deps.Auth,
+		AuthManagement: deps.AuthManagement,
+		Uploads:        deps.Uploads,
+		Catalog:        deps.Catalog,
+		Blobs:          deps.Blobs,
+		UploadTTL:      cfg.UploadTTL,
 	})
 
 	server := &Server{
@@ -195,7 +200,8 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 }
 
 type authDependency struct {
-	service *httpauth.Middleware
+	service    *httpauth.Middleware
+	management httpapi.AuthManagementService
 }
 
 // newAuthService builds authkit middleware from the shared Postgres store and configured issuers.
@@ -213,8 +219,12 @@ func newAuthService(ctx context.Context, cfg Config, store *postgres.Store) (aut
 		return authDependency{}, nil
 	}
 
+	authStore := store.Authkit()
+	if err := authz.EnsureBuiltinRoles(ctx, authStore); err != nil {
+		return authDependency{}, err
+	}
 	service, err := authz.NewMiddleware(ctx, authz.Config{
-		Store: store.Authkit(),
+		Store: authStore,
 		OIDC: authz.OIDCConfig{
 			IssuerURL:     cfg.OIDCIssuerURL,
 			Audience:      cfg.OIDCAudience,
@@ -235,6 +245,9 @@ func newAuthService(ctx context.Context, cfg Config, store *postgres.Store) (aut
 
 	return authDependency{
 		service: service,
+		management: authz.NewManagementService(authz.ManagementConfig{
+			Store: authStore,
+		}),
 	}, nil
 }
 
