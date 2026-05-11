@@ -36,21 +36,6 @@ func WithAPIToken() Option {
 	}
 }
 
-// WithOIDC configures generic OIDC JWT bearer authentication for the test server.
-func WithOIDC(
-	issuerURL string,
-	audience string,
-	requiredScope string,
-	httpClients ...*http.Client,
-) Option {
-	return func(options *options) {
-		options.harness = append(
-			options.harness,
-			harness.WithOIDC(issuerURL, audience, requiredScope, httpClients...),
-		)
-	}
-}
-
 // WithOIDCHTTPClient configures the HTTP client used for OIDC discovery and JWKS requests.
 func WithOIDCHTTPClient(httpClient *http.Client) Option {
 	return func(options *options) {

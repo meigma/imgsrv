@@ -3,9 +3,7 @@ package app
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -69,30 +67,6 @@ type Config struct {
 	// PostgresURL is the PostgreSQL connection URL used for the control plane.
 	// Empty skips database startup for operational-only runs.
 	PostgresURL string
-
-	// OIDCIssuerURL is the configured issuer for generic OIDC JWT bearer tokens.
-	OIDCIssuerURL string
-
-	// OIDCAudience is the required audience for generic OIDC JWT bearer tokens.
-	OIDCAudience string
-
-	// OIDCRequiredScope is the token scope required before OIDC principals may write content.
-	OIDCRequiredScope string
-
-	// GitHubOIDCIssuerURL is the GitHub Actions OIDC issuer. Empty selects the public GitHub issuer.
-	GitHubOIDCIssuerURL string
-
-	// GitHubOIDCAudience is the required audience for GitHub Actions OIDC tokens.
-	GitHubOIDCAudience string
-
-	// GitHubOIDCRepositoryID is the trusted GitHub repository_id claim.
-	GitHubOIDCRepositoryID string
-
-	// GitHubOIDCWorkflowRef is the trusted GitHub workflow_ref claim.
-	GitHubOIDCWorkflowRef string
-
-	// GitHubOIDCSubject is the trusted GitHub OIDC sub claim.
-	GitHubOIDCSubject string
 
 	// S3Endpoint is the S3-compatible API endpoint without a URL scheme.
 	S3Endpoint string
@@ -229,75 +203,4 @@ func (c Config) hasS3Config() bool {
 		c.S3SecretAccessKey != "" ||
 		c.S3SessionToken != "" ||
 		c.S3Region != ""
-}
-
-// hasOIDCConfig reports whether any generic OIDC configuration field is populated.
-func (c Config) hasOIDCConfig() bool {
-	return strings.TrimSpace(c.OIDCIssuerURL) != "" ||
-		strings.TrimSpace(c.OIDCAudience) != "" ||
-		strings.TrimSpace(c.OIDCRequiredScope) != ""
-}
-
-// hasGitHubOIDCConfig reports whether any GitHub Actions OIDC configuration field is populated.
-func (c Config) hasGitHubOIDCConfig() bool {
-	return strings.TrimSpace(c.GitHubOIDCIssuerURL) != "" ||
-		strings.TrimSpace(c.GitHubOIDCAudience) != "" ||
-		strings.TrimSpace(c.GitHubOIDCRepositoryID) != "" ||
-		strings.TrimSpace(c.GitHubOIDCWorkflowRef) != "" ||
-		strings.TrimSpace(c.GitHubOIDCSubject) != ""
-}
-
-// hasAuthConfig reports whether non-API-token auth configuration is populated.
-func (c Config) hasAuthConfig() bool {
-	return c.hasOIDCConfig() || c.hasGitHubOIDCConfig()
-}
-
-// validateOIDCConfig enforces all-or-nothing generic OIDC configuration.
-func (c Config) validateOIDCConfig() error {
-	issuerURL := strings.TrimSpace(c.OIDCIssuerURL)
-	audience := strings.TrimSpace(c.OIDCAudience)
-	scope := strings.TrimSpace(c.OIDCRequiredScope)
-	if issuerURL == "" && audience == "" && scope == "" {
-		return nil
-	}
-	if issuerURL == "" || audience == "" || scope == "" {
-		return errors.New("oidc issuer url, audience, and required scope must be set together")
-	}
-	issuer, err := url.Parse(issuerURL)
-	if err != nil || issuer.Scheme == "" || issuer.Host == "" {
-		return errors.New("oidc issuer url must be an absolute URL")
-	}
-	if issuer.Scheme != "https" {
-		return errors.New("oidc issuer url must use https")
-	}
-
-	return nil
-}
-
-// validateGitHubOIDCConfig enforces all-or-nothing GitHub Actions OIDC configuration.
-func (c Config) validateGitHubOIDCConfig() error {
-	issuerURL := strings.TrimSpace(c.GitHubOIDCIssuerURL)
-	audience := strings.TrimSpace(c.GitHubOIDCAudience)
-	repositoryID := strings.TrimSpace(c.GitHubOIDCRepositoryID)
-	workflowRef := strings.TrimSpace(c.GitHubOIDCWorkflowRef)
-	subject := strings.TrimSpace(c.GitHubOIDCSubject)
-	if issuerURL == "" && audience == "" && repositoryID == "" && workflowRef == "" && subject == "" {
-		return nil
-	}
-	if audience == "" || repositoryID == "" || workflowRef == "" || subject == "" {
-		return errors.New(
-			"github oidc audience, repository id, workflow ref, and subject must be set together",
-		)
-	}
-	if issuerURL != "" {
-		issuer, err := url.Parse(issuerURL)
-		if err != nil || issuer.Scheme == "" || issuer.Host == "" {
-			return errors.New("github oidc issuer url must be an absolute URL")
-		}
-		if issuer.Scheme != "https" {
-			return errors.New("github oidc issuer url must use https")
-		}
-	}
-
-	return nil
 }

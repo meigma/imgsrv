@@ -21,12 +21,28 @@ func TestOIDCBearerTokenCanUseWriteFlow(t *testing.T) {
 	token := issuer.SignToken(t, nil)
 	env := imgsrvtest.Start(
 		t,
-		imgsrvtest.WithOIDC(issuer.URL(), "imgsrv-api", "imgsrv.write", issuer.HTTPClient()),
-		imgsrvtest.WithBearerToken(token),
+		imgsrvtest.WithAPIToken(),
+		imgsrvtest.WithOIDCHTTPClient(issuer.HTTPClient()),
 	)
 
 	ctx := context.Background()
-	image, err := env.Client(t).Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+	_, err := env.Client(t).Auth().CreateOIDCProvisioningRule(ctx, imgsrv.SaveOIDCProvisioningRuleRequest{
+		ID:              "scope-publisher",
+		DisplayName:     "Scope publisher",
+		IssuerURL:       issuer.URL(),
+		Audience:        "imgsrv-api",
+		ForwardedClaims: []string{"scope"},
+		Condition:       `hasToken(claims.scope, "imgsrv.write")`,
+	})
+	require.NoError(t, err)
+
+	oidcClient, err := imgsrv.New(imgsrv.Options{
+		BaseURL:     env.BaseURL(),
+		HTTPClient:  env.HTTPClient(),
+		BearerToken: token,
+	})
+	require.NoError(t, err)
+	image, err := oidcClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
 		Name: "oidc-public-flow",
 	})
 

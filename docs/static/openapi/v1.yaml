@@ -6,6 +6,208 @@ info:
 servers:
   - url: /
 paths:
+  /v1/auth/roles:
+    get:
+      operationId: listAuthRoles
+      summary: List built-in auth roles.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Built-in auth roles.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthRoleList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/auth/principals:
+    get:
+      operationId: listAuthPrincipals
+      summary: List auth principals.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Auth principals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPrincipalList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createAuthPrincipal
+      summary: Create an auth principal.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAuthPrincipalRequest'
+      responses:
+        '201':
+          description: Auth principal created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPrincipal'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/auth/principals/{principal_id}:
+    get:
+      operationId: getAuthPrincipal
+      summary: Get one auth principal.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AuthPrincipalID'
+      responses:
+        '200':
+          description: Auth principal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthPrincipal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/auth/principals/{principal_id}/roles/{role_id}:
+    put:
+      operationId: assignAuthPrincipalRole
+      summary: Assign a role to an auth principal.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AuthPrincipalID'
+        - $ref: '#/components/parameters/AuthRoleID'
+      responses:
+        '204':
+          description: Role assigned.
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: unassignAuthPrincipalRole
+      summary: Remove a role from an auth principal.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AuthPrincipalID'
+        - $ref: '#/components/parameters/AuthRoleID'
+      responses:
+        '204':
+          description: Role removed.
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/auth/principals/{principal_id}/api-tokens:
+    get:
+      operationId: listAuthPrincipalAPITokens
+      summary: List API tokens for one auth principal.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AuthPrincipalID'
+      responses:
+        '200':
+          description: API-token metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthAPITokenList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: issueAuthPrincipalAPIToken
+      summary: Issue an API token for an auth principal.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AuthPrincipalID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueAuthAPITokenRequest'
+      responses:
+        '201':
+          description: API token issued. The plaintext bearer token is returned only in this response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthAPIToken'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/auth/api-tokens/{token_id}:
+    delete:
+      operationId: revokeAuthAPIToken
+      summary: Revoke an API token.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AuthAPITokenID'
+      responses:
+        '204':
+          description: API token revoked.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /v1/auth/oidc-provisioning-rules:
     get:
       operationId: listOIDCProvisioningRules
@@ -1047,6 +1249,29 @@ components:
       schema:
         type: string
         minLength: 1
+    AuthPrincipalID:
+      name: principal_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    AuthRoleID:
+      name: role_id
+      in: path
+      required: true
+      schema:
+        type: string
+        enum:
+          - auth-manager
+          - content-writer
+    AuthAPITokenID:
+      name: token_id
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
     BlobDigest:
       name: digest
       in: path
@@ -1259,6 +1484,139 @@ components:
     AttachmentID:
       type: string
       format: uuid
+    AuthRole:
+      type: object
+      required:
+        - id
+        - display_name
+        - description
+        - actions
+      properties:
+        id:
+          type: string
+          enum:
+            - auth-manager
+            - content-writer
+        display_name:
+          type: string
+        description:
+          type: string
+        actions:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    AuthRoleList:
+      type: object
+      required:
+        - roles
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuthRole'
+      additionalProperties: false
+    CreateAuthPrincipalRequest:
+      type: object
+      required:
+        - kind
+        - display_name
+      properties:
+        kind:
+          type: string
+          enum:
+            - user
+            - service
+        display_name:
+          type: string
+          minLength: 1
+        attributes:
+          type: object
+          additionalProperties: true
+      additionalProperties: false
+    AuthPrincipal:
+      type: object
+      required:
+        - id
+        - kind
+        - display_name
+        - role_ids
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum:
+            - user
+            - service
+        display_name:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+        role_ids:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    AuthPrincipalList:
+      type: object
+      required:
+        - principals
+      properties:
+        principals:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuthPrincipal'
+      additionalProperties: false
+    IssueAuthAPITokenRequest:
+      type: object
+      required:
+        - expires_at
+      properties:
+        name:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    AuthAPIToken:
+      type: object
+      required:
+        - id
+        - principal_id
+        - name
+        - expires_at
+      properties:
+        id:
+          type: string
+        principal_id:
+          type: string
+        name:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+        plaintext:
+          type: string
+          description: Full bearer token secret. Present only in issue responses.
+      additionalProperties: false
+    AuthAPITokenList:
+      type: object
+      required:
+        - api_tokens
+      properties:
+        api_tokens:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuthAPIToken'
+      additionalProperties: false
     SaveOIDCProvisioningRuleRequest:
       type: object
       required:

@@ -35,22 +35,6 @@ type rootCommand struct {
 	// PostgresURL is the PostgreSQL connection URL used for the control plane.
 	// An empty value skips database startup.
 	PostgresURL string `name:"postgres-url" env:"IMGSRV_POSTGRES_URL" help:"PostgreSQL connection URL. Empty skips database startup."`
-	// OIDCIssuerURL is the OIDC issuer used for JWT bearer authentication.
-	OIDCIssuerURL string `name:"oidc-issuer-url" env:"IMGSRV_OIDC_ISSUER_URL" help:"OIDC issuer URL for JWT bearer authentication."`
-	// OIDCAudience is the required audience for OIDC JWT bearer tokens.
-	OIDCAudience string `name:"oidc-audience" env:"IMGSRV_OIDC_AUDIENCE" help:"Required OIDC JWT audience."`
-	// OIDCRequiredScope is the token scope required before OIDC principals may write content.
-	OIDCRequiredScope string `name:"oidc-required-scope" env:"IMGSRV_OIDC_REQUIRED_SCOPE" help:"Required OIDC scope for content writes."`
-	// GitHubOIDCIssuerURL is the GitHub Actions OIDC issuer.
-	GitHubOIDCIssuerURL string `name:"github-oidc-issuer-url" env:"IMGSRV_GITHUB_OIDC_ISSUER_URL" help:"GitHub Actions OIDC issuer URL. Empty uses GitHub's public issuer."`
-	// GitHubOIDCAudience is the required audience for GitHub Actions OIDC tokens.
-	GitHubOIDCAudience string `name:"github-oidc-audience" env:"IMGSRV_GITHUB_OIDC_AUDIENCE" help:"Required GitHub Actions OIDC audience."`
-	// GitHubOIDCRepositoryID is the trusted GitHub repository_id claim.
-	GitHubOIDCRepositoryID string `name:"github-oidc-repository-id" env:"IMGSRV_GITHUB_OIDC_REPOSITORY_ID" help:"Trusted GitHub Actions OIDC repository_id claim."`
-	// GitHubOIDCWorkflowRef is the trusted GitHub workflow_ref claim.
-	GitHubOIDCWorkflowRef string `name:"github-oidc-workflow-ref" env:"IMGSRV_GITHUB_OIDC_WORKFLOW_REF" help:"Trusted GitHub Actions OIDC workflow_ref claim."`
-	// GitHubOIDCSubject is the trusted GitHub OIDC sub claim.
-	GitHubOIDCSubject string `name:"github-oidc-subject" env:"IMGSRV_GITHUB_OIDC_SUBJECT" help:"Trusted GitHub Actions OIDC sub claim."`
 	// S3Endpoint is the S3-compatible API endpoint without a URL scheme.
 	S3Endpoint string `name:"s3-endpoint" env:"IMGSRV_S3_ENDPOINT" help:"S3-compatible endpoint without a URL scheme."`
 	// S3Bucket is the bucket used for imgsrv object storage.
@@ -131,14 +115,6 @@ func ExecuteContext(ctx context.Context, args []string, run Runner, stdout io.Wr
 		MetricsListen:                      command.MetricsListen,
 		MetricsPath:                        command.MetricsPath,
 		PostgresURL:                        command.PostgresURL,
-		OIDCIssuerURL:                      command.OIDCIssuerURL,
-		OIDCAudience:                       command.OIDCAudience,
-		OIDCRequiredScope:                  command.OIDCRequiredScope,
-		GitHubOIDCIssuerURL:                command.GitHubOIDCIssuerURL,
-		GitHubOIDCAudience:                 command.GitHubOIDCAudience,
-		GitHubOIDCRepositoryID:             command.GitHubOIDCRepositoryID,
-		GitHubOIDCWorkflowRef:              command.GitHubOIDCWorkflowRef,
-		GitHubOIDCSubject:                  command.GitHubOIDCSubject,
 		S3Endpoint:                         command.S3Endpoint,
 		S3Bucket:                           command.S3Bucket,
 		S3AccessKeyID:                      command.S3AccessKeyID,

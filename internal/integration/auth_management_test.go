@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"testing"
@@ -96,11 +97,7 @@ func TestManagedOIDCProvisioningRulesAuthorizePublishers(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "managed-github-oidc-flow", image.Name)
 
-	principal, err := env.Store().Authkit().ResolveIdentity(ctx, authkit.Identity{
-		Provider: issuer.URL(),
-		Subject:  managedGitHubSubject,
-	})
-	require.NoError(t, err)
+	principal := requirePrincipalBySubject(t, adminClient, ctx, managedGitHubSubject)
 	assert.NotEmpty(t, principal.ID)
 
 	deniedClient := newBearerClient(t, env, issuer.SignToken(t, githubActionsClaims(func(claims map[string]any) {
@@ -125,4 +122,115 @@ func TestManagedOIDCProvisioningRulesAuthorizePublishers(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "managed-scope-oidc-flow", image.Name)
+
+	scopePrincipal := requirePrincipalBySubject(t, adminClient, ctx, "subject-1")
+
+	_, err = adminClient.Auth().UpdateOIDCProvisioningRule(
+		ctx,
+		scopeRule.ID,
+		imgsrv.SaveOIDCProvisioningRuleRequest{
+			DisplayName:     scopeRule.DisplayName,
+			IssuerURL:       issuer.URL(),
+			Audience:        "imgsrv-api",
+			ForwardedClaims: []string{"scope", "groups"},
+			Condition:       `hasToken(claims.scope, "imgsrv.write") && hasAny(claims.groups, ["publishers"])`,
+			Enabled:         boolPtr(false),
+		},
+	)
+	require.NoError(t, err)
+
+	futureDisabledClient := newBearerClient(t, env, issuer.SignToken(t, func(claims map[string]any) {
+		claims["sub"] = "subject-disabled"
+		claims["groups"] = []string{"publishers"}
+	}))
+	_, err = futureDisabledClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "managed-scope-disabled-future",
+	})
+	assertProblemStatus(t, err, http.StatusForbidden)
+
+	image, err = scopeClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "managed-scope-existing-after-disable",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "managed-scope-existing-after-disable", image.Name)
+
+	_, err = adminClient.Auth().UpdateOIDCProvisioningRule(
+		ctx,
+		scopeRule.ID,
+		imgsrv.SaveOIDCProvisioningRuleRequest{
+			DisplayName:     scopeRule.DisplayName,
+			IssuerURL:       issuer.URL(),
+			Audience:        "imgsrv-api",
+			ForwardedClaims: []string{"scope", "groups"},
+			Condition:       `hasToken(claims.scope, "imgsrv.write") && hasAny(claims.groups, ["publishers"])`,
+			Enabled:         boolPtr(true),
+		},
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, adminClient.Auth().UnassignPrincipalRole(ctx, scopePrincipal.ID, "content-writer"))
+	scopeChangedAfterUnassignClient := newBearerClient(t, env, issuer.SignToken(t, func(claims map[string]any) {
+		claims["groups"] = []string{"publishers", "admins"}
+		claims["scope"] = "openid profile imgsrv.write extra"
+	}))
+	_, err = scopeChangedAfterUnassignClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "managed-scope-existing-after-unassign-changed-claims",
+	})
+	assertProblemStatus(t, err, http.StatusForbidden)
+
+	_, err = scopeClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "managed-scope-existing-after-unassign",
+	})
+	assertProblemStatus(t, err, http.StatusForbidden)
+
+	deleteScopeClient := newBearerClient(t, env, issuer.SignToken(t, func(claims map[string]any) {
+		claims["sub"] = "subject-delete-existing"
+		claims["groups"] = []string{"publishers"}
+	}))
+	image, err = deleteScopeClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "managed-scope-delete-existing-before-delete",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "managed-scope-delete-existing-before-delete", image.Name)
+
+	require.NoError(t, adminClient.Auth().DeleteOIDCProvisioningRule(ctx, scopeRule.ID))
+
+	futureDeletedClient := newBearerClient(t, env, issuer.SignToken(t, func(claims map[string]any) {
+		claims["sub"] = "subject-deleted"
+		claims["groups"] = []string{"publishers"}
+	}))
+	_, err = futureDeletedClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "managed-scope-deleted-future",
+	})
+	assertProblemStatus(t, err, http.StatusForbidden)
+
+	image, err = deleteScopeClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "managed-scope-existing-after-delete",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "managed-scope-existing-after-delete", image.Name)
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func requirePrincipalBySubject(
+	t testing.TB,
+	client *imgsrv.Client,
+	ctx context.Context,
+	subject string,
+) imgsrv.Principal {
+	t.Helper()
+
+	principals, err := client.Auth().ListPrincipals(ctx)
+	require.NoError(t, err)
+	for _, principal := range principals {
+		if got, _ := principal.Attributes["subject"].(string); got == subject {
+			return principal
+		}
+	}
+
+	require.Failf(t, "principal not found", "subject %q was not in %+v", subject, principals)
+	return imgsrv.Principal{}
 }

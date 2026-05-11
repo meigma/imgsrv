@@ -112,7 +112,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
-	authDependency, err := newAuthService(ctx, cfg, store)
+	authDependency, err := newAuthService(ctx, store, os.Stdout)
 	if err != nil {
 		if store != nil {
 			return joinError(err, store.Close())
@@ -204,18 +204,13 @@ type authDependency struct {
 	management httpapi.AuthManagementService
 }
 
-// newAuthService builds authkit middleware from the shared Postgres store and configured issuers.
-func newAuthService(ctx context.Context, cfg Config, store *postgres.Store) (authDependency, error) {
-	if err := cfg.validateOIDCConfig(); err != nil {
-		return authDependency{}, err
-	}
-	if err := cfg.validateGitHubOIDCConfig(); err != nil {
-		return authDependency{}, err
-	}
+// newAuthService builds authkit middleware from the shared Postgres store.
+func newAuthService(
+	ctx context.Context,
+	store *postgres.Store,
+	bootstrapWriter io.Writer,
+) (authDependency, error) {
 	if store == nil {
-		if cfg.hasAuthConfig() {
-			return authDependency{}, errors.New("postgres url is required when auth is configured")
-		}
 		return authDependency{}, nil
 	}
 
@@ -223,20 +218,14 @@ func newAuthService(ctx context.Context, cfg Config, store *postgres.Store) (aut
 	if err := authz.EnsureBuiltinRoles(ctx, authStore); err != nil {
 		return authDependency{}, err
 	}
+	if err := authz.EnsureBootstrapAdmin(ctx, authz.BootstrapConfig{
+		Store:  authStore,
+		Output: bootstrapWriter,
+	}); err != nil {
+		return authDependency{}, err
+	}
 	service, err := authz.NewMiddleware(ctx, authz.Config{
-		Store: authStore,
-		OIDC: authz.OIDCConfig{
-			IssuerURL:     cfg.OIDCIssuerURL,
-			Audience:      cfg.OIDCAudience,
-			RequiredScope: cfg.OIDCRequiredScope,
-		},
-		GitHubOIDC: authz.GitHubOIDCConfig{
-			IssuerURL:    cfg.GitHubOIDCIssuerURL,
-			Audience:     cfg.GitHubOIDCAudience,
-			RepositoryID: cfg.GitHubOIDCRepositoryID,
-			WorkflowRef:  cfg.GitHubOIDCWorkflowRef,
-			Subject:      cfg.GitHubOIDCSubject,
-		},
+		Store:         authStore,
 		ErrorRenderer: httpapi.WriteAuthError,
 	})
 	if err != nil {

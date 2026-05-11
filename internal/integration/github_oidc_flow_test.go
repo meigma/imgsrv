@@ -26,15 +26,21 @@ const (
 
 func TestGitHubActionsOIDCWriteFlow(t *testing.T) {
 	issuer := testoidc.Start(t, time.Now().UTC())
-	env := harness.Start(t, harness.WithGitHubActionsOIDC(
-		issuer.URL(),
-		githubOIDCAudience,
-		githubRepositoryID,
-		githubWorkflowRef,
-		githubOIDCSubject,
-		issuer.HTTPClient(),
-	))
+	env := harness.Start(t, harness.WithAPIToken(), harness.WithOIDCHTTPClient(issuer.HTTPClient()))
 	ctx := t.Context()
+	adminClient := newBearerClient(t, env, env.APIToken())
+	_, err := adminClient.Auth().CreateOIDCProvisioningRule(ctx, imgsrv.SaveOIDCProvisioningRuleRequest{
+		ID:              "github-main-publisher",
+		DisplayName:     "GitHub main publisher",
+		IssuerURL:       issuer.URL(),
+		Audience:        githubOIDCAudience,
+		ForwardedClaims: []string{"repository_id", "workflow_ref"},
+		Condition: `identity.subject == "` + githubOIDCSubject + `" &&
+			claims.repository_id == "` + githubRepositoryID + `" &&
+			claims.workflow_ref == "` + githubWorkflowRef + `"`,
+	})
+	require.NoError(t, err)
+
 	trustedClient := newBearerClient(t, env, issuer.SignToken(t, githubActionsClaims(nil)))
 
 	image, err := trustedClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{

@@ -54,21 +54,6 @@ func WithAPIToken() Option {
 	}
 }
 
-// WithOIDC configures generic OIDC JWT bearer authentication for the test server.
-func WithOIDC(
-	issuerURL string,
-	audience string,
-	requiredScope string,
-	httpClients ...*http.Client,
-) Option {
-	return func(options *options) {
-		options.oidcIssuerURL = issuerURL
-		options.oidcAudience = audience
-		options.oidcRequiredScope = requiredScope
-		options.useOIDCHTTPClient(httpClients...)
-	}
-}
-
 // WithOIDCHTTPClient configures the HTTP client used for OIDC discovery and JWKS requests.
 func WithOIDCHTTPClient(httpClient *http.Client) Option {
 	return func(options *options) {
@@ -76,22 +61,13 @@ func WithOIDCHTTPClient(httpClient *http.Client) Option {
 	}
 }
 
-// WithGitHubActionsOIDC configures GitHub Actions OIDC publisher authentication.
-func WithGitHubActionsOIDC(
-	issuerURL string,
-	audience string,
-	repositoryID string,
-	workflowRef string,
-	subject string,
-	httpClients ...*http.Client,
-) Option {
+// WithBootstrapOutput captures the one-time bootstrap token printed on first startup.
+func WithBootstrapOutput(output io.Writer) Option {
 	return func(options *options) {
-		options.githubOIDCIssuerURL = issuerURL
-		options.githubOIDCAudience = audience
-		options.githubOIDCRepositoryID = repositoryID
-		options.githubOIDCWorkflowRef = workflowRef
-		options.githubOIDCSubject = subject
-		options.useOIDCHTTPClient(httpClients...)
+		if output == nil {
+			return
+		}
+		options.bootstrapOutput = output
 	}
 }
 
@@ -179,18 +155,11 @@ func (env *Env) APIToken() string {
 }
 
 type options struct {
-	logger                 *slog.Logger
-	casPromotion           bool
-	apiToken               bool
-	oidcIssuerURL          string
-	oidcAudience           string
-	oidcRequiredScope      string
-	githubOIDCIssuerURL    string
-	githubOIDCAudience     string
-	githubOIDCRepositoryID string
-	githubOIDCWorkflowRef  string
-	githubOIDCSubject      string
-	oidcHTTPClient         *http.Client
+	logger          *slog.Logger
+	bootstrapOutput io.Writer
+	casPromotion    bool
+	apiToken        bool
+	oidcHTTPClient  *http.Client
 }
 
 // newOptions applies opts to a zero options value and returns the resolved

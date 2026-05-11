@@ -224,7 +224,12 @@ CAS correctness.
 
 Published query and download surfaces are anonymous in v0. Write, draft, upload,
 publish, and alias mutation APIs require a bearer principal authorized for
-`content.write`, currently from API tokens or configured OIDC publishers.
+`content.write`. Authentication and authorization state is operator-managed
+through `/v1/auth/*`: operators create principals, assign built-in roles, issue
+or revoke API tokens, and define OIDC provisioning rules for external
+publishers. A fresh Postgres-backed deployment with no `auth-manager` principal
+prints one 24-hour bootstrap API token to stdout so the admin API can be used for
+initial setup.
 
 Downloads are proxied through `imgsrv` by default. This keeps Garage hidden,
 keeps clients on stable `imgsrv` URLs, and avoids surprising compatibility
@@ -319,7 +324,6 @@ The following are intentionally outside v0:
 - other protocol-specific materializations
 - `tus` upload support
 - direct pre-signed upload/download optimization
-- DB-backed publisher trust-rule management
 - private download policy
 - transparency log integration
 - advanced deduplication beyond digest-addressed CAS
