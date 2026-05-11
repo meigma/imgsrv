@@ -192,6 +192,7 @@ func TestManagedOIDCProvisioningRulesAuthorizePublishers(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "managed-scope-delete-existing-before-delete", image.Name)
+	deletePrincipal := requirePrincipalBySubject(t, adminClient, ctx, "subject-delete-existing")
 
 	require.NoError(t, adminClient.Auth().DeleteOIDCProvisioningRule(ctx, scopeRule.ID))
 
@@ -209,6 +210,30 @@ func TestManagedOIDCProvisioningRulesAuthorizePublishers(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "managed-scope-existing-after-delete", image.Name)
+
+	preview, err := adminClient.Auth().PreviewOIDCProvisioningRuleReconciliation(ctx, scopeRule.ID)
+	require.NoError(t, err)
+	assert.False(t, preview.Applied)
+	assert.Equal(t, []string{"content-writer"}, preview.UnassignRoleIDs)
+	require.Len(t, preview.Principals, 1)
+	assert.Equal(t, deletePrincipal.ID, preview.Principals[0].ID)
+
+	applied, err := adminClient.Auth().ReconcileOIDCProvisioningRule(ctx, scopeRule.ID)
+	require.NoError(t, err)
+	assert.True(t, applied.Applied)
+	require.Len(t, applied.Principals, 1)
+	assert.Equal(t, deletePrincipal.ID, applied.Principals[0].ID)
+	assert.NotContains(t, applied.Principals[0].RoleIDs, "content-writer")
+
+	_, err = deleteScopeClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "managed-scope-reconciled-after-delete",
+	})
+	assertProblemStatus(t, err, http.StatusForbidden)
+
+	reapplied, err := adminClient.Auth().ReconcileOIDCProvisioningRule(ctx, scopeRule.ID)
+	require.NoError(t, err)
+	assert.True(t, reapplied.Applied)
+	assert.Empty(t, reapplied.Principals)
 }
 
 func boolPtr(value bool) *bool {

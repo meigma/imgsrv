@@ -232,6 +232,89 @@ func TestOIDCProvisioningRuleCRUD(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
+func TestOIDCProvisioningRuleReconciliation(t *testing.T) {
+	authMgmt := newFakeAuthManagement()
+	authMgmt.principals["principal-1"] = authz.Principal{
+		ID:          "principal-1",
+		Kind:        authkit.PrincipalKindService,
+		DisplayName: "publisher",
+		Attributes: map[string]any{
+			"provisioning_rule_id": "rule-1",
+		},
+		RoleIDs: []string{authz.RoleAuthManager, authz.RoleContentWriter},
+	}
+	authMgmt.principals["principal-2"] = authz.Principal{
+		ID:          "principal-2",
+		Kind:        authkit.PrincipalKindService,
+		DisplayName: "other publisher",
+		Attributes: map[string]any{
+			"provisioning_rule_id": "rule-2",
+		},
+		RoleIDs: []string{authz.RoleContentWriter},
+	}
+	handler := New(Dependencies{
+		Auth:           newAcceptingAuthService(t),
+		AuthManagement: authMgmt,
+	})
+
+	preview := doAuthManagementJSON[oidcProvisioningRuleReconciliationResponse](
+		t,
+		handler,
+		http.MethodGet,
+		"/v1/auth/oidc-provisioning-rules/rule-1/reconciliation",
+		"",
+		http.StatusOK,
+	)
+	assert.False(t, preview.Applied)
+	assert.Equal(t, "rule-1", preview.RuleID)
+	assert.Equal(t, []string{authz.RoleContentWriter}, preview.UnassignRoleIDs)
+	require.Len(t, preview.Principals, 1)
+	assert.Equal(t, "principal-1", preview.Principals[0].ID)
+	assert.Equal(t, []string{authz.RoleAuthManager, authz.RoleContentWriter}, preview.Principals[0].RoleIDs)
+
+	applied := doAuthManagementJSON[oidcProvisioningRuleReconciliationResponse](
+		t,
+		handler,
+		http.MethodPost,
+		"/v1/auth/oidc-provisioning-rules/rule-1/reconciliation",
+		"",
+		http.StatusOK,
+	)
+	assert.True(t, applied.Applied)
+	require.Len(t, applied.Principals, 1)
+	assert.Equal(t, []string{authz.RoleAuthManager}, applied.Principals[0].RoleIDs)
+	assert.Equal(t, []string{authz.RoleAuthManager}, authMgmt.principals["principal-1"].RoleIDs)
+	assert.Equal(t, []string{authz.RoleContentWriter}, authMgmt.principals["principal-2"].RoleIDs)
+
+	reapplied := doAuthManagementJSON[oidcProvisioningRuleReconciliationResponse](
+		t,
+		handler,
+		http.MethodPost,
+		"/v1/auth/oidc-provisioning-rules/rule-1/reconciliation",
+		"",
+		http.StatusOK,
+	)
+	assert.True(t, reapplied.Applied)
+	assert.Empty(t, reapplied.Principals)
+}
+
+func TestOIDCProvisioningRuleReconciliationReturnsUnavailableWhenServiceMissing(t *testing.T) {
+	handler := New(Dependencies{
+		Auth: newAcceptingAuthService(t),
+	})
+	req := newAuthManagementRequest(
+		http.MethodGet,
+		"/v1/auth/oidc-provisioning-rules/rule-1/reconciliation",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assertProblem(t, rec, http.StatusServiceUnavailable, errAuthManagementUnavailable.Error())
+}
+
 func TestOIDCProvisioningRuleRejectsBadCEL(t *testing.T) {
 	handler := New(Dependencies{
 		Auth:           newAcceptingAuthService(t),
@@ -546,6 +629,61 @@ func (f *fakeAuthManagement) ListOIDCProvisioningRules(
 	}
 
 	return rules, nil
+}
+
+func (f *fakeAuthManagement) PreviewOIDCProvisioningRuleReconciliation(
+	ctx context.Context,
+	ruleID string,
+) (authz.OIDCProvisioningRuleReconciliation, error) {
+	return f.oidcProvisioningRuleReconciliation(ctx, ruleID, false)
+}
+
+func (f *fakeAuthManagement) ReconcileOIDCProvisioningRule(
+	ctx context.Context,
+	ruleID string,
+) (authz.OIDCProvisioningRuleReconciliation, error) {
+	return f.oidcProvisioningRuleReconciliation(ctx, ruleID, true)
+}
+
+func (f *fakeAuthManagement) oidcProvisioningRuleReconciliation(
+	_ context.Context,
+	ruleID string,
+	apply bool,
+) (authz.OIDCProvisioningRuleReconciliation, error) {
+	reconciliation := authz.OIDCProvisioningRuleReconciliation{
+		RuleID:          ruleID,
+		UnassignRoleIDs: []string{authz.RoleContentWriter},
+		Principals:      []authz.Principal{},
+		Applied:         apply,
+	}
+	principals := make([]authz.Principal, 0, len(f.principals))
+	for _, principal := range f.principals {
+		principals = append(principals, principal)
+	}
+	sort.Slice(principals, func(i, j int) bool {
+		return principals[i].ID < principals[j].ID
+	})
+	for _, principal := range principals {
+		if principal.Attributes["provisioning_rule_id"] != ruleID {
+			continue
+		}
+		if !slices.Contains(principal.RoleIDs, authz.RoleContentWriter) {
+			continue
+		}
+		if apply {
+			filtered := principal.RoleIDs[:0]
+			for _, assigned := range principal.RoleIDs {
+				if assigned != authz.RoleContentWriter {
+					filtered = append(filtered, assigned)
+				}
+			}
+			principal.RoleIDs = filtered
+			f.principals[principal.ID] = principal
+		}
+		reconciliation.Principals = append(reconciliation.Principals, principal)
+	}
+
+	return reconciliation, nil
 }
 
 func fakeRule(req authz.SaveOIDCProvisioningRuleRequest) authz.OIDCProvisioningRule {

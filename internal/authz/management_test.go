@@ -119,6 +119,62 @@ func TestManagedRuleConditionBindsAudience(t *testing.T) {
 	assert.Equal(t, []string{RoleContentWriter}, matchingRoles)
 }
 
+func TestManagementServiceReconcilesOIDCProvisioningRulePrincipals(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStore()
+	service := NewManagementService(ManagementConfig{Store: store})
+	require.NoError(t, EnsureBuiltinRoles(ctx, store))
+
+	target, err := service.CreatePrincipal(ctx, CreatePrincipalRequest{
+		Kind:        authkit.PrincipalKindService,
+		DisplayName: "rule publisher",
+		Attributes: map[string]any{
+			"provisioning_rule_id": "rule-1",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.AssignPrincipalRole(ctx, target.ID, RoleContentWriter))
+	require.NoError(t, service.AssignPrincipalRole(ctx, target.ID, RoleAuthManager))
+
+	otherRule, err := service.CreatePrincipal(ctx, CreatePrincipalRequest{
+		Kind:        authkit.PrincipalKindService,
+		DisplayName: "other publisher",
+		Attributes: map[string]any{
+			"provisioning_rule_id": "rule-2",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.AssignPrincipalRole(ctx, otherRule.ID, RoleContentWriter))
+
+	preview, err := service.PreviewOIDCProvisioningRuleReconciliation(ctx, "rule-1")
+	require.NoError(t, err)
+	assert.False(t, preview.Applied)
+	assert.Equal(t, "rule-1", preview.RuleID)
+	assert.Equal(t, []string{RoleContentWriter}, preview.UnassignRoleIDs)
+	require.Len(t, preview.Principals, 1)
+	assert.Equal(t, target.ID, preview.Principals[0].ID)
+	assert.ElementsMatch(t, []string{RoleAuthManager, RoleContentWriter}, preview.Principals[0].RoleIDs)
+
+	applied, err := service.ReconcileOIDCProvisioningRule(ctx, "rule-1")
+	require.NoError(t, err)
+	assert.True(t, applied.Applied)
+	require.Len(t, applied.Principals, 1)
+	assert.Equal(t, target.ID, applied.Principals[0].ID)
+	assert.Equal(t, []string{RoleAuthManager}, applied.Principals[0].RoleIDs)
+
+	found, err := service.FindPrincipal(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{RoleAuthManager}, found.RoleIDs)
+	foundOther, err := service.FindPrincipal(ctx, otherRule.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{RoleContentWriter}, foundOther.RoleIDs)
+
+	reapplied, err := service.ReconcileOIDCProvisioningRule(ctx, "rule-1")
+	require.NoError(t, err)
+	assert.True(t, reapplied.Applied)
+	assert.Empty(t, reapplied.Principals)
+}
+
 func TestManagedClaimPathsIncludesAudienceOnce(t *testing.T) {
 	assert.Equal(t, []authkit.ClaimPath{
 		{"repository_id"},

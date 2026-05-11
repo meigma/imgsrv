@@ -207,6 +207,18 @@ type AuthManagementService interface {
 	// DeleteOIDCProvisioningRule deletes one OIDC provisioning rule.
 	DeleteOIDCProvisioningRule(context.Context, string) error
 
+	// PreviewOIDCProvisioningRuleReconciliation previews rule-granted role cleanup.
+	PreviewOIDCProvisioningRuleReconciliation(
+		context.Context,
+		string,
+	) (authz.OIDCProvisioningRuleReconciliation, error)
+
+	// ReconcileOIDCProvisioningRule removes rule-granted roles from existing principals.
+	ReconcileOIDCProvisioningRule(
+		context.Context,
+		string,
+	) (authz.OIDCProvisioningRuleReconciliation, error)
+
 	// FindOIDCProvisioningRule returns one OIDC provisioning rule.
 	FindOIDCProvisioningRule(context.Context, string) (authz.OIDCProvisioningRule, error)
 
@@ -397,6 +409,14 @@ func (a *api) registerAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(
 		"DELETE /v1/auth/oidc-provisioning-rules/{rule_id}",
 		a.requireAction(authz.ActionAuthManage, a.deleteOIDCProvisioningRule),
+	)
+	mux.HandleFunc(
+		"GET /v1/auth/oidc-provisioning-rules/{rule_id}/reconciliation",
+		a.requireAction(authz.ActionAuthManage, a.previewOIDCProvisioningRuleReconciliation),
+	)
+	mux.HandleFunc(
+		"POST /v1/auth/oidc-provisioning-rules/{rule_id}/reconciliation",
+		a.requireAction(authz.ActionAuthManage, a.reconcileOIDCProvisioningRule),
 	)
 }
 

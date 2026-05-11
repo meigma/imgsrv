@@ -152,6 +152,14 @@ func TestClientAuthFlowBuildsRequests(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, oidcRuleFixture(false), updated)
 
+	preview, err := client.Auth().PreviewOIDCProvisioningRuleReconciliation(ctx, "rule-1")
+	require.NoError(t, err)
+	assert.Equal(t, reconciliationFixture(false), preview)
+
+	applied, err := client.Auth().ReconcileOIDCProvisioningRule(ctx, "rule-1")
+	require.NoError(t, err)
+	assert.Equal(t, reconciliationFixture(true), applied)
+
 	require.NoError(t, client.Auth().DeleteOIDCProvisioningRule(ctx, "rule-1"))
 }
 
@@ -187,6 +195,10 @@ func newClientAuthFlowServer(
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("/api/v1/auth/oidc-provisioning-rules", handleClientOIDCRules(t))
+	mux.HandleFunc(
+		"/api/v1/auth/oidc-provisioning-rules/rule-1/reconciliation",
+		handleClientOIDCReconciliation(t),
+	)
 	mux.HandleFunc("/api/v1/auth/oidc-provisioning-rules/rule-1", handleClientOIDCRule(t, enabled))
 
 	return httptest.NewServer(mux)
@@ -297,6 +309,22 @@ func handleClientOIDCRule(t *testing.T, enabled *bool) http.HandlerFunc {
 			writeJSON(t, w, http.StatusOK, oidcRuleFixture(false))
 		case http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func handleClientOIDCReconciliation(t *testing.T) http.HandlerFunc {
+	t.Helper()
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, r.Method)
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, reconciliationFixture(false))
+		case http.MethodPost:
+			writeJSON(t, w, http.StatusOK, reconciliationFixture(true))
 		default:
 			http.NotFound(w, r)
 		}
@@ -1206,6 +1234,20 @@ func oidcRuleFixture(enabled bool) OIDCProvisioningRule {
 		Condition:       "claims.repository_id == '123456789'",
 		AssignRoleIDs:   []string{"content-writer"},
 		Enabled:         enabled,
+	}
+}
+
+func reconciliationFixture(applied bool) OIDCProvisioningRuleReconciliation {
+	principal := principalFixture()
+	if applied {
+		principal.RoleIDs = []string{"auth-manager"}
+	}
+
+	return OIDCProvisioningRuleReconciliation{
+		RuleID:          "rule-1",
+		UnassignRoleIDs: []string{"content-writer"},
+		Principals:      []Principal{principal},
+		Applied:         applied,
 	}
 }
 

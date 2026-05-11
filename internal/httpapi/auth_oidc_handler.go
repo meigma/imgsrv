@@ -38,6 +38,13 @@ type oidcProvisioningRuleListResponse struct {
 	Rules []oidcProvisioningRuleResponse `json:"rules"`
 }
 
+type oidcProvisioningRuleReconciliationResponse struct {
+	RuleID          string              `json:"rule_id"`
+	UnassignRoleIDs []string            `json:"unassign_role_ids"`
+	Principals      []principalResponse `json:"principals"`
+	Applied         bool                `json:"applied"`
+}
+
 func (a *api) createOIDCProvisioningRule(w http.ResponseWriter, r *http.Request) {
 	service := a.authMgmt
 	if service == nil {
@@ -132,6 +139,41 @@ func (a *api) deleteOIDCProvisioningRule(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *api) previewOIDCProvisioningRuleReconciliation(w http.ResponseWriter, r *http.Request) {
+	service := a.authMgmt
+	if service == nil {
+		writeProblem(w, http.StatusServiceUnavailable, errAuthManagementUnavailable.Error())
+		return
+	}
+
+	reconciliation, err := service.PreviewOIDCProvisioningRuleReconciliation(
+		r.Context(),
+		r.PathValue("rule_id"),
+	)
+	if err != nil {
+		writeAuthManagementError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newOIDCProvisioningRuleReconciliationResponse(reconciliation))
+}
+
+func (a *api) reconcileOIDCProvisioningRule(w http.ResponseWriter, r *http.Request) {
+	service := a.authMgmt
+	if service == nil {
+		writeProblem(w, http.StatusServiceUnavailable, errAuthManagementUnavailable.Error())
+		return
+	}
+
+	reconciliation, err := service.ReconcileOIDCProvisioningRule(r.Context(), r.PathValue("rule_id"))
+	if err != nil {
+		writeAuthManagementError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newOIDCProvisioningRuleReconciliationResponse(reconciliation))
+}
+
 func saveOIDCProvisioningRuleRequest(
 	pathID string,
 	request oidcProvisioningRuleRequest,
@@ -182,6 +224,22 @@ func newOIDCProvisioningRuleResponse(rule authz.OIDCProvisioningRule) oidcProvis
 	}
 }
 
+func newOIDCProvisioningRuleReconciliationResponse(
+	reconciliation authz.OIDCProvisioningRuleReconciliation,
+) oidcProvisioningRuleReconciliationResponse {
+	response := oidcProvisioningRuleReconciliationResponse{
+		RuleID:          reconciliation.RuleID,
+		UnassignRoleIDs: reconciliation.UnassignRoleIDs,
+		Principals:      make([]principalResponse, 0, len(reconciliation.Principals)),
+		Applied:         reconciliation.Applied,
+	}
+	for _, principal := range reconciliation.Principals {
+		response.Principals = append(response.Principals, newPrincipalResponse(principal))
+	}
+
+	return response
+}
+
 func writeAuthManagementError(w http.ResponseWriter, err error) {
 	writeProblem(w, authManagementErrorStatus(err), err.Error())
 }
@@ -208,6 +266,7 @@ func isAuthManagementValidationError(err error) bool {
 	knownValidationFragments := []string{
 		"apikey: expiration must be in the future",
 		"authz: OIDC audience is required",
+		"authz: OIDC provisioning rule ID is required",
 		"authz: OIDC issuer URL is required",
 		"authz: OIDC issuer URL must be an absolute HTTPS URL",
 		"authz: unknown built-in role",
