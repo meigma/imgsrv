@@ -22,9 +22,6 @@ require-template-schema-exists: true
 template: testify
 template-schema: '{{.Template}}.schema.json'
 packages:
-  github.com/meigma/imgsrv/internal/auth:
-    interfaces:
-      Store:
   github.com/meigma/imgsrv/internal/catalog:
     interfaces:
       Store:
@@ -33,7 +30,6 @@ packages:
       Store:
   github.com/meigma/imgsrv/internal/httpapi:
     interfaces:
-      AuthService:
       BlobService:
       CatalogService:
       UploadService:
