@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -79,6 +80,21 @@ type OIDCProvisioningRule struct {
 
 	// Enabled controls whether the rule participates in provisioning.
 	Enabled bool
+}
+
+// OIDCProvisioningRuleReconciliation describes principals affected by a rule cleanup.
+type OIDCProvisioningRuleReconciliation struct {
+	// RuleID is the provisioning rule being reconciled.
+	RuleID string
+
+	// UnassignRoleIDs are the roles previewed or removed by reconciliation.
+	UnassignRoleIDs []string
+
+	// Principals are the principals that would be or were reconciled.
+	Principals []Principal
+
+	// Applied is true when reconciliation was applied, and false for preview responses.
+	Applied bool
 }
 
 // SaveOIDCProvisioningRuleRequest creates or updates an OIDC provisioning rule.
@@ -522,6 +538,67 @@ func (s *ManagementService) DeleteOIDCProvisioningRule(ctx context.Context, id s
 	return s.store.DeleteProvisioningRule(ctx, id)
 }
 
+// PreviewOIDCProvisioningRuleReconciliation previews rule-granted role cleanup.
+func (s *ManagementService) PreviewOIDCProvisioningRuleReconciliation(
+	ctx context.Context,
+	ruleID string,
+) (OIDCProvisioningRuleReconciliation, error) {
+	return s.oidcProvisioningRuleReconciliation(ctx, ruleID, false)
+}
+
+// ReconcileOIDCProvisioningRule removes rule-granted roles from existing principals.
+func (s *ManagementService) ReconcileOIDCProvisioningRule(
+	ctx context.Context,
+	ruleID string,
+) (OIDCProvisioningRuleReconciliation, error) {
+	return s.oidcProvisioningRuleReconciliation(ctx, ruleID, true)
+}
+
+func (s *ManagementService) oidcProvisioningRuleReconciliation(
+	ctx context.Context,
+	ruleID string,
+	apply bool,
+) (OIDCProvisioningRuleReconciliation, error) {
+	if s == nil || s.store == nil {
+		return OIDCProvisioningRuleReconciliation{}, errManagementStoreRequired()
+	}
+	ruleID = strings.TrimSpace(ruleID)
+	if ruleID == "" {
+		return OIDCProvisioningRuleReconciliation{}, errors.New("authz: OIDC provisioning rule ID is required")
+	}
+
+	result := OIDCProvisioningRuleReconciliation{
+		RuleID:          ruleID,
+		UnassignRoleIDs: []string{RoleContentWriter},
+		Principals:      []Principal{},
+		Applied:         apply,
+	}
+	principals, err := s.ListPrincipals(ctx)
+	if err != nil {
+		return OIDCProvisioningRuleReconciliation{}, err
+	}
+	for _, principal := range principals {
+		if principal.Attributes["provisioning_rule_id"] != ruleID {
+			continue
+		}
+		if !slices.Contains(principal.RoleIDs, RoleContentWriter) {
+			continue
+		}
+		if apply {
+			if err := s.store.UnassignPrincipalRole(ctx, authkit.UnassignPrincipalRoleRequest{
+				PrincipalID: principal.ID,
+				RoleID:      RoleContentWriter,
+			}); err != nil {
+				return OIDCProvisioningRuleReconciliation{}, err
+			}
+			principal.RoleIDs = withoutRole(principal.RoleIDs, RoleContentWriter)
+		}
+		result.Principals = append(result.Principals, principal)
+	}
+
+	return result, nil
+}
+
 // FindOIDCProvisioningRule returns one OIDC provisioning rule.
 func (s *ManagementService) FindOIDCProvisioningRule(
 	ctx context.Context,
@@ -729,4 +806,15 @@ func firstString(values []string) string {
 
 func errManagementStoreRequired() error {
 	return errors.New("authz: management store is required")
+}
+
+func withoutRole(roleIDs []string, roleID string) []string {
+	filtered := make([]string, 0, len(roleIDs))
+	for _, assigned := range roleIDs {
+		if assigned != roleID {
+			filtered = append(filtered, assigned)
+		}
+	}
+
+	return filtered
 }

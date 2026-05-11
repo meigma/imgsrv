@@ -324,6 +324,51 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /v1/auth/oidc-provisioning-rules/{rule_id}/reconciliation:
+    get:
+      operationId: previewOIDCProvisioningRuleReconciliation
+      summary: Preview OIDC provisioning rule role cleanup.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OIDCProvisioningRuleID'
+      responses:
+        '200':
+          description: Principals that would be reconciled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OIDCProvisioningRuleReconciliation'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: reconcileOIDCProvisioningRule
+      summary: Remove rule-granted roles from existing principals.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OIDCProvisioningRuleID'
+      responses:
+        '200':
+          description: Principals reconciled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OIDCProvisioningRuleReconciliation'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Problem'
   /v1/uploads:
     post:
       operationId: beginUpload
@@ -1690,6 +1735,27 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OIDCProvisioningRule'
+      additionalProperties: false
+    OIDCProvisioningRuleReconciliation:
+      type: object
+      required:
+        - rule_id
+        - unassign_role_ids
+        - principals
+        - applied
+      properties:
+        rule_id:
+          type: string
+        unassign_role_ids:
+          type: array
+          items:
+            type: string
+        principals:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuthPrincipal'
+        applied:
+          type: boolean
       additionalProperties: false
     UploadState:
       type: string

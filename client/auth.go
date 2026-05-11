@@ -54,6 +54,18 @@ type AuthClient interface {
 
 	// DeleteOIDCProvisioningRule deletes one OIDC provisioning rule.
 	DeleteOIDCProvisioningRule(context.Context, string) error
+
+	// PreviewOIDCProvisioningRuleReconciliation previews rule-granted role cleanup.
+	PreviewOIDCProvisioningRuleReconciliation(
+		context.Context,
+		string,
+	) (OIDCProvisioningRuleReconciliation, error)
+
+	// ReconcileOIDCProvisioningRule removes rule-granted roles from existing principals.
+	ReconcileOIDCProvisioningRule(
+		context.Context,
+		string,
+	) (OIDCProvisioningRuleReconciliation, error)
 }
 
 // HTTPAuthClient is the concrete HTTP implementation of AuthClient.
@@ -191,6 +203,21 @@ type OIDCProvisioningRule struct {
 
 	// Enabled controls whether the rule participates in provisioning.
 	Enabled bool `json:"enabled"`
+}
+
+// OIDCProvisioningRuleReconciliation describes principals affected by rule cleanup.
+type OIDCProvisioningRuleReconciliation struct {
+	// RuleID is the provisioning rule being reconciled.
+	RuleID string `json:"rule_id"`
+
+	// UnassignRoleIDs are the roles previewed or removed by reconciliation.
+	UnassignRoleIDs []string `json:"unassign_role_ids"`
+
+	// Principals are the principals that would be or were reconciled.
+	Principals []Principal `json:"principals"`
+
+	// Applied is true when reconciliation was applied, and false for preview responses.
+	Applied bool `json:"applied"`
 }
 
 type oidcProvisioningRuleList struct {
@@ -446,4 +473,42 @@ func (client *HTTPAuthClient) DeleteOIDCProvisioningRule(ctx context.Context, ru
 	}()
 
 	return nil
+}
+
+// PreviewOIDCProvisioningRuleReconciliation previews rule-granted role cleanup.
+func (client *HTTPAuthClient) PreviewOIDCProvisioningRuleReconciliation(
+	ctx context.Context,
+	ruleID string,
+) (OIDCProvisioningRuleReconciliation, error) {
+	var reconciliation OIDCProvisioningRuleReconciliation
+	err := client.transport.do(
+		ctx,
+		http.MethodGet,
+		"/v1/auth/oidc-provisioning-rules/"+url.PathEscape(ruleID)+"/reconciliation",
+		nil,
+		0,
+		nil,
+		&reconciliation,
+	)
+
+	return reconciliation, err
+}
+
+// ReconcileOIDCProvisioningRule removes rule-granted roles from existing principals.
+func (client *HTTPAuthClient) ReconcileOIDCProvisioningRule(
+	ctx context.Context,
+	ruleID string,
+) (OIDCProvisioningRuleReconciliation, error) {
+	var reconciliation OIDCProvisioningRuleReconciliation
+	err := client.transport.do(
+		ctx,
+		http.MethodPost,
+		"/v1/auth/oidc-provisioning-rules/"+url.PathEscape(ruleID)+"/reconciliation",
+		nil,
+		0,
+		nil,
+		&reconciliation,
+	)
+
+	return reconciliation, err
 }
