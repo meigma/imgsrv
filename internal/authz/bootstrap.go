@@ -78,7 +78,7 @@ func EnsureBootstrapAdmin(ctx context.Context, config BootstrapConfig) error {
 		displayName = defaultBootstrapDisplayName
 	}
 
-	apiTokens, err := apikey.NewService(config.Store)
+	apiTokens, err := apikey.NewService(config.Store, apikey.WithClock(now))
 	if err != nil {
 		return err
 	}
