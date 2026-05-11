@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -253,6 +254,46 @@ func TestOIDCProvisioningRuleRejectsBadCEL(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	assertProblem(t, rec, http.StatusBadRequest, "condition must produce bool")
+}
+
+func TestAuthManagementErrorStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{
+			name:   "provisioning rule not found",
+			err:    authkit.ErrProvisioningRuleNotFound,
+			status: http.StatusNotFound,
+		},
+		{
+			name:   "principal not found",
+			err:    authkit.ErrPrincipalNotFound,
+			status: http.StatusNotFound,
+		},
+		{
+			name:   "validation",
+			err:    errors.New("authz: OIDC audience is required"),
+			status: http.StatusBadRequest,
+		},
+		{
+			name:   "server failure",
+			err:    errors.New("postgres: query authkit_principals: connection refused"),
+			status: http.StatusInternalServerError,
+		},
+		{
+			name:   "provider backend failure",
+			err:    errors.New("authz: fetch OIDC discovery document: unexpected status 503"),
+			status: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.status, authManagementErrorStatus(tt.err))
+		})
+	}
 }
 
 func newAuthManagementRequest(method string, target string, body *strings.Reader) *http.Request {

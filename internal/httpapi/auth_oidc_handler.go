@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/meigma/authkit"
 	"github.com/meigma/authkit/apikey"
@@ -182,12 +183,44 @@ func newOIDCProvisioningRuleResponse(rule authz.OIDCProvisioningRule) oidcProvis
 }
 
 func writeAuthManagementError(w http.ResponseWriter, err error) {
+	writeProblem(w, authManagementErrorStatus(err), err.Error())
+}
+
+func authManagementErrorStatus(err error) int {
 	switch {
 	case errors.Is(err, authkit.ErrProvisioningRuleNotFound):
-		writeProblem(w, http.StatusNotFound, err.Error())
+		return http.StatusNotFound
 	case errors.Is(err, authkit.ErrPrincipalNotFound), errors.Is(err, apikey.ErrTokenNotFound):
-		writeProblem(w, http.StatusNotFound, err.Error())
+		return http.StatusNotFound
+	case isAuthManagementValidationError(err):
+		return http.StatusBadRequest
 	default:
-		writeProblem(w, http.StatusBadRequest, err.Error())
+		return http.StatusInternalServerError
 	}
+}
+
+func isAuthManagementValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := err.Error()
+	knownValidationFragments := []string{
+		"apikey: expiration must be in the future",
+		"authz: OIDC audience is required",
+		"authz: OIDC issuer URL is required",
+		"authz: OIDC issuer URL must be an absolute HTTPS URL",
+		"authz: unknown built-in role",
+		"condition exceeds",
+		"condition is required",
+		"condition must produce bool",
+		"unsupported principal kind",
+	}
+	for _, fragment := range knownValidationFragments {
+		if strings.Contains(message, fragment) {
+			return true
+		}
+	}
+
+	return false
 }
