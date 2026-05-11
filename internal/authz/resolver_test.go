@@ -59,6 +59,47 @@ func TestPolicyResolverProvisionsManagedOIDCRuleWithInitialRoles(t *testing.T) {
 	require.NotEmpty(t, store.resolvedIdentities)
 	assert.Contains(t, store.resolvedIdentities[0].Subject, "subject-1#claims:")
 	assert.Contains(t, store.provisionIdentity.Subject, "subject-1#claims:")
+	assert.Equal(t, "github-main-publisher", principal.Attributes["provisioning_rule_id"])
+}
+
+func TestPolicyResolverUsesExistingRulePrincipalForChangedMatchingClaims(t *testing.T) {
+	store := &resolverStore{
+		resolveErr: authkit.ErrUnresolvedIdentity,
+		principals: []authkit.Principal{
+			{
+				ID:          "existing-principal",
+				Kind:        authkit.PrincipalKindUser,
+				DisplayName: "oidc:subject-1",
+				Attributes: map[string]any{
+					"provider":             "https://issuer.example",
+					"subject":              "subject-1",
+					"provisioning_rule_id": "scope-group-publisher",
+				},
+			},
+		},
+		rules: []authkit.ProvisioningRule{
+			{
+				ID:            "scope-group-publisher",
+				Provider:      "https://issuer.example",
+				Condition:     `hasAny(claims.groups, ["publishers"])`,
+				AssignRoleIDs: []string{RoleContentWriter},
+				Enabled:       true,
+			},
+		},
+	}
+	resolver := policyResolver{store: store}
+
+	principal, err := resolver.ResolveIdentity(context.Background(), authkit.Identity{
+		Provider: "https://issuer.example",
+		Subject:  "subject-1",
+		Claims: map[string]any{
+			"groups": []string{"publishers", "admins"},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "existing-principal", principal.ID)
+	assert.Equal(t, 0, store.provisionCalls)
 }
 
 func TestPolicyResolverDoesNotProvisionUnmatchedGitHubIdentity(t *testing.T) {
@@ -97,6 +138,7 @@ func TestPolicyResolverLeavesAPITokensUnprovisioned(t *testing.T) {
 type resolverStore struct {
 	resolveErr              error
 	rules                   []authkit.ProvisioningRule
+	principals              []authkit.Principal
 	provisionCalls          int
 	provisionInitialRoleIDs []string
 	resolvedIdentities      []authkit.Identity
@@ -138,8 +180,12 @@ func (s *resolverStore) ListProvisioningRules(context.Context) ([]authkit.Provis
 	return append([]authkit.ProvisioningRule(nil), s.rules...), nil
 }
 
-func TestLocalResolutionIdentityUsesRawAPITokenSubject(t *testing.T) {
-	identity := localResolutionIdentity(authkit.Identity{
+func (s *resolverStore) ListPrincipals(context.Context) ([]authkit.Principal, error) {
+	return append([]authkit.Principal(nil), s.principals...), nil
+}
+
+func TestClaimFingerprintIdentityUsesRawAPITokenSubject(t *testing.T) {
+	identity := claimFingerprintIdentity(authkit.Identity{
 		Provider: apikey.Provider,
 		Subject:  "token-1",
 		Claims: map[string]any{
@@ -150,8 +196,8 @@ func TestLocalResolutionIdentityUsesRawAPITokenSubject(t *testing.T) {
 	assert.Equal(t, "token-1", identity.Subject)
 }
 
-func TestLocalResolutionIdentityIncludesOIDCClaims(t *testing.T) {
-	identity := localResolutionIdentity(authkit.Identity{
+func TestClaimFingerprintIdentityIncludesOIDCClaims(t *testing.T) {
+	identity := claimFingerprintIdentity(authkit.Identity{
 		Provider: "https://issuer.example",
 		Subject:  "subject-1",
 		Claims: map[string]any{

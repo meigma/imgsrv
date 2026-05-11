@@ -14,6 +14,7 @@ import (
 )
 
 type identityStore interface {
+	authkit.PrincipalLister
 	authkit.PrincipalResolver
 	authkit.IdentityProvisioner
 	authkit.ProvisioningRuleLister
@@ -27,7 +28,7 @@ func (r *policyResolver) ResolveIdentity(
 	ctx context.Context,
 	identity authkit.Identity,
 ) (*authkit.Principal, error) {
-	localIdentity := localResolutionIdentity(identity)
+	localIdentity := claimFingerprintIdentity(identity)
 	principal, err := r.store.ResolveIdentity(ctx, localIdentity)
 	if err == nil {
 		return principal, nil
@@ -42,10 +43,17 @@ func (r *policyResolver) ResolveIdentity(
 	default:
 		prefix, kind := principalShape(identity)
 		req := principalRequest(prefix, kind, identity)
-		if roleIDs, ok, roleErr := r.managedInitialRoleIDs(ctx, identity); roleErr != nil {
+		if match, ok, roleErr := r.managedMatch(ctx, identity); roleErr != nil {
 			return nil, roleErr
 		} else if ok {
-			return r.provision(ctx, localIdentity, req, roleIDs)
+			if principal, found, findErr := r.existingRulePrincipal(ctx, identity, match.ruleIDs); findErr != nil {
+				return nil, findErr
+			} else if found {
+				return principal, nil
+			}
+			req.Attributes["provisioning_rule_id"] = match.primaryRuleID
+
+			return r.provision(ctx, localIdentity, req, match.roleIDs)
 		}
 
 		return transientPrincipal(identity, req), nil
@@ -70,20 +78,73 @@ func (r *policyResolver) provision(
 	return &result.Principal, nil
 }
 
-func (r *policyResolver) managedInitialRoleIDs(
+type managedRuleMatch struct {
+	primaryRuleID string
+	ruleIDs       []string
+	roleIDs       []string
+}
+
+func (r *policyResolver) managedMatch(
 	ctx context.Context,
 	identity authkit.Identity,
-) ([]string, bool, error) {
+) (managedRuleMatch, bool, error) {
 	rules, err := r.store.ListProvisioningRules(ctx)
+	if err != nil {
+		return managedRuleMatch{}, false, err
+	}
+	roleIDs := make([]string, 0)
+	ruleIDs := make([]string, 0)
+	seenRoles := map[string]struct{}{}
+	for _, rule := range rules {
+		matchedRoleIDs := provisioning.MatchRules(identity, []authkit.ProvisioningRule{rule})
+		if !slices.Contains(matchedRoleIDs, RoleContentWriter) {
+			continue
+		}
+		ruleIDs = append(ruleIDs, rule.ID)
+		for _, roleID := range matchedRoleIDs {
+			if _, ok := seenRoles[roleID]; ok {
+				continue
+			}
+			seenRoles[roleID] = struct{}{}
+			roleIDs = append(roleIDs, roleID)
+		}
+	}
+	if !slices.Contains(roleIDs, RoleContentWriter) {
+		return managedRuleMatch{}, false, nil
+	}
+
+	return managedRuleMatch{
+		primaryRuleID: ruleIDs[0],
+		ruleIDs:       ruleIDs,
+		roleIDs:       roleIDs,
+	}, true, nil
+}
+
+func (r *policyResolver) existingRulePrincipal(
+	ctx context.Context,
+	identity authkit.Identity,
+	ruleIDs []string,
+) (*authkit.Principal, bool, error) {
+	principals, err := r.store.ListPrincipals(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	roleIDs := provisioning.MatchRules(identity, rules)
-	if !slices.Contains(roleIDs, RoleContentWriter) {
-		return nil, false, nil
+	for _, principal := range principals {
+		if principal.Attributes["provider"] != identity.Provider {
+			continue
+		}
+		if principal.Attributes["subject"] != identity.Subject {
+			continue
+		}
+		ruleID, ok := principal.Attributes["provisioning_rule_id"].(string)
+		if !ok || !slices.Contains(ruleIDs, ruleID) {
+			continue
+		}
+
+		return &principal, true, nil
 	}
 
-	return roleIDs, true, nil
+	return nil, false, nil
 }
 
 func principalShape(identity authkit.Identity) (string, authkit.PrincipalKind) {
@@ -94,7 +155,7 @@ func principalShape(identity authkit.Identity) (string, authkit.PrincipalKind) {
 	return "oidc", authkit.PrincipalKindUser
 }
 
-func localResolutionIdentity(identity authkit.Identity) authkit.Identity {
+func claimFingerprintIdentity(identity authkit.Identity) authkit.Identity {
 	if identity.Provider == apikey.Provider || len(identity.Claims) == 0 {
 		return identity
 	}

@@ -167,6 +167,32 @@ func TestManagedOIDCProvisioningRulesAuthorizePublishers(t *testing.T) {
 		},
 	)
 	require.NoError(t, err)
+
+	require.NoError(t, adminClient.Auth().UnassignPrincipalRole(ctx, scopePrincipal.ID, "content-writer"))
+	scopeChangedAfterUnassignClient := newBearerClient(t, env, issuer.SignToken(t, func(claims map[string]any) {
+		claims["groups"] = []string{"publishers", "admins"}
+		claims["scope"] = "openid profile imgsrv.write extra"
+	}))
+	_, err = scopeChangedAfterUnassignClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "managed-scope-existing-after-unassign-changed-claims",
+	})
+	assertProblemStatus(t, err, http.StatusForbidden)
+
+	_, err = scopeClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "managed-scope-existing-after-unassign",
+	})
+	assertProblemStatus(t, err, http.StatusForbidden)
+
+	deleteScopeClient := newBearerClient(t, env, issuer.SignToken(t, func(claims map[string]any) {
+		claims["sub"] = "subject-delete-existing"
+		claims["groups"] = []string{"publishers"}
+	}))
+	image, err = deleteScopeClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "managed-scope-delete-existing-before-delete",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "managed-scope-delete-existing-before-delete", image.Name)
+
 	require.NoError(t, adminClient.Auth().DeleteOIDCProvisioningRule(ctx, scopeRule.ID))
 
 	futureDeletedClient := newBearerClient(t, env, issuer.SignToken(t, func(claims map[string]any) {
@@ -178,11 +204,11 @@ func TestManagedOIDCProvisioningRulesAuthorizePublishers(t *testing.T) {
 	})
 	assertProblemStatus(t, err, http.StatusForbidden)
 
-	require.NoError(t, adminClient.Auth().UnassignPrincipalRole(ctx, scopePrincipal.ID, "content-writer"))
-	_, err = scopeClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
-		Name: "managed-scope-existing-after-unassign",
+	image, err = deleteScopeClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
+		Name: "managed-scope-existing-after-delete",
 	})
-	assertProblemStatus(t, err, http.StatusForbidden)
+	require.NoError(t, err)
+	assert.Equal(t, "managed-scope-existing-after-delete", image.Name)
 }
 
 func boolPtr(value bool) *bool {

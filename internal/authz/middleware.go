@@ -26,6 +26,7 @@ const (
 type Store interface {
 	apikey.TokenStore
 	authkitoidc.ProviderSource
+	authkit.PrincipalLister
 	authkit.PrincipalResolver
 	authkit.IdentityProvisioner
 	authkit.PrincipalActionResolver
