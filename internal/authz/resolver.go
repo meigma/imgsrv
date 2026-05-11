@@ -2,6 +2,9 @@ package authz
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"slices"
 
@@ -17,16 +20,15 @@ type identityStore interface {
 }
 
 type policyResolver struct {
-	store      identityStore
-	oidc       OIDCConfig
-	githubOIDC GitHubOIDCConfig
+	store identityStore
 }
 
 func (r *policyResolver) ResolveIdentity(
 	ctx context.Context,
 	identity authkit.Identity,
 ) (*authkit.Principal, error) {
-	principal, err := r.store.ResolveIdentity(ctx, identity)
+	localIdentity := localResolutionIdentity(identity)
+	principal, err := r.store.ResolveIdentity(ctx, localIdentity)
 	if err == nil {
 		return principal, nil
 	}
@@ -43,10 +45,7 @@ func (r *policyResolver) ResolveIdentity(
 		if roleIDs, ok, roleErr := r.managedInitialRoleIDs(ctx, identity); roleErr != nil {
 			return nil, roleErr
 		} else if ok {
-			return r.provision(ctx, identity, req, roleIDs)
-		}
-		if oidcIdentityCanWrite(identity, r.oidc) || githubIdentityCanWrite(identity, r.githubOIDC) {
-			return r.provision(ctx, identity, req, nil)
+			return r.provision(ctx, localIdentity, req, roleIDs)
 		}
 
 		return transientPrincipal(identity, req), nil
@@ -93,6 +92,21 @@ func principalShape(identity authkit.Identity) (string, authkit.PrincipalKind) {
 	}
 
 	return "oidc", authkit.PrincipalKindUser
+}
+
+func localResolutionIdentity(identity authkit.Identity) authkit.Identity {
+	if identity.Provider == apikey.Provider || len(identity.Claims) == 0 {
+		return identity
+	}
+	encoded, err := json.Marshal(identity.Claims)
+	if err != nil {
+		return identity
+	}
+
+	sum := sha256.Sum256([]byte(identity.Subject + "\x00" + string(encoded)))
+	identity.Subject = identity.Subject + "#claims:" + hex.EncodeToString(sum[:])
+
+	return identity
 }
 
 func principalRequest(

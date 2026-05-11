@@ -165,6 +165,33 @@ type BlobService interface {
 
 // AuthManagementService coordinates auth-management operations for HTTP callers.
 type AuthManagementService interface {
+	// ListRoles returns imgsrv's built-in auth roles.
+	ListRoles(context.Context) ([]authz.Role, error)
+
+	// CreatePrincipal creates a principal.
+	CreatePrincipal(context.Context, authz.CreatePrincipalRequest) (authz.Principal, error)
+
+	// ListPrincipals returns principals.
+	ListPrincipals(context.Context) ([]authz.Principal, error)
+
+	// FindPrincipal returns one principal.
+	FindPrincipal(context.Context, string) (authz.Principal, error)
+
+	// AssignPrincipalRole assigns a role to a principal.
+	AssignPrincipalRole(context.Context, string, string) error
+
+	// UnassignPrincipalRole removes a role from a principal.
+	UnassignPrincipalRole(context.Context, string, string) error
+
+	// IssueAPIToken issues an API token for a principal.
+	IssueAPIToken(context.Context, authz.IssueAPITokenRequest) (authz.IssuedAPIToken, error)
+
+	// ListPrincipalAPITokens returns API-token metadata for a principal.
+	ListPrincipalAPITokens(context.Context, string) ([]authz.APITokenMetadata, error)
+
+	// RevokeAPIToken revokes an API token.
+	RevokeAPIToken(context.Context, string) error
+
 	// CreateOIDCProvisioningRule creates an OIDC provisioning rule.
 	CreateOIDCProvisioningRule(
 		context.Context,
@@ -243,26 +270,7 @@ func New(deps Dependencies) http.Handler {
 func (a *api) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.HandleFunc("GET /readyz", a.readyz)
-	mux.HandleFunc(
-		"GET /v1/auth/oidc-provisioning-rules",
-		a.requireAction(authz.ActionAuthManage, a.listOIDCProvisioningRules),
-	)
-	mux.HandleFunc(
-		"POST /v1/auth/oidc-provisioning-rules",
-		a.requireAction(authz.ActionAuthManage, a.createOIDCProvisioningRule),
-	)
-	mux.HandleFunc(
-		"GET /v1/auth/oidc-provisioning-rules/{rule_id}",
-		a.requireAction(authz.ActionAuthManage, a.getOIDCProvisioningRule),
-	)
-	mux.HandleFunc(
-		"PUT /v1/auth/oidc-provisioning-rules/{rule_id}",
-		a.requireAction(authz.ActionAuthManage, a.updateOIDCProvisioningRule),
-	)
-	mux.HandleFunc(
-		"DELETE /v1/auth/oidc-provisioning-rules/{rule_id}",
-		a.requireAction(authz.ActionAuthManage, a.deleteOIDCProvisioningRule),
-	)
+	a.registerAuthRoutes(mux)
 	mux.HandleFunc("POST /v1/uploads", a.requireAction(authz.ActionContentWrite, a.beginUpload))
 	mux.HandleFunc("GET /v1/uploads/{upload_id}", a.getUpload)
 	mux.HandleFunc(
@@ -331,6 +339,65 @@ func (a *api) registerRoutes(mux *http.ServeMux) {
 		a.requireAction(authz.ActionContentWrite, a.deleteAlias),
 	)
 	mux.HandleFunc("GET /v1/images/{name}/refs/{ref}", a.resolveManifest)
+}
+
+func (a *api) registerAuthRoutes(mux *http.ServeMux) {
+	mux.HandleFunc(
+		"GET /v1/auth/roles",
+		a.requireAction(authz.ActionAuthManage, a.listAuthRoles),
+	)
+	mux.HandleFunc(
+		"GET /v1/auth/principals",
+		a.requireAction(authz.ActionAuthManage, a.listAuthPrincipals),
+	)
+	mux.HandleFunc(
+		"POST /v1/auth/principals",
+		a.requireAction(authz.ActionAuthManage, a.createAuthPrincipal),
+	)
+	mux.HandleFunc(
+		"GET /v1/auth/principals/{principal_id}",
+		a.requireAction(authz.ActionAuthManage, a.getAuthPrincipal),
+	)
+	mux.HandleFunc(
+		"PUT /v1/auth/principals/{principal_id}/roles/{role_id}",
+		a.requireAction(authz.ActionAuthManage, a.assignAuthPrincipalRole),
+	)
+	mux.HandleFunc(
+		"DELETE /v1/auth/principals/{principal_id}/roles/{role_id}",
+		a.requireAction(authz.ActionAuthManage, a.unassignAuthPrincipalRole),
+	)
+	mux.HandleFunc(
+		"POST /v1/auth/principals/{principal_id}/api-tokens",
+		a.requireAction(authz.ActionAuthManage, a.issueAuthPrincipalAPIToken),
+	)
+	mux.HandleFunc(
+		"GET /v1/auth/principals/{principal_id}/api-tokens",
+		a.requireAction(authz.ActionAuthManage, a.listAuthPrincipalAPITokens),
+	)
+	mux.HandleFunc(
+		"DELETE /v1/auth/api-tokens/{token_id}",
+		a.requireAction(authz.ActionAuthManage, a.revokeAuthAPIToken),
+	)
+	mux.HandleFunc(
+		"GET /v1/auth/oidc-provisioning-rules",
+		a.requireAction(authz.ActionAuthManage, a.listOIDCProvisioningRules),
+	)
+	mux.HandleFunc(
+		"POST /v1/auth/oidc-provisioning-rules",
+		a.requireAction(authz.ActionAuthManage, a.createOIDCProvisioningRule),
+	)
+	mux.HandleFunc(
+		"GET /v1/auth/oidc-provisioning-rules/{rule_id}",
+		a.requireAction(authz.ActionAuthManage, a.getOIDCProvisioningRule),
+	)
+	mux.HandleFunc(
+		"PUT /v1/auth/oidc-provisioning-rules/{rule_id}",
+		a.requireAction(authz.ActionAuthManage, a.updateOIDCProvisioningRule),
+	)
+	mux.HandleFunc(
+		"DELETE /v1/auth/oidc-provisioning-rules/{rule_id}",
+		a.requireAction(authz.ActionAuthManage, a.deleteOIDCProvisioningRule),
+	)
 }
 
 // healthz handles GET /healthz and reports liveness with no body.

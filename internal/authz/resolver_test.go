@@ -2,6 +2,7 @@ package authz
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/meigma/authkit"
@@ -12,13 +13,7 @@ import (
 
 func TestPolicyResolverDoesNotProvisionDeniedOIDCIdentity(t *testing.T) {
 	store := &resolverStore{resolveErr: authkit.ErrUnresolvedIdentity}
-	resolver := policyResolver{
-		store: store,
-		oidc: OIDCConfig{
-			IssuerURL:     "https://issuer.example",
-			RequiredScope: "imgsrv.write",
-		},
-	}
+	resolver := policyResolver{store: store}
 
 	principal, err := resolver.ResolveIdentity(context.Background(), authkit.Identity{
 		Provider: "https://issuer.example",
@@ -32,29 +27,6 @@ func TestPolicyResolverDoesNotProvisionDeniedOIDCIdentity(t *testing.T) {
 	assert.Equal(t, 0, store.provisionCalls)
 	assert.Equal(t, authkit.PrincipalKindUser, principal.Kind)
 	assert.Equal(t, true, principal.Attributes["transient"])
-}
-
-func TestPolicyResolverProvisionsAllowedOIDCIdentity(t *testing.T) {
-	store := &resolverStore{resolveErr: authkit.ErrUnresolvedIdentity}
-	resolver := policyResolver{
-		store: store,
-		oidc: OIDCConfig{
-			IssuerURL:     "https://issuer.example",
-			RequiredScope: "imgsrv.write",
-		},
-	}
-
-	principal, err := resolver.ResolveIdentity(context.Background(), authkit.Identity{
-		Provider: "https://issuer.example",
-		Subject:  "subject-1",
-		Claims: map[string]any{
-			"scope": "openid profile imgsrv.write",
-		},
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, 1, store.provisionCalls)
-	assert.Equal(t, "persisted-principal", principal.ID)
 }
 
 func TestPolicyResolverProvisionsManagedOIDCRuleWithInitialRoles(t *testing.T) {
@@ -84,19 +56,14 @@ func TestPolicyResolverProvisionsManagedOIDCRuleWithInitialRoles(t *testing.T) {
 	assert.Equal(t, 1, store.provisionCalls)
 	assert.Equal(t, "persisted-principal", principal.ID)
 	assert.Equal(t, []string{RoleContentWriter}, store.provisionInitialRoleIDs)
+	require.NotEmpty(t, store.resolvedIdentities)
+	assert.Contains(t, store.resolvedIdentities[0].Subject, "subject-1#claims:")
+	assert.Contains(t, store.provisionIdentity.Subject, "subject-1#claims:")
 }
 
-func TestPolicyResolverDoesNotProvisionDeniedGitHubIdentity(t *testing.T) {
+func TestPolicyResolverDoesNotProvisionUnmatchedGitHubIdentity(t *testing.T) {
 	store := &resolverStore{resolveErr: authkit.ErrUnresolvedIdentity}
-	resolver := policyResolver{
-		store: store,
-		githubOIDC: GitHubOIDCConfig{
-			IssuerURL:    "https://token.actions.githubusercontent.com",
-			RepositoryID: "123456789",
-			WorkflowRef:  "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main",
-			Subject:      "repo:meigma/imgsrv:ref:refs/heads/main",
-		},
-	}
+	resolver := policyResolver{store: store}
 
 	principal, err := resolver.ResolveIdentity(context.Background(), authkit.Identity{
 		Provider: "https://token.actions.githubusercontent.com",
@@ -132,12 +99,15 @@ type resolverStore struct {
 	rules                   []authkit.ProvisioningRule
 	provisionCalls          int
 	provisionInitialRoleIDs []string
+	resolvedIdentities      []authkit.Identity
+	provisionIdentity       authkit.Identity
 }
 
 func (s *resolverStore) ResolveIdentity(
 	_ context.Context,
-	_ authkit.Identity,
+	identity authkit.Identity,
 ) (*authkit.Principal, error) {
+	s.resolvedIdentities = append(s.resolvedIdentities, identity)
 	if s.resolveErr != nil {
 		return nil, s.resolveErr
 	}
@@ -151,6 +121,7 @@ func (s *resolverStore) ProvisionIdentity(
 ) (authkit.ProvisionIdentityResult, error) {
 	s.provisionCalls++
 	s.provisionInitialRoleIDs = append([]string(nil), req.InitialRoleIDs...)
+	s.provisionIdentity = req.Identity
 
 	return authkit.ProvisionIdentityResult{
 		Principal: authkit.Principal{
@@ -165,4 +136,29 @@ func (s *resolverStore) ProvisionIdentity(
 
 func (s *resolverStore) ListProvisioningRules(context.Context) ([]authkit.ProvisioningRule, error) {
 	return append([]authkit.ProvisioningRule(nil), s.rules...), nil
+}
+
+func TestLocalResolutionIdentityUsesRawAPITokenSubject(t *testing.T) {
+	identity := localResolutionIdentity(authkit.Identity{
+		Provider: apikey.Provider,
+		Subject:  "token-1",
+		Claims: map[string]any{
+			"scope": "ignored",
+		},
+	})
+
+	assert.Equal(t, "token-1", identity.Subject)
+}
+
+func TestLocalResolutionIdentityIncludesOIDCClaims(t *testing.T) {
+	identity := localResolutionIdentity(authkit.Identity{
+		Provider: "https://issuer.example",
+		Subject:  "subject-1",
+		Claims: map[string]any{
+			"repository_id": "123456789",
+			"workflow_ref":  "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main",
+		},
+	})
+
+	assert.True(t, strings.HasPrefix(identity.Subject, "subject-1#claims:"))
 }

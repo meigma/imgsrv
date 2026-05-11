@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/meigma/authkit"
 	"github.com/meigma/authkit/provisioning"
@@ -32,6 +35,117 @@ func TestOIDCProvisioningRulesRequireAuthManage(t *testing.T) {
 
 	require.Equal(t, http.StatusForbidden, rec.Code)
 	assertProblem(t, rec, http.StatusForbidden, "principal is not authorized for action auth.manage")
+}
+
+func TestAuthAdminCoreCRUD(t *testing.T) {
+	handler := New(Dependencies{
+		Auth:           newAcceptingAuthService(t),
+		AuthManagement: newFakeAuthManagement(),
+	})
+
+	roles := doAuthManagementJSON[roleListResponse](
+		t,
+		handler,
+		http.MethodGet,
+		"/v1/auth/roles",
+		"",
+		http.StatusOK,
+	)
+	require.Len(t, roles.Roles, 2)
+	assert.Equal(t, authz.RoleAuthManager, roles.Roles[1].ID)
+
+	principal := doAuthManagementJSON[principalResponse](
+		t,
+		handler,
+		http.MethodPost,
+		"/v1/auth/principals",
+		`{"kind":"service","display_name":"publisher","attributes":{"source":"test"}}`,
+		http.StatusCreated,
+	)
+	assert.Equal(t, "principal-1", principal.ID)
+	assert.Equal(t, "service", string(principal.Kind))
+
+	req := newAuthManagementRequest(
+		http.MethodPut,
+		"/v1/auth/principals/principal-1/roles/content-writer",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	got := doAuthManagementJSON[principalResponse](
+		t,
+		handler,
+		http.MethodGet,
+		"/v1/auth/principals/principal-1",
+		"",
+		http.StatusOK,
+	)
+	assert.Equal(t, []string{authz.RoleContentWriter}, got.RoleIDs)
+
+	listed := doAuthManagementJSON[principalListResponse](
+		t,
+		handler,
+		http.MethodGet,
+		"/v1/auth/principals",
+		"",
+		http.StatusOK,
+	)
+	require.Len(t, listed.Principals, 1)
+	assert.Equal(t, "principal-1", listed.Principals[0].ID)
+
+	expiresAt := time.Date(2026, time.May, 11, 12, 0, 0, 0, time.UTC)
+	token := doAuthManagementJSON[apiTokenResponse](
+		t,
+		handler,
+		http.MethodPost,
+		"/v1/auth/principals/principal-1/api-tokens",
+		`{"name":"deploy","expires_at":"`+expiresAt.Format(time.RFC3339)+`"}`,
+		http.StatusCreated,
+	)
+	assert.Equal(t, "token-1", token.ID)
+	assert.Equal(t, "principal-1", token.PrincipalID)
+	assert.Equal(t, "ak_token-1_secret", token.Plaintext)
+
+	tokens := doAuthManagementJSON[apiTokenListResponse](
+		t,
+		handler,
+		http.MethodGet,
+		"/v1/auth/principals/principal-1/api-tokens",
+		"",
+		http.StatusOK,
+	)
+	require.Len(t, tokens.APITokens, 1)
+	assert.Empty(t, tokens.APITokens[0].Plaintext)
+
+	req = newAuthManagementRequest(
+		http.MethodDelete,
+		"/v1/auth/api-tokens/token-1",
+		nil,
+	)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	req = newAuthManagementRequest(
+		http.MethodDelete,
+		"/v1/auth/principals/principal-1/roles/content-writer",
+		nil,
+	)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+
+	got = doAuthManagementJSON[principalResponse](
+		t,
+		handler,
+		http.MethodGet,
+		"/v1/auth/principals/principal-1",
+		"",
+		http.StatusOK,
+	)
+	assert.Empty(t, got.RoleIDs)
 }
 
 func TestOIDCProvisioningRuleCRUD(t *testing.T) {
@@ -179,13 +293,154 @@ func doAuthManagementJSON[T any](
 }
 
 type fakeAuthManagement struct {
-	rules map[string]authz.OIDCProvisioningRule
+	rules      map[string]authz.OIDCProvisioningRule
+	principals map[string]authz.Principal
+	tokens     map[string]authz.APITokenMetadata
 }
 
 func newFakeAuthManagement() *fakeAuthManagement {
 	return &fakeAuthManagement{
-		rules: map[string]authz.OIDCProvisioningRule{},
+		rules:      map[string]authz.OIDCProvisioningRule{},
+		principals: map[string]authz.Principal{},
+		tokens:     map[string]authz.APITokenMetadata{},
 	}
+}
+
+func (f *fakeAuthManagement) ListRoles(context.Context) ([]authz.Role, error) {
+	return []authz.Role{
+		{
+			ID:          authz.RoleContentWriter,
+			DisplayName: "Content writer",
+			Description: "Can write imgsrv content.",
+			Actions:     []string{authz.ActionContentWrite},
+		},
+		{
+			ID:          authz.RoleAuthManager,
+			DisplayName: "Auth manager",
+			Description: "Can manage imgsrv authentication policy.",
+			Actions:     []string{authz.ActionAuthManage},
+		},
+	}, nil
+}
+
+func (f *fakeAuthManagement) CreatePrincipal(
+	_ context.Context,
+	req authz.CreatePrincipalRequest,
+) (authz.Principal, error) {
+	principal := authz.Principal{
+		ID:          "principal-1",
+		Kind:        req.Kind,
+		DisplayName: req.DisplayName,
+		Attributes:  req.Attributes,
+	}
+	f.principals[principal.ID] = principal
+
+	return principal, nil
+}
+
+func (f *fakeAuthManagement) ListPrincipals(context.Context) ([]authz.Principal, error) {
+	principals := make([]authz.Principal, 0, len(f.principals))
+	for _, principal := range f.principals {
+		principals = append(principals, principal)
+	}
+	sort.Slice(principals, func(i, j int) bool {
+		return principals[i].ID < principals[j].ID
+	})
+
+	return principals, nil
+}
+
+func (f *fakeAuthManagement) FindPrincipal(_ context.Context, id string) (authz.Principal, error) {
+	principal, ok := f.principals[id]
+	if !ok {
+		return authz.Principal{}, authkit.ErrPrincipalNotFound
+	}
+
+	return principal, nil
+}
+
+func (f *fakeAuthManagement) AssignPrincipalRole(_ context.Context, principalID string, roleID string) error {
+	principal, ok := f.principals[principalID]
+	if !ok {
+		return authkit.ErrPrincipalNotFound
+	}
+	if slices.Contains(principal.RoleIDs, roleID) {
+		f.principals[principalID] = principal
+
+		return nil
+	}
+	principal.RoleIDs = append(principal.RoleIDs, roleID)
+	sort.Strings(principal.RoleIDs)
+	f.principals[principalID] = principal
+
+	return nil
+}
+
+func (f *fakeAuthManagement) UnassignPrincipalRole(_ context.Context, principalID string, roleID string) error {
+	principal, ok := f.principals[principalID]
+	if !ok {
+		return authkit.ErrPrincipalNotFound
+	}
+	filtered := principal.RoleIDs[:0]
+	for _, assigned := range principal.RoleIDs {
+		if assigned != roleID {
+			filtered = append(filtered, assigned)
+		}
+	}
+	principal.RoleIDs = filtered
+	f.principals[principalID] = principal
+
+	return nil
+}
+
+func (f *fakeAuthManagement) IssueAPIToken(
+	_ context.Context,
+	req authz.IssueAPITokenRequest,
+) (authz.IssuedAPIToken, error) {
+	if _, ok := f.principals[req.PrincipalID]; !ok {
+		return authz.IssuedAPIToken{}, authkit.ErrPrincipalNotFound
+	}
+	token := authz.APITokenMetadata{
+		ID:          "token-1",
+		PrincipalID: req.PrincipalID,
+		Name:        req.Name,
+		ExpiresAt:   req.ExpiresAt,
+	}
+	f.tokens[token.ID] = token
+
+	return authz.IssuedAPIToken{
+		APITokenMetadata: token,
+		Plaintext:        "ak_token-1_secret",
+	}, nil
+}
+
+func (f *fakeAuthManagement) ListPrincipalAPITokens(
+	_ context.Context,
+	principalID string,
+) ([]authz.APITokenMetadata, error) {
+	if _, ok := f.principals[principalID]; !ok {
+		return nil, authkit.ErrPrincipalNotFound
+	}
+	tokens := make([]authz.APITokenMetadata, 0)
+	for _, token := range f.tokens {
+		if token.PrincipalID == principalID {
+			tokens = append(tokens, token)
+		}
+	}
+	sort.Slice(tokens, func(i, j int) bool {
+		return tokens[i].ID < tokens[j].ID
+	})
+
+	return tokens, nil
+}
+
+func (f *fakeAuthManagement) RevokeAPIToken(_ context.Context, tokenID string) error {
+	if _, ok := f.tokens[tokenID]; !ok {
+		return authkit.ErrPrincipalNotFound
+	}
+	delete(f.tokens, tokenID)
+
+	return nil
 }
 
 func (f *fakeAuthManagement) CreateOIDCProvisioningRule(

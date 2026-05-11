@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -77,47 +78,8 @@ func TestNewValidatesBaseURL(t *testing.T) {
 func TestClientAuthFlowBuildsRequests(t *testing.T) {
 	ctx := context.Background()
 	enabled := false
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/auth/oidc-provisioning-rules", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, r.Method)
-		switch r.Method {
-		case http.MethodPost:
-			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-			var got SaveOIDCProvisioningRuleRequest
-			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
-				return
-			}
-			assert.Equal(t, "rule-1", got.ID)
-			assert.Equal(t, []string{"repository_id", "workflow_ref"}, got.ForwardedClaims)
-			writeJSON(t, w, http.StatusCreated, oidcRuleFixture(true))
-		case http.MethodGet:
-			writeJSON(t, w, http.StatusOK, oidcProvisioningRuleList{
-				Rules: []OIDCProvisioningRule{oidcRuleFixture(true)},
-			})
-		default:
-			http.NotFound(w, r)
-		}
-	})
-	mux.HandleFunc("/api/v1/auth/oidc-provisioning-rules/rule-1", func(w http.ResponseWriter, r *http.Request) {
-		assertRequestBasics(t, r, r.Method)
-		switch r.Method {
-		case http.MethodGet:
-			writeJSON(t, w, http.StatusOK, oidcRuleFixture(true))
-		case http.MethodPut:
-			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-			var got SaveOIDCProvisioningRuleRequest
-			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
-				return
-			}
-			assert.Equal(t, &enabled, got.Enabled)
-			writeJSON(t, w, http.StatusOK, oidcRuleFixture(false))
-		case http.MethodDelete:
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			http.NotFound(w, r)
-		}
-	})
-	server := httptest.NewServer(mux)
+	expiresAt := time.Date(2026, time.May, 11, 12, 0, 0, 0, time.UTC)
+	server := newClientAuthFlowServer(t, expiresAt, &enabled)
 	t.Cleanup(server.Close)
 	client, err := New(Options{
 		BaseURL:     server.URL + "/api",
@@ -125,6 +87,41 @@ func TestClientAuthFlowBuildsRequests(t *testing.T) {
 		UserAgent:   "imgsrv-test-client",
 	})
 	require.NoError(t, err)
+
+	roles, err := client.Auth().ListRoles(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []Role{roleFixture()}, roles)
+
+	principal, err := client.Auth().CreatePrincipal(ctx, CreatePrincipalRequest{
+		Kind:        "service",
+		DisplayName: "publisher",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, principalFixture(), principal)
+
+	principals, err := client.Auth().ListPrincipals(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, []Principal{principalFixture()}, principals)
+
+	gotPrincipal, err := client.Auth().GetPrincipal(ctx, "principal-1")
+	require.NoError(t, err)
+	assert.Equal(t, principalFixture(), gotPrincipal)
+
+	require.NoError(t, client.Auth().AssignPrincipalRole(ctx, "principal-1", "content-writer"))
+	require.NoError(t, client.Auth().UnassignPrincipalRole(ctx, "principal-1", "content-writer"))
+
+	token, err := client.Auth().IssueAPIToken(ctx, "principal-1", IssueAPITokenRequest{
+		Name:      "deploy",
+		ExpiresAt: expiresAt,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, apiTokenFixture(true, expiresAt), token)
+
+	tokens, err := client.Auth().ListPrincipalAPITokens(ctx, "principal-1")
+	require.NoError(t, err)
+	assert.Equal(t, []APIToken{apiTokenFixture(false, expiresAt)}, tokens)
+
+	require.NoError(t, client.Auth().RevokeAPIToken(ctx, "token-1"))
 
 	created, err := client.Auth().CreateOIDCProvisioningRule(ctx, SaveOIDCProvisioningRuleRequest{
 		ID:              "rule-1",
@@ -156,6 +153,154 @@ func TestClientAuthFlowBuildsRequests(t *testing.T) {
 	assert.Equal(t, oidcRuleFixture(false), updated)
 
 	require.NoError(t, client.Auth().DeleteOIDCProvisioningRule(ctx, "rule-1"))
+}
+
+func newClientAuthFlowServer(
+	t *testing.T,
+	expiresAt time.Time,
+	enabled *bool,
+) *httptest.Server {
+	t.Helper()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/auth/roles", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodGet)
+		writeJSON(t, w, http.StatusOK, roleList{
+			Roles: []Role{roleFixture()},
+		})
+	})
+	mux.HandleFunc("/api/v1/auth/principals", handleClientAuthPrincipals(t))
+	mux.HandleFunc("/api/v1/auth/principals/principal-1", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodGet)
+		writeJSON(t, w, http.StatusOK, principalFixture())
+	})
+	mux.HandleFunc(
+		"/api/v1/auth/principals/principal-1/roles/content-writer",
+		handleClientAuthPrincipalRoles(t),
+	)
+	mux.HandleFunc(
+		"/api/v1/auth/principals/principal-1/api-tokens",
+		handleClientAuthPrincipalTokens(t, expiresAt),
+	)
+	mux.HandleFunc("/api/v1/auth/api-tokens/token-1", func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, http.MethodDelete)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/api/v1/auth/oidc-provisioning-rules", handleClientOIDCRules(t))
+	mux.HandleFunc("/api/v1/auth/oidc-provisioning-rules/rule-1", handleClientOIDCRule(t, enabled))
+
+	return httptest.NewServer(mux)
+}
+
+func handleClientAuthPrincipals(t *testing.T) http.HandlerFunc {
+	t.Helper()
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, r.Method)
+		switch r.Method {
+		case http.MethodPost:
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			var got CreatePrincipalRequest
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+				return
+			}
+			assert.Equal(t, "service", got.Kind)
+			writeJSON(t, w, http.StatusCreated, principalFixture())
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, principalList{
+				Principals: []Principal{principalFixture()},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func handleClientAuthPrincipalRoles(t *testing.T) http.HandlerFunc {
+	t.Helper()
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, r.Method)
+		switch r.Method {
+		case http.MethodPut, http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func handleClientAuthPrincipalTokens(t *testing.T, expiresAt time.Time) http.HandlerFunc {
+	t.Helper()
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, r.Method)
+		switch r.Method {
+		case http.MethodPost:
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			var got IssueAPITokenRequest
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+				return
+			}
+			assert.Equal(t, expiresAt, got.ExpiresAt)
+			writeJSON(t, w, http.StatusCreated, apiTokenFixture(true, expiresAt))
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, apiTokenList{
+				APITokens: []APIToken{apiTokenFixture(false, expiresAt)},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func handleClientOIDCRules(t *testing.T) http.HandlerFunc {
+	t.Helper()
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, r.Method)
+		switch r.Method {
+		case http.MethodPost:
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			var got SaveOIDCProvisioningRuleRequest
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+				return
+			}
+			assert.Equal(t, "rule-1", got.ID)
+			assert.Equal(t, []string{"repository_id", "workflow_ref"}, got.ForwardedClaims)
+			writeJSON(t, w, http.StatusCreated, oidcRuleFixture(true))
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, oidcProvisioningRuleList{
+				Rules: []OIDCProvisioningRule{oidcRuleFixture(true)},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func handleClientOIDCRule(t *testing.T, enabled *bool) http.HandlerFunc {
+	t.Helper()
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		assertRequestBasics(t, r, r.Method)
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(t, w, http.StatusOK, oidcRuleFixture(true))
+		case http.MethodPut:
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			var got SaveOIDCProvisioningRuleRequest
+			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&got)) {
+				return
+			}
+			assert.Equal(t, enabled, got.Enabled)
+			writeJSON(t, w, http.StatusOK, oidcRuleFixture(false))
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}
 }
 
 func TestClientUploadFlowBuildsRequests(t *testing.T) {
@@ -1014,6 +1159,41 @@ func manifestFixture(state ImageVersionState) Manifest {
 			Attachments: []Attachment{attachmentFixture()},
 		}},
 	}
+}
+
+func roleFixture() Role {
+	return Role{
+		ID:          "content-writer",
+		DisplayName: "Content writer",
+		Description: "Can write imgsrv content.",
+		Actions:     []string{"content.write"},
+	}
+}
+
+func principalFixture() Principal {
+	return Principal{
+		ID:          "principal-1",
+		Kind:        "service",
+		DisplayName: "publisher",
+		Attributes: map[string]any{
+			"source": "test",
+		},
+		RoleIDs: []string{"content-writer"},
+	}
+}
+
+func apiTokenFixture(includePlaintext bool, expiresAt time.Time) APIToken {
+	token := APIToken{
+		ID:          "token-1",
+		PrincipalID: "principal-1",
+		Name:        "deploy",
+		ExpiresAt:   expiresAt,
+	}
+	if includePlaintext {
+		token.Plaintext = "ak_token-1_secret"
+	}
+
+	return token
 }
 
 func oidcRuleFixture(enabled bool) OIDCProvisioningRule {

@@ -47,14 +47,6 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"IMGSRV_METRICS_LISTEN":                         "127.0.0.1:9091",
 				"IMGSRV_METRICS_PATH":                           "/internal/metrics",
 				"IMGSRV_POSTGRES_URL":                           "postgres://env",
-				"IMGSRV_OIDC_ISSUER_URL":                        "https://issuer.env",
-				"IMGSRV_OIDC_AUDIENCE":                          "imgsrv-env",
-				"IMGSRV_OIDC_REQUIRED_SCOPE":                    "imgsrv.write.env",
-				"IMGSRV_GITHUB_OIDC_ISSUER_URL":                 "https://github-issuer.env",
-				"IMGSRV_GITHUB_OIDC_AUDIENCE":                   "imgsrv-github-env",
-				"IMGSRV_GITHUB_OIDC_REPOSITORY_ID":              "123456789",
-				"IMGSRV_GITHUB_OIDC_WORKFLOW_REF":               "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main",
-				"IMGSRV_GITHUB_OIDC_SUBJECT":                    "repo:meigma/imgsrv:ref:refs/heads/main",
 				"IMGSRV_S3_ENDPOINT":                            "garage.env:3900",
 				"IMGSRV_S3_BUCKET":                              "imgsrv-env",
 				"IMGSRV_S3_ACCESS_KEY_ID":                       "env-access",
@@ -80,14 +72,6 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				MetricsListen:                      "127.0.0.1:9091",
 				MetricsPath:                        "/internal/metrics",
 				PostgresURL:                        "postgres://env",
-				OIDCIssuerURL:                      "https://issuer.env",
-				OIDCAudience:                       "imgsrv-env",
-				OIDCRequiredScope:                  "imgsrv.write.env",
-				GitHubOIDCIssuerURL:                "https://github-issuer.env",
-				GitHubOIDCAudience:                 "imgsrv-github-env",
-				GitHubOIDCRepositoryID:             "123456789",
-				GitHubOIDCWorkflowRef:              "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main",
-				GitHubOIDCSubject:                  "repo:meigma/imgsrv:ref:refs/heads/main",
 				S3Endpoint:                         "garage.env:3900",
 				S3Bucket:                           "imgsrv-env",
 				S3AccessKeyID:                      "env-access",
@@ -116,14 +100,6 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"IMGSRV_METRICS_LISTEN":                         "127.0.0.1:9091",
 				"IMGSRV_METRICS_PATH":                           "/internal/metrics",
 				"IMGSRV_POSTGRES_URL":                           "postgres://env",
-				"IMGSRV_OIDC_ISSUER_URL":                        "https://issuer.env",
-				"IMGSRV_OIDC_AUDIENCE":                          "imgsrv-env",
-				"IMGSRV_OIDC_REQUIRED_SCOPE":                    "imgsrv.write.env",
-				"IMGSRV_GITHUB_OIDC_ISSUER_URL":                 "https://github-issuer.env",
-				"IMGSRV_GITHUB_OIDC_AUDIENCE":                   "imgsrv-github-env",
-				"IMGSRV_GITHUB_OIDC_REPOSITORY_ID":              "123456789",
-				"IMGSRV_GITHUB_OIDC_WORKFLOW_REF":               "meigma/imgsrv/.github/workflows/publish.yml@refs/heads/main",
-				"IMGSRV_GITHUB_OIDC_SUBJECT":                    "repo:meigma/imgsrv:ref:refs/heads/main",
 				"IMGSRV_S3_ENDPOINT":                            "garage.env:3900",
 				"IMGSRV_S3_BUCKET":                              "imgsrv-env",
 				"IMGSRV_S3_ACCESS_KEY_ID":                       "env-access",
@@ -149,14 +125,6 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				"--metrics-listen=",
 				"--metrics-path=/scrape",
 				"--postgres-url=postgres://flag",
-				"--oidc-issuer-url=https://issuer.flag",
-				"--oidc-audience=imgsrv-flag",
-				"--oidc-required-scope=imgsrv.write.flag",
-				"--github-oidc-issuer-url=https://github-issuer.flag",
-				"--github-oidc-audience=imgsrv-github-flag",
-				"--github-oidc-repository-id=987654321",
-				"--github-oidc-workflow-ref=meigma/imgsrv/.github/workflows/release.yml@refs/heads/main",
-				"--github-oidc-subject=repo:meigma/imgsrv:environment:production",
 				"--s3-endpoint=garage.flag:3900",
 				"--s3-bucket=imgsrv-flag",
 				"--s3-access-key-id=flag-access",
@@ -182,14 +150,6 @@ func TestExecuteContextResolvesConfig(t *testing.T) {
 				MetricsListen:                      "",
 				MetricsPath:                        "/scrape",
 				PostgresURL:                        "postgres://flag",
-				OIDCIssuerURL:                      "https://issuer.flag",
-				OIDCAudience:                       "imgsrv-flag",
-				OIDCRequiredScope:                  "imgsrv.write.flag",
-				GitHubOIDCIssuerURL:                "https://github-issuer.flag",
-				GitHubOIDCAudience:                 "imgsrv-github-flag",
-				GitHubOIDCRepositoryID:             "987654321",
-				GitHubOIDCWorkflowRef:              "meigma/imgsrv/.github/workflows/release.yml@refs/heads/main",
-				GitHubOIDCSubject:                  "repo:meigma/imgsrv:environment:production",
 				S3Endpoint:                         "garage.flag:3900",
 				S3Bucket:                           "imgsrv-flag",
 				S3AccessKeyID:                      "flag-access",
@@ -285,14 +245,8 @@ func TestExecuteContextPrintsHelpWithoutStartingServer(t *testing.T) {
 	assert.Contains(t, stdout.String(), "--metrics-listen")
 	assert.Contains(t, stdout.String(), "--metrics-path")
 	assert.Contains(t, stdout.String(), "--postgres-url")
-	assert.Contains(t, stdout.String(), "--oidc-issuer-url")
-	assert.Contains(t, stdout.String(), "--oidc-audience")
-	assert.Contains(t, stdout.String(), "--oidc-required-scope")
-	assert.Contains(t, stdout.String(), "--github-oidc-issuer-url")
-	assert.Contains(t, stdout.String(), "--github-oidc-audience")
-	assert.Contains(t, stdout.String(), "--github-oidc-repository-id")
-	assert.Contains(t, stdout.String(), "--github-oidc-workflow-ref")
-	assert.Contains(t, stdout.String(), "--github-oidc-subject")
+	assert.NotContains(t, stdout.String(), "--oidc-issuer-url")
+	assert.NotContains(t, stdout.String(), "--github-oidc-audience")
 	assert.Contains(t, stdout.String(), "--s3-endpoint")
 	assert.Contains(t, stdout.String(), "--upload-ttl")
 	assert.Contains(t, stdout.String(), "--cas-promotion-enabled")
@@ -335,14 +289,6 @@ func unsetConfigEnv(t *testing.T) {
 		"IMGSRV_METRICS_LISTEN",
 		"IMGSRV_METRICS_PATH",
 		"IMGSRV_POSTGRES_URL",
-		"IMGSRV_OIDC_ISSUER_URL",
-		"IMGSRV_OIDC_AUDIENCE",
-		"IMGSRV_OIDC_REQUIRED_SCOPE",
-		"IMGSRV_GITHUB_OIDC_ISSUER_URL",
-		"IMGSRV_GITHUB_OIDC_AUDIENCE",
-		"IMGSRV_GITHUB_OIDC_REPOSITORY_ID",
-		"IMGSRV_GITHUB_OIDC_WORKFLOW_REF",
-		"IMGSRV_GITHUB_OIDC_SUBJECT",
 		"IMGSRV_S3_ENDPOINT",
 		"IMGSRV_S3_BUCKET",
 		"IMGSRV_S3_ACCESS_KEY_ID",

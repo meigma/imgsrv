@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/meigma/authkit"
+	"github.com/meigma/authkit/apikey"
 
 	"github.com/meigma/imgsrv/internal/authz"
 )
@@ -183,6 +184,8 @@ func newOIDCProvisioningRuleResponse(rule authz.OIDCProvisioningRule) oidcProvis
 func writeAuthManagementError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, authkit.ErrProvisioningRuleNotFound):
+		writeProblem(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, authkit.ErrPrincipalNotFound), errors.Is(err, apikey.ErrTokenNotFound):
 		writeProblem(w, http.StatusNotFound, err.Error())
 	default:
 		writeProblem(w, http.StatusBadRequest, err.Error())

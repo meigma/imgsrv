@@ -74,9 +74,15 @@ func startServer(
 
 	listener, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+	authStore := store.Authkit()
+	require.NoError(t, authz.EnsureBuiltinRoles(ctx, authStore))
+	require.NoError(t, authz.EnsureBootstrapAdmin(ctx, authz.BootstrapConfig{
+		Store:  authStore,
+		Output: options.bootstrapOutput,
+	}))
 	authService := newAuthService(ctx, t, options, store)
 	authManagement := authz.NewManagementService(authz.ManagementConfig{
-		Store:      store.Authkit(),
+		Store:      authStore,
 		HTTPClient: options.oidcHTTPClient,
 	})
 
@@ -131,19 +137,7 @@ func newAuthService(
 	t.Helper()
 
 	authMiddleware, err := authz.NewMiddleware(ctx, authz.Config{
-		Store: store.Authkit(),
-		OIDC: authz.OIDCConfig{
-			IssuerURL:     options.oidcIssuerURL,
-			Audience:      options.oidcAudience,
-			RequiredScope: options.oidcRequiredScope,
-		},
-		GitHubOIDC: authz.GitHubOIDCConfig{
-			IssuerURL:    options.githubOIDCIssuerURL,
-			Audience:     options.githubOIDCAudience,
-			RepositoryID: options.githubOIDCRepositoryID,
-			WorkflowRef:  options.githubOIDCWorkflowRef,
-			Subject:      options.githubOIDCSubject,
-		},
+		Store:         store.Authkit(),
 		HTTPClient:    options.oidcHTTPClient,
 		ErrorRenderer: httpapi.WriteAuthError,
 	})
