@@ -1164,12 +1164,12 @@ paths:
         - $ref: '#/components/parameters/ImageName'
         - $ref: '#/components/parameters/ImageVersion'
       responses:
-        '200':
-          description: Image version published.
+        '202':
+          description: Publish job queued.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ImageVersion'
+                $ref: '#/components/schemas/PublishJob'
         '400':
           $ref: '#/components/responses/Problem'
         '401':
@@ -1179,6 +1179,33 @@ paths:
         '404':
           $ref: '#/components/responses/Problem'
         '412':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /v1/publish-jobs/{job_id}:
+    get:
+      operationId: getPublishJob
+      summary: Get a publish job.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PublishJobID'
+      responses:
+        '200':
+          description: Publish job status and ordered steps.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishJob'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
@@ -1369,6 +1396,12 @@ components:
       schema:
         type: string
         pattern: '^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$'
+    PublishJobID:
+      name: job_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/PublishJobID'
     AliasName:
       name: alias
       in: path
@@ -1553,6 +1586,9 @@ components:
       examples:
         - sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
     UploadID:
+      type: string
+      format: uuid
+    PublishJobID:
       type: string
       format: uuid
     ArtifactID:
@@ -1803,7 +1839,23 @@ components:
       type: string
       enum:
         - draft
+        - publishing
         - published
+    PublishJobState:
+      type: string
+      enum:
+        - queued
+        - running
+        - succeeded
+        - failed
+    PublishStepState:
+      type: string
+      enum:
+        - queued
+        - running
+        - succeeded
+        - failed
+        - skipped
     ArtifactFormat:
       type: string
       enum:
@@ -2050,6 +2102,99 @@ components:
         published_at:
           type: string
           format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+    PublishJob:
+      type: object
+      required:
+        - id
+        - version_id
+        - image_name
+        - version
+        - state
+        - created_at
+        - updated_at
+        - steps
+      properties:
+        id:
+          $ref: '#/components/schemas/PublishJobID'
+        version_id:
+          type: string
+          format: uuid
+        image_name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{0,127}$'
+        version:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+:-]{0,127}$'
+        state:
+          $ref: '#/components/schemas/PublishJobState'
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        failure_message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublishJobStep'
+      additionalProperties: false
+    PublishJobStep:
+      type: object
+      required:
+        - id
+        - job_id
+        - name
+        - state
+        - blocking
+        - sequence
+        - attempt_count
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        job_id:
+          $ref: '#/components/schemas/PublishJobID'
+        name:
+          type: string
+          enum:
+            - validate_catalog
+            - incus_index
+            - finalize_publish
+        state:
+          $ref: '#/components/schemas/PublishStepState'
+        blocking:
+          type: boolean
+        sequence:
+          type: integer
+          minimum: 0
+        attempt_count:
+          type: integer
+          minimum: 0
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        failure_message:
+          type: string
         created_at:
           type: string
           format: date-time

@@ -31,9 +31,9 @@ v0 proves the native `imgsrv` API plus a first Incus-compatible read projection:
 - serve an unsigned Simple Streams view for published qcow2 artifacts with
   `incus.tar.xz` metadata attachments
 
-The Simple Streams view is intentionally a live projection, not a persisted
-materialization table or background job. It exists to prove Incus compatibility
-before adding a broader materialization framework.
+The Incus Simple Streams view is backed by publish-time projection rows for
+eligible qcow2 artifacts. Aliases are still resolved live when the documents are
+rendered, but anonymous Simple Streams reads do not open CAS blobs.
 
 ## Implementation Baseline
 
@@ -211,7 +211,9 @@ The native API should allow operators to:
 5. publish the draft once every cited digest exists in the trusted CAS catalog
 
 Publishing is the immutability boundary. Before publish, a draft is operator
-controlled. After publish, the version manifest cannot change.
+controlled. Publish enqueue freezes the version as `publishing`; after the
+durable publish job finalizes, the version is `published`. A `publishing` or
+`published` manifest cannot change.
 
 Publishing validates at least:
 
@@ -243,18 +245,20 @@ baseline.
 
 ## Jobs
 
-v0 needs one durable background job class: CAS ingest.
+v0 needs two durable background job classes: CAS ingest and publish.
 
 CAS ingest workers claim completed uploads from PostgreSQL, verify staged bytes,
 ensure the digest-addressed CAS object exists, record the trusted blob, and clean
 up staging state when safe.
 
-The current Incus Simple Streams route is a live projection over published
-release manifests, CAS blobs, and artifact attachments. Future jobs can generate
-artifact attachments when operators ask for them, and future materializers may
-maintain projection tables for cheap serving. Those tables are caches or views;
-the source of truth remains the published release manifest, CAS blob catalog,
-and artifact attachments.
+Publish workers claim ordered publish steps from PostgreSQL. The first slice
+validates the frozen catalog, writes Incus projection rows for qcow2 artifacts
+that include an `incus.tar.xz` attachment, and finalizes the version as
+`published`.
+
+Future materializers may add more protocol-specific projection tables. Those
+tables are caches or views; the source of truth remains the release manifest,
+CAS blob catalog, and artifact attachments.
 
 ## API Sketch
 
@@ -279,6 +283,7 @@ Image and version catalog:
 - `GET /v1/images/{name}/versions`
 - `GET /v1/images/{name}/versions/{version}`
 - `POST /v1/images/{name}/versions/{version}/publish`
+- `GET /v1/publish-jobs/{job_id}`
 
 Draft manifest editing:
 
@@ -322,7 +327,7 @@ environments where operator trust is not guaranteed.
 
 The following are intentionally outside v0:
 
-- persisted/static simplestreams materialization jobs
+- generalized materialization framework
 - other protocol-specific materializations
 - `tus` upload support
 - direct pre-signed upload/download optimization

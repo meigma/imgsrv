@@ -163,11 +163,6 @@ func validateDeleteAttachmentParams(params domain.DeleteAttachmentParams) error 
 	return nil
 }
 
-// validatePublishVersionParams validates the inputs to Store.PublishVersion.
-func validatePublishVersionParams(params domain.PublishVersionParams) error {
-	return validateCreateDraftVersionParams(domain.CreateDraftVersionParams(params))
-}
-
 // validatePutAliasParams validates the inputs to Store.PutAlias.
 func validatePutAliasParams(params domain.PutAliasParams) error {
 	if err := domain.ValidateImageName(params.ImageName); err != nil {

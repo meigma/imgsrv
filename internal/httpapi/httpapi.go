@@ -13,6 +13,7 @@ import (
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
 	"github.com/meigma/imgsrv/internal/objectstore"
+	"github.com/meigma/imgsrv/internal/publish"
 	"github.com/meigma/imgsrv/internal/telemetry"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
@@ -42,6 +43,9 @@ type Dependencies struct {
 
 	// Catalog coordinates client-facing image catalog operations. Nil leaves catalog routes unavailable.
 	Catalog CatalogService
+
+	// Publish coordinates durable publish workflows. Nil leaves publish routes unavailable.
+	Publish PublishService
 
 	// Blobs coordinates client-facing raw CAS blob reads. Nil leaves blob routes unavailable.
 	Blobs BlobService
@@ -135,9 +139,6 @@ type CatalogService interface {
 	// DeleteAttachment removes an attachment from a draft artifact.
 	DeleteAttachment(context.Context, catalog.DeleteAttachmentParams) error
 
-	// PublishVersion marks a draft version immutable and publishable.
-	PublishVersion(context.Context, catalog.PublishVersionParams) (catalog.Version, error)
-
 	// PutAlias creates or moves an alias to a published version.
 	PutAlias(context.Context, catalog.PutAliasParams) (catalog.Alias, error)
 
@@ -155,6 +156,15 @@ type CatalogService interface {
 
 	// ResolveManifest resolves a published image manifest by version or alias.
 	ResolveManifest(context.Context, catalog.ResolveManifestParams) (catalog.Manifest, error)
+}
+
+// PublishService coordinates durable publish workflow operations for HTTP callers.
+type PublishService interface {
+	// PublishVersion freezes a draft version and queues durable publish steps.
+	PublishVersion(context.Context, publish.EnqueueVersionParams) (publish.Job, error)
+
+	// GetPublishJob returns a publish job with its durable steps.
+	GetPublishJob(context.Context, publish.GetJobParams) (publish.Job, error)
 }
 
 // BlobService coordinates raw CAS blob reads for HTTP callers.
@@ -246,6 +256,7 @@ type api struct {
 	authMgmt  AuthManagementService
 	uploads   UploadService
 	catalog   CatalogService
+	publish   PublishService
 	blobs     BlobService
 	streams   SimpleStreamsService
 	now       func() time.Time
@@ -280,6 +291,7 @@ func New(deps Dependencies) http.Handler {
 		authMgmt:  deps.AuthManagement,
 		uploads:   deps.Uploads,
 		catalog:   deps.Catalog,
+		publish:   deps.Publish,
 		blobs:     deps.Blobs,
 		streams:   deps.SimpleStreams,
 		now:       now,
@@ -355,6 +367,10 @@ func (a *api) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(
 		"POST /v1/images/{name}/versions/{version}/publish",
 		a.requireAction(authz.ActionContentWrite, a.publishVersion),
+	)
+	mux.HandleFunc(
+		"GET /v1/publish-jobs/{job_id}",
+		a.requireAction(authz.ActionContentWrite, a.getPublishJob),
 	)
 	mux.HandleFunc(
 		"PUT /v1/images/{name}/aliases/{alias}",

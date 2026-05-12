@@ -21,8 +21,10 @@ import (
 	"github.com/meigma/imgsrv/internal/httpapi"
 	"github.com/meigma/imgsrv/internal/jobs"
 	"github.com/meigma/imgsrv/internal/jobs/promote"
+	"github.com/meigma/imgsrv/internal/jobs/publishflow"
 	incusmaterialization "github.com/meigma/imgsrv/internal/materialization/incus"
 	"github.com/meigma/imgsrv/internal/objectstore"
+	"github.com/meigma/imgsrv/internal/publish"
 	"github.com/meigma/imgsrv/internal/store/postgres"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
@@ -59,6 +61,18 @@ const (
 	// casPromotionErrorBackoffMax caps the exponential backoff applied after
 	// CAS promotion failures during integration runs.
 	casPromotionErrorBackoffMax = 100 * time.Millisecond
+
+	// publishWorkerName is the job name suffix used in the worker ID and in
+	// logger attributes for the durable publish job.
+	publishWorkerName = "publish"
+
+	// publishPollInterval is the poll cadence the integration publish job uses
+	// when looking for queued publish steps.
+	publishPollInterval = 10 * time.Millisecond
+
+	// publishErrorBackoffMax caps the exponential backoff applied after publish
+	// worker failures during integration runs.
+	publishErrorBackoffMax = 100 * time.Millisecond
 )
 
 // startServer constructs and runs the in-process imgsrv HTTP server, waits for
@@ -104,12 +118,15 @@ func startServer(
 			TrustedBlobs: trustedBlobLookup(store),
 		}),
 		Catalog: catalogService,
-		Blobs:   blobService,
+		Publish: publish.NewService(publish.ServiceConfig{
+			Store: store.Publish(),
+		}),
+		Blobs: blobService,
 		SimpleStreams: incusmaterialization.NewService(incusmaterialization.Config{
 			Catalog: catalogService,
-			Blobs:   blobService,
+			Store:   store.IncusProjection(),
 		}),
-		BackgroundJobs: backgroundJobs(options, store, objects),
+		BackgroundJobs: backgroundJobs(options, store, objects, catalogService, blobService),
 	})
 	require.NoError(t, err)
 
@@ -199,9 +216,28 @@ func backgroundJobs(
 	options options,
 	store *postgres.Store,
 	objects objectstore.Store,
+	catalogService httpapi.CatalogService,
+	blobService httpapi.BlobService,
 ) []app.BackgroundJob {
+	publishJob := jobs.New(jobs.Config{
+		Handler: publishflow.New(publishflow.Config{
+			Store: store.Publish(),
+			Incus: incusmaterialization.NewIndexer(incusmaterialization.IndexerConfig{
+				Catalog: catalogService,
+				Blobs:   blobService,
+			}),
+		}),
+		WorkerID: jobs.Identity{
+			NodeName: casPromotionWorkerNodeName,
+			RunID:    casPromotionWorkerRunID,
+		}.WorkerID(publishWorkerName),
+		Interval:            publishPollInterval,
+		ErrorBackoffInitial: publishPollInterval,
+		ErrorBackoffMax:     publishErrorBackoffMax,
+		Logger:              options.logger.With("component", publishWorkerName),
+	})
 	if !options.casPromotion {
-		return nil
+		return []app.BackgroundJob{publishJob}
 	}
 
 	casService := newCASService(store, objects)
@@ -219,7 +255,7 @@ func backgroundJobs(
 		ErrorBackoffInitial: casPromotionPollInterval,
 		ErrorBackoffMax:     casPromotionErrorBackoffMax,
 		Logger:              options.logger.With("component", casPromotionWorkerName),
-	})}
+	}), publishJob}
 }
 
 // trustedBlobLookup returns the upload trusted-blob lookup when the shared store implements it.

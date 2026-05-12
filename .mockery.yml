@@ -32,8 +32,16 @@ packages:
     interfaces:
       BlobService:
       CatalogService:
+      PublishService:
       UploadService:
+  github.com/meigma/imgsrv/internal/jobs/publishflow:
+    interfaces:
+      IncusIndexer:
+      StepStore:
   github.com/meigma/imgsrv/internal/objectstore:
+    interfaces:
+      Store:
+  github.com/meigma/imgsrv/internal/publish:
     interfaces:
       Store:
   github.com/meigma/imgsrv/internal/uploads:

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"testing"
+	"time"
 
 	simplestreams "github.com/meigma/go-simplestreams"
 	"github.com/meigma/go-simplestreams/adapters/httpmirror"
@@ -85,13 +86,14 @@ func TestReleaseFlowPublishesDraft(t *testing.T) {
 	require.NoError(t, err)
 	assertManifest(t, draft, image.Name, imgsrv.ImageVersionStateDraft, primaryBlob, attachmentBlob)
 
-	published, err := catalog.PublishVersion(ctx, image.Name, version.Version)
+	publishJob, err := catalog.PublishVersion(ctx, image.Name, version.Version)
 	require.NoError(t, err)
-	assert.Equal(t, imgsrv.ImageVersionStatePublished, published.State)
-	assert.NotNil(t, published.PublishedAt)
+	assert.Equal(t, imgsrv.PublishJobStateQueued, publishJob.State)
+	waitForPublishJob(ctx, t, catalog, publishJob.ID)
 
 	manifest, err := catalog.GetVersionManifest(ctx, image.Name, version.Version)
 	require.NoError(t, err)
+	assert.NotNil(t, manifest.Version.PublishedAt)
 	assertManifest(
 		t,
 		manifest,
@@ -264,9 +266,10 @@ func TestReleaseFlowServesIncusSimpleStreams(t *testing.T) {
 		attachmentRequest("incus.tar.xz", metadataBlob),
 	)
 	require.NoError(t, err)
-	published, err := catalog.PublishVersion(ctx, image.Name, draft.Version)
+	publishJob, err := catalog.PublishVersion(ctx, image.Name, draft.Version)
 	require.NoError(t, err)
-	_, err = catalog.PutAlias(ctx, image.Name, "latest", imgsrv.PutAliasRequest{Version: published.Version})
+	waitForPublishJob(ctx, t, catalog, publishJob.ID)
+	_, err = catalog.PutAlias(ctx, image.Name, "latest", imgsrv.PutAliasRequest{Version: draft.Version})
 	require.NoError(t, err)
 
 	source, err := httpmirror.New(env.BaseURL(), httpmirror.WithHTTPClient(env.HTTPClient()))
@@ -514,12 +517,13 @@ func TestReleaseFlowRejectsInvalidDraftWrites(t *testing.T) {
 		artifactRequest(primaryBlob),
 	)
 	require.NoError(t, err)
-	_, err = catalog.PublishVersion(
+	publishJob, err := catalog.PublishVersion(
 		ctx,
 		"release-published-rejects-edits",
 		publishedVersion.Version,
 	)
 	require.NoError(t, err)
+	waitForPublishJob(ctx, t, catalog, publishJob.ID)
 
 	_, err = catalog.AddArtifact(
 		ctx,
@@ -718,10 +722,44 @@ func createPublishedVersion(
 	require.NoError(t, err)
 	_, err = catalog.AddArtifact(ctx, imageName, draft.Version, artifactRequest(primaryBlob))
 	require.NoError(t, err)
-	published, err := catalog.PublishVersion(ctx, imageName, draft.Version)
+	publishJob, err := catalog.PublishVersion(ctx, imageName, draft.Version)
+	require.NoError(t, err)
+	waitForPublishJob(ctx, t, catalog, publishJob.ID)
+	manifest, err := catalog.GetVersionManifest(ctx, imageName, draft.Version)
 	require.NoError(t, err)
 
-	return published
+	return manifest.Version
+}
+
+func waitForPublishJob(
+	ctx context.Context,
+	t testing.TB,
+	catalog imgsrv.CatalogClient,
+	jobID imgsrv.PublishJobID,
+) imgsrv.PublishJob {
+	t.Helper()
+
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		job, err := catalog.GetPublishJob(waitCtx, jobID.String())
+		require.NoError(t, err)
+		switch job.State {
+		case imgsrv.PublishJobStateSucceeded:
+			return job
+		case imgsrv.PublishJobStateFailed:
+			require.FailNow(t, "publish job failed", job.FailureMessage)
+		}
+
+		select {
+		case <-waitCtx.Done():
+			require.NoError(t, waitCtx.Err(), "timed out waiting for publish job %s", jobID)
+		case <-ticker.C:
+		}
+	}
 }
 
 func artifactRequest(blob catalogBlob) imgsrv.AddArtifactRequest {

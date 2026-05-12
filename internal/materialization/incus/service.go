@@ -3,22 +3,18 @@ package incus
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	simplestreams "github.com/meigma/go-simplestreams"
 	incusschema "github.com/meigma/go-simplestreams/schema/incus"
 
-	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
-	"github.com/meigma/imgsrv/internal/objectstore"
-	"github.com/meigma/imgsrv/internal/uploads"
 )
 
 const (
@@ -32,58 +28,107 @@ const (
 	defaultVariant   = "default"
 )
 
-// Catalog reads the published catalog state needed to project an Incus stream.
-type Catalog interface {
-	// ListImages returns image namespaces with published versions.
-	ListImages(context.Context, catalog.ListImagesParams) ([]catalog.Image, error)
+// ProjectionRow is one persisted Incus projection item for an eligible artifact.
+type ProjectionRow struct {
+	// VersionID identifies the published image version.
+	VersionID uuid.UUID
 
-	// ListVersions returns published versions for one image.
-	ListVersions(context.Context, catalog.ListVersionsParams) ([]catalog.Version, error)
+	// ArtifactID identifies the qcow2 artifact.
+	ArtifactID uuid.UUID
 
-	// ListAliases returns aliases for one image.
-	ListAliases(context.Context, catalog.ListAliasesParams) ([]catalog.Alias, error)
+	// MetadataAttachmentID identifies the incus.tar.xz attachment.
+	MetadataAttachmentID uuid.UUID
 
-	// GetVersionManifest returns an exact draft or published version manifest.
-	GetVersionManifest(context.Context, catalog.GetVersionManifestParams) (catalog.Manifest, error)
+	// ImageName is the image namespace.
+	ImageName string
+
+	// ImageDisplayName is the optional human-friendly image label.
+	ImageDisplayName *string
+
+	// Version is the operator-defined version string.
+	Version string
+
+	// VersionCreatedAt is when the image version was created.
+	VersionCreatedAt time.Time
+
+	// PublishedAt is when the version became visible to published reads.
+	PublishedAt *time.Time
+
+	// OperatingSystem is the artifact operating-system token.
+	OperatingSystem string
+
+	// Architecture is the artifact architecture token.
+	Architecture string
+
+	// MetadataPath is the API download path for the metadata item.
+	MetadataPath string
+
+	// DiskPath is the API download path for the qcow2 disk item.
+	DiskPath string
+
+	// MetadataSHA256 is the metadata blob digest without the sha256: prefix.
+	MetadataSHA256 string
+
+	// MetadataSizeBytes is the metadata blob size.
+	MetadataSizeBytes int64
+
+	// DiskSHA256 is the qcow2 blob digest without the sha256: prefix.
+	DiskSHA256 string
+
+	// DiskSizeBytes is the qcow2 blob size.
+	DiskSizeBytes int64
+
+	// CombinedDiskKVMImgSHA256 is the Incus combined metadata-plus-disk checksum.
+	CombinedDiskKVMImgSHA256 string
 }
 
-// BlobReader opens trusted CAS blobs for projection-time checksum work.
-type BlobReader interface {
-	// OpenBlob opens a trusted CAS blob, optionally constrained to one byte range.
-	OpenBlob(context.Context, cas.OpenBlobParams) (objectstore.ObjectReader, error)
+// ProjectionStore reads persisted Incus projection rows.
+type ProjectionStore interface {
+	// ListProjectionRows returns completed projection rows for published versions.
+	ListProjectionRows(context.Context) ([]ProjectionRow, error)
+}
+
+// AliasCatalog reads current aliases for product metadata.
+type AliasCatalog interface {
+	// ListAliases returns aliases for one image.
+	ListAliases(context.Context, catalog.ListAliasesParams) ([]catalog.Alias, error)
 }
 
 // Config configures the Incus Simple Streams projection service.
 type Config struct {
-	// Catalog reads published imgsrv catalog state.
-	Catalog Catalog
+	// Catalog reads mutable alias state used at render time.
+	Catalog AliasCatalog
 
-	// Blobs opens trusted CAS blob bytes.
-	Blobs BlobReader
+	// Store reads persisted Incus projection rows.
+	Store ProjectionStore
 }
 
-// Service builds Incus-compatible Simple Streams metadata from imgsrv catalog state.
+// Service builds Incus-compatible Simple Streams metadata from persisted projection rows.
 type Service struct {
-	catalog Catalog
-	blobs   BlobReader
+	catalog AliasCatalog
+	store   ProjectionStore
 }
 
 // NewService constructs an Incus projection service.
 func NewService(config Config) *Service {
 	return &Service{
 		catalog: config.Catalog,
-		blobs:   config.Blobs,
+		store:   config.Store,
 	}
 }
 
 // Index renders the Simple Streams index document.
 func (service *Service) Index(ctx context.Context) ([]byte, error) {
-	catalogReader, _, err := service.dependencies()
+	_, store, err := service.dependencies()
 	if err != nil {
 		return nil, err
 	}
 
-	products, err := projectedProductNames(ctx, catalogReader)
+	rows, err := store.ListProjectionRows(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("incus materialization: list projection rows: %w", err)
+	}
+	products, err := projectedProductNames(rows)
 	if err != nil {
 		return nil, err
 	}
@@ -117,25 +162,35 @@ func (service *Service) ProductFile(ctx context.Context) ([]byte, error) {
 
 // BuildProductFile builds the Incus image product document as Simple Streams domain types.
 func (service *Service) BuildProductFile(ctx context.Context) (*simplestreams.ProductFile, error) {
-	catalogReader, blobs, err := service.dependencies()
+	catalogReader, store, err := service.dependencies()
 	if err != nil {
 		return nil, err
 	}
 
-	projection := projectionState{
-		blobs:          blobs,
-		combinedSHA256: map[combinedKey]string{},
+	rows, err := store.ListProjectionRows(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("incus materialization: list projection rows: %w", err)
 	}
+
 	productFile := simplestreams.NewProductFile(incusschema.ContentIDImages)
 	productFile.DataType = incusschema.DataTypeImageDownloads
+	aliases := map[string][]catalog.Alias{}
+	for _, row := range rows {
+		productName := productName(row.ImageName, row.Version, row.Architecture)
+		if _, exists := productFile.Products[productName]; exists {
+			return nil, fmt.Errorf("incus materialization: duplicate product %q", productName)
+		}
+		imageAliases, ok := aliases[row.ImageName]
+		if !ok {
+			var aliasErr error
+			imageAliases, aliasErr = catalogReader.ListAliases(ctx, catalog.ListAliasesParams{ImageName: row.ImageName})
+			if aliasErr != nil {
+				return nil, fmt.Errorf("incus materialization: list aliases for image %q: %w", row.ImageName, aliasErr)
+			}
+			aliases[row.ImageName] = imageAliases
+		}
 
-	images, err := catalogReader.ListImages(ctx, catalog.ListImagesParams{})
-	if err != nil {
-		return nil, fmt.Errorf("incus materialization: list images: %w", err)
-	}
-
-	for _, image := range images {
-		if err := service.projectImage(ctx, catalogReader, &projection, productFile, image); err != nil {
+		if err := projectRow(productFile, row, imageAliases); err != nil {
 			return nil, err
 		}
 	}
@@ -143,267 +198,70 @@ func (service *Service) BuildProductFile(ctx context.Context) (*simplestreams.Pr
 	return productFile, nil
 }
 
-func projectedProductNames(ctx context.Context, catalogReader Catalog) ([]string, error) {
-	images, err := catalogReader.ListImages(ctx, catalog.ListImagesParams{})
-	if err != nil {
-		return nil, fmt.Errorf("incus materialization: list images: %w", err)
-	}
-
+func projectedProductNames(rows []ProjectionRow) ([]string, error) {
 	names := []string{}
 	seen := map[string]struct{}{}
-	for _, image := range images {
-		if err := appendImageProductNames(ctx, catalogReader, image, &names, seen); err != nil {
-			return nil, err
+	for _, row := range rows {
+		name := productName(row.ImageName, row.Version, row.Architecture)
+		if _, exists := seen[name]; exists {
+			return nil, fmt.Errorf("incus materialization: duplicate product %q", name)
 		}
+		seen[name] = struct{}{}
+		names = append(names, name)
 	}
 	sort.Strings(names)
 
 	return names, nil
 }
 
-func appendImageProductNames(
-	ctx context.Context,
-	catalogReader Catalog,
-	image catalog.Image,
-	names *[]string,
-	seen map[string]struct{},
-) error {
-	versions, err := catalogReader.ListVersions(ctx, catalog.ListVersionsParams{ImageName: image.Name})
-	if err != nil {
-		return fmt.Errorf("incus materialization: list versions for image %q: %w", image.Name, err)
-	}
-	for _, version := range versions {
-		manifest, err := catalogReader.GetVersionManifest(ctx, catalog.GetVersionManifestParams{
-			ImageName: image.Name,
-			Version:   version.Version,
-		})
-		if err != nil {
-			return fmt.Errorf(
-				"incus materialization: load manifest for image %q version %q: %w",
-				image.Name,
-				version.Version,
-				err,
-			)
-		}
-		if err := appendManifestProductNames(manifest, names, seen); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func appendManifestProductNames(
-	manifest catalog.Manifest,
-	names *[]string,
-	seen map[string]struct{},
-) error {
-	for _, manifestArtifact := range manifest.Artifacts {
-		artifact := manifestArtifact.Artifact
-		if artifact.Format != catalog.ArtifactFormatQCOW2 {
-			continue
-		}
-		if _, ok := findMetadataAttachment(manifestArtifact.Attachments); !ok {
-			continue
-		}
-
-		name := productName(manifest.Image.Name, manifest.Version.Version, artifact.Architecture)
-		if _, exists := seen[name]; exists {
-			return fmt.Errorf("incus materialization: duplicate product %q", name)
-		}
-		seen[name] = struct{}{}
-		*names = append(*names, name)
-	}
-
-	return nil
-}
-
-func (service *Service) projectImage(
-	ctx context.Context,
-	catalogReader Catalog,
-	projection *projectionState,
+func projectRow(
 	productFile *simplestreams.ProductFile,
-	image catalog.Image,
-) error {
-	versions, err := catalogReader.ListVersions(ctx, catalog.ListVersionsParams{ImageName: image.Name})
-	if err != nil {
-		return fmt.Errorf("incus materialization: list versions for image %q: %w", image.Name, err)
-	}
-	aliases, err := catalogReader.ListAliases(ctx, catalog.ListAliasesParams{ImageName: image.Name})
-	if err != nil {
-		return fmt.Errorf("incus materialization: list aliases for image %q: %w", image.Name, err)
-	}
-
-	for _, version := range versions {
-		manifest, err := catalogReader.GetVersionManifest(ctx, catalog.GetVersionManifestParams{
-			ImageName: image.Name,
-			Version:   version.Version,
-		})
-		if err != nil {
-			return fmt.Errorf(
-				"incus materialization: load manifest for image %q version %q: %w",
-				image.Name,
-				version.Version,
-				err,
-			)
-		}
-		if err := projection.projectManifest(ctx, productFile, manifest, aliases); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-type projectionState struct {
-	blobs          BlobReader
-	combinedSHA256 map[combinedKey]string
-}
-
-type combinedKey struct {
-	metadata catalog.Digest
-	disk     catalog.Digest
-}
-
-func (projection *projectionState) projectManifest(
-	ctx context.Context,
-	productFile *simplestreams.ProductFile,
-	manifest catalog.Manifest,
+	row ProjectionRow,
 	aliases []catalog.Alias,
 ) error {
-	for _, manifestArtifact := range manifest.Artifacts {
-		artifact := manifestArtifact.Artifact
-		if artifact.Format != catalog.ArtifactFormatQCOW2 {
-			continue
-		}
-		metadataAttachment, ok := findMetadataAttachment(manifestArtifact.Attachments)
-		if !ok {
-			continue
-		}
+	product := productFile.SetProduct(productName(row.ImageName, row.Version, row.Architecture), nil)
+	product.SetMetadata("aliases", productAliases(row.ImageName, row.Version, aliases))
+	product.SetMetadata("arch", incusArchitecture(row.Architecture))
+	product.SetMetadata("os", row.OperatingSystem)
+	product.SetMetadata("release", row.Version)
+	product.SetMetadata("release_title", releaseTitle(row.ImageName, row.ImageDisplayName, row.Version))
+	product.SetMetadata("variant", defaultVariant)
+	product.SetMetadata("requirements", map[string]any{})
 
-		productName := productName(manifest.Image.Name, manifest.Version.Version, artifact.Architecture)
-		if _, exists := productFile.Products[productName]; exists {
-			return fmt.Errorf("incus materialization: duplicate product %q", productName)
-		}
-
-		product := productFile.SetProduct(productName, nil)
-		product.SetMetadata("aliases", productAliases(manifest.Image.Name, manifest.Version.Version, aliases))
-		product.SetMetadata("arch", incusArchitecture(artifact.Architecture))
-		product.SetMetadata("os", artifact.OperatingSystem)
-		product.SetMetadata("release", manifest.Version.Version)
-		product.SetMetadata("release_title", releaseTitle(manifest.Image, manifest.Version))
-		product.SetMetadata("variant", defaultVariant)
-		product.SetMetadata("requirements", map[string]any{})
-
-		version := product.SetVersion(incusSerial(manifest.Version), nil)
-		if err := projection.setItems(ctx, version, manifest, artifact, metadataAttachment); err != nil {
-			return err
-		}
+	version := product.SetVersion(incusSerial(row), nil)
+	if err := setItems(version, row); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func (projection *projectionState) setItems(
-	ctx context.Context,
-	version *simplestreams.Version,
-	manifest catalog.Manifest,
-	artifact catalog.Artifact,
-	metadata catalog.Attachment,
-) error {
-	metadataPath, err := attachmentDownloadPath(manifest.Image.Name, manifest.Version.Version, artifact.ID, metadata.ID)
+func setItems(version *simplestreams.Version, row ProjectionRow) error {
+	metadataPath, err := parseProjectionPath(row.MetadataPath)
 	if err != nil {
 		return err
 	}
-	diskPath, err := artifactDownloadPath(manifest.Image.Name, manifest.Version.Version, artifact.ID)
+	diskPath, err := parseProjectionPath(row.DiskPath)
 	if err != nil {
 		return err
 	}
 
-	metadataSHA256, err := digestSHA256Hex(metadata.BlobDigest)
-	if err != nil {
-		return err
-	}
-	diskSHA256, err := digestSHA256Hex(artifact.PrimaryBlobDigest)
-	if err != nil {
-		return err
-	}
-	combinedSHA256, err := projection.combinedDiskSHA256(ctx, metadata.BlobDigest, artifact.PrimaryBlobDigest)
-	if err != nil {
-		return err
-	}
-
-	metadataSize := metadata.BlobSizeBytes
+	metadataSize := row.MetadataSizeBytes
 	metadataItem := version.SetItem(metadataItemName, nil)
 	metadataItem.FileType = metadataFileType
 	metadataItem.Path = metadataPath
 	metadataItem.Size = &metadataSize
-	metadataItem.SHA256 = metadataSHA256
-	metadataItem.SetMetadata("combined_disk-kvm-img_sha256", combinedSHA256)
+	metadataItem.SHA256 = row.MetadataSHA256
+	metadataItem.SetMetadata("combined_disk-kvm-img_sha256", row.CombinedDiskKVMImgSHA256)
 
-	diskSize := artifact.PrimaryBlobSizeBytes
+	diskSize := row.DiskSizeBytes
 	diskItem := version.SetItem(diskItemName, nil)
 	diskItem.FileType = diskFileType
 	diskItem.Path = diskPath
 	diskItem.Size = &diskSize
-	diskItem.SHA256 = diskSHA256
+	diskItem.SHA256 = row.DiskSHA256
 
 	return nil
-}
-
-func (projection *projectionState) combinedDiskSHA256(
-	ctx context.Context,
-	metadataDigest catalog.Digest,
-	diskDigest catalog.Digest,
-) (string, error) {
-	key := combinedKey{metadata: metadataDigest, disk: diskDigest}
-	if value, ok := projection.combinedSHA256[key]; ok {
-		return value, nil
-	}
-
-	metadataReader, err := projection.openBlob(ctx, metadataDigest)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = metadataReader.Body.Close() }()
-
-	diskReader, err := projection.openBlob(ctx, diskDigest)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = diskReader.Body.Close() }()
-
-	value, err := simplestreams.SHA256Concat(metadataReader.Body, diskReader.Body)
-	if err != nil {
-		return "", fmt.Errorf("incus materialization: compute combined disk checksum: %w", err)
-	}
-	projection.combinedSHA256[key] = value
-
-	return value, nil
-}
-
-func (projection *projectionState) openBlob(
-	ctx context.Context,
-	digest catalog.Digest,
-) (objectstore.ObjectReader, error) {
-	reader, err := projection.blobs.OpenBlob(ctx, cas.OpenBlobParams{
-		Digest: uploads.Digest(digest.String()),
-	})
-	if err != nil {
-		return objectstore.ObjectReader{}, fmt.Errorf("incus materialization: open blob %s: %w", digest, err)
-	}
-
-	return reader, nil
-}
-
-func findMetadataAttachment(attachments []catalog.Attachment) (catalog.Attachment, bool) {
-	for _, attachment := range attachments {
-		if attachment.Name == metadataItemName {
-			return attachment, true
-		}
-	}
-
-	return catalog.Attachment{}, false
 }
 
 func productName(imageName string, version string, architecture string) string {
@@ -445,18 +303,18 @@ func productAliases(imageName string, version string, aliases []catalog.Alias) s
 	return strings.Join(values, ",")
 }
 
-func releaseTitle(image catalog.Image, version catalog.Version) string {
-	if image.DisplayName != nil && strings.TrimSpace(*image.DisplayName) != "" {
-		return *image.DisplayName
+func releaseTitle(imageName string, displayName *string, version string) string {
+	if displayName != nil && strings.TrimSpace(*displayName) != "" {
+		return *displayName
 	}
 
-	return image.Name + " " + version.Version
+	return imageName + " " + version
 }
 
-func incusSerial(version catalog.Version) string {
-	timestamp := version.CreatedAt
-	if version.PublishedAt != nil {
-		timestamp = *version.PublishedAt
+func incusSerial(row ProjectionRow) string {
+	timestamp := row.VersionCreatedAt
+	if row.PublishedAt != nil {
+		timestamp = *row.PublishedAt
 	}
 
 	return timestamp.UTC().Format("20060102_15:04")
@@ -499,23 +357,10 @@ func parseProjectionPath(path string) (simplestreams.RelativePath, error) {
 	return relativePath, nil
 }
 
-func digestSHA256Hex(digest catalog.Digest) (string, error) {
-	value := digest.String()
-	hash, ok := strings.CutPrefix(value, "sha256:")
-	if !ok {
-		return "", fmt.Errorf("incus materialization: digest %q is not sha256", value)
-	}
-	if _, err := hex.DecodeString(hash); err != nil || len(hash) != sha256.Size*2 {
-		return "", fmt.Errorf("incus materialization: digest %q is not valid lowercase hex", value)
-	}
-
-	return hash, nil
-}
-
-func (service *Service) dependencies() (Catalog, BlobReader, error) {
-	if service == nil || service.catalog == nil || service.blobs == nil {
+func (service *Service) dependencies() (AliasCatalog, ProjectionStore, error) {
+	if service == nil || service.catalog == nil || service.store == nil {
 		return nil, nil, errors.New("incus materialization dependencies are not configured")
 	}
 
-	return service.catalog, service.blobs, nil
+	return service.catalog, service.store, nil
 }

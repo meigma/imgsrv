@@ -22,9 +22,10 @@ const (
 	testDigest       = Digest(
 		"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 	)
-	testImageID   = "22222222-3333-4444-5555-666666666666"
-	testUploadID  = "11111111-2222-3333-4444-555555555555"
-	testVersionID = "55555555-6666-7777-8888-999999999999"
+	testImageID      = "22222222-3333-4444-5555-666666666666"
+	testPublishJobID = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
+	testUploadID     = "11111111-2222-3333-4444-555555555555"
+	testVersionID    = "55555555-6666-7777-8888-999999999999"
 )
 
 func TestNewValidatesBaseURL(t *testing.T) {
@@ -576,9 +577,15 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	assert.Equal(t, ImageVersionStateDraft, manifest.Version.State)
 	require.Len(t, manifest.Artifacts, 1)
 
-	published, err := catalog.PublishVersion(ctx, image.Name, version.Version)
+	publishJob, err := catalog.PublishVersion(ctx, image.Name, version.Version)
 	require.NoError(t, err)
-	assert.Equal(t, ImageVersionStatePublished, published.State)
+	assert.Equal(t, PublishJobStateQueued, publishJob.State)
+	assert.Equal(t, image.Name, publishJob.ImageName)
+	assert.Equal(t, version.Version, publishJob.Version)
+
+	gotPublishJob, err := catalog.GetPublishJob(ctx, publishJob.ID.String())
+	require.NoError(t, err)
+	assert.Equal(t, PublishJobStateSucceeded, gotPublishJob.State)
 
 	alias, err := catalog.PutAlias(
 		ctx,
@@ -732,7 +739,14 @@ func registerCatalogVersionHandlers(t *testing.T, mux *http.ServeMux) {
 		func(w http.ResponseWriter, r *http.Request) {
 			assertRequestBasics(t, r, http.MethodPost)
 			assert.Zero(t, r.ContentLength)
-			writeJSON(t, w, http.StatusOK, versionFixture(ImageVersionStatePublished))
+			writeJSON(t, w, http.StatusAccepted, publishJobFixture(PublishJobStateQueued))
+		},
+	)
+	mux.HandleFunc(
+		"/api/v1/publish-jobs/"+testPublishJobID,
+		func(w http.ResponseWriter, r *http.Request) {
+			assertRequestBasics(t, r, http.MethodGet)
+			writeJSON(t, w, http.StatusOK, publishJobFixture(PublishJobStateSucceeded))
 		},
 	)
 	mux.HandleFunc(
@@ -1136,6 +1150,50 @@ func versionFixture(state ImageVersionState) ImageVersion {
 	}
 
 	return version
+}
+
+func publishJobFixture(state PublishJobState) PublishJob {
+	job := PublishJob{
+		ID:        PublishJobID(testPublishJobID),
+		VersionID: testVersionID,
+		ImageName: "debian",
+		Version:   "v1.0.0",
+		State:     state,
+		CreatedAt: "2026-05-05T12:00:00Z",
+		UpdatedAt: "2026-05-05T12:00:00Z",
+		Steps: []PublishJobStep{
+			publishStepFixture("validate_catalog", 10, PublishStepStateQueued),
+			publishStepFixture("incus_index", 20, PublishStepStateQueued),
+			publishStepFixture("finalize_publish", 30, PublishStepStateQueued),
+		},
+	}
+	if state == PublishJobStateSucceeded {
+		startedAt := "2026-05-05T12:00:01Z"
+		finishedAt := "2026-05-05T12:00:02Z"
+		job.StartedAt = &startedAt
+		job.FinishedAt = &finishedAt
+		for index := range job.Steps {
+			job.Steps[index].State = PublishStepStateSucceeded
+			job.Steps[index].StartedAt = &startedAt
+			job.Steps[index].FinishedAt = &finishedAt
+		}
+	}
+
+	return job
+}
+
+func publishStepFixture(name string, sequence int, state PublishStepState) PublishJobStep {
+	return PublishJobStep{
+		ID:           testPublishJobID[:8] + "-0000-0000-0000-" + testPublishJobID[24:],
+		JobID:        PublishJobID(testPublishJobID),
+		Name:         name,
+		State:        state,
+		Blocking:     true,
+		Sequence:     sequence,
+		AttemptCount: 0,
+		CreatedAt:    "2026-05-05T12:00:00Z",
+		UpdatedAt:    "2026-05-05T12:00:00Z",
+	}
 }
 
 func artifactFixture() Artifact {

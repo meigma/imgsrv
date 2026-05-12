@@ -71,9 +71,6 @@ type Store interface {
 	// DeleteAttachment removes an attachment from a draft artifact.
 	DeleteAttachment(context.Context, DeleteAttachmentParams) error
 
-	// PublishVersion marks a draft version immutable and publishable.
-	PublishVersion(context.Context, PublishVersionParams) (Version, error)
-
 	// PutAlias creates or moves an alias to a published version.
 	PutAlias(context.Context, PutAliasParams) (Alias, error)
 
@@ -116,6 +113,9 @@ type VersionState string
 const (
 	// VersionStateDraft means a version manifest can still be edited.
 	VersionStateDraft VersionState = "draft"
+
+	// VersionStatePublishing means a version manifest is frozen while publish steps run.
+	VersionStatePublishing VersionState = "publishing"
 
 	// VersionStatePublished means a version manifest is immutable.
 	VersionStatePublished VersionState = "published"
@@ -433,15 +433,6 @@ type DeleteAttachmentParams struct {
 
 	// AttachmentID identifies the attachment to remove.
 	AttachmentID uuid.UUID
-}
-
-// PublishVersionParams publishes a draft version.
-type PublishVersionParams struct {
-	// ImageName identifies the parent image by name.
-	ImageName string
-
-	// Version identifies the draft image version.
-	Version string
 }
 
 // PutAliasParams creates or moves an image alias.
