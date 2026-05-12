@@ -19,7 +19,7 @@ not a complete reference manual.
 
 ## Scope
 
-v0 proves the native `imgsrv` API only:
+v0 proves the native `imgsrv` API plus a first Incus-compatible read projection:
 
 - upload content into a verified content-addressed store
 - create draft image versions
@@ -28,10 +28,12 @@ v0 proves the native `imgsrv` API only:
 - manage aliases that point to versions
 - query published images and versions
 - download published artifacts through `imgsrv`
+- serve an unsigned Simple Streams view for published qcow2 artifacts with
+  `incus.tar.xz` metadata attachments
 
-v0 does not implement downstream materializations such as simplestreams. The data
-model leaves room for them, but the first prototype should not try to prove Incus
-compatibility.
+The Simple Streams view is intentionally a live projection, not a persisted
+materialization table or background job. It exists to prove Incus compatibility
+before adding a broader materialization framework.
 
 ## Implementation Baseline
 
@@ -247,12 +249,12 @@ CAS ingest workers claim completed uploads from PostgreSQL, verify staged bytes,
 ensure the digest-addressed CAS object exists, record the trusted blob, and clean
 up staging state when safe.
 
-Future jobs can generate artifact attachments when operators ask for them. For
-example, a later Incus metadata generator could create a MIME-typed attachment,
-write it to CAS, and attach it to a release artifact. Future materializers may
-also maintain projection tables for cheap serving. Those tables are caches or
-views; the source of truth remains the published release manifest, CAS blob
-catalog, and artifact attachments.
+The current Incus Simple Streams route is a live projection over published
+release manifests, CAS blobs, and artifact attachments. Future jobs can generate
+artifact attachments when operators ask for them, and future materializers may
+maintain projection tables for cheap serving. Those tables are caches or views;
+the source of truth remains the published release manifest, CAS blob catalog,
+and artifact attachments.
 
 ## API Sketch
 
@@ -320,7 +322,7 @@ environments where operator trust is not guaranteed.
 
 The following are intentionally outside v0:
 
-- simplestreams or Incus materialization
+- persisted/static simplestreams materialization jobs
 - other protocol-specific materializations
 - `tus` upload support
 - direct pre-signed upload/download optimization

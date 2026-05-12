@@ -19,6 +19,7 @@ import (
 	"github.com/meigma/imgsrv/internal/httpapi"
 	"github.com/meigma/imgsrv/internal/jobs"
 	"github.com/meigma/imgsrv/internal/jobs/promote"
+	incusmaterialization "github.com/meigma/imgsrv/internal/materialization/incus"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/objectstore/s3"
 	"github.com/meigma/imgsrv/internal/store/postgres"
@@ -51,6 +52,9 @@ type Dependencies struct {
 
 	// Blobs coordinates client-facing raw CAS blob reads.
 	Blobs httpapi.BlobService
+
+	// SimpleStreams coordinates Incus Simple Streams metadata reads.
+	SimpleStreams httpapi.SimpleStreamsService
 
 	// BackgroundJobs run process-local background work until shutdown.
 	BackgroundJobs []BackgroundJob
@@ -120,13 +124,15 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
+	catalogService := newCatalogService(store)
 	server, err := NewServer(cfg, Dependencies{
 		Logger:         logger,
 		Auth:           authDependency.service,
 		AuthManagement: authDependency.management,
 		Uploads:        uploadDependency.service,
-		Catalog:        newCatalogService(store),
+		Catalog:        catalogService,
 		Blobs:          uploadDependency.blobs,
+		SimpleStreams:  newSimpleStreamsService(catalogService, uploadDependency.blobs),
 		BackgroundJobs: backgroundJobs,
 	})
 	if err != nil {
@@ -174,6 +180,7 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 		Uploads:        deps.Uploads,
 		Catalog:        deps.Catalog,
 		Blobs:          deps.Blobs,
+		SimpleStreams:  deps.SimpleStreams,
 		UploadTTL:      cfg.UploadTTL,
 	})
 
@@ -248,6 +255,21 @@ func newCatalogService(store *postgres.Store) httpapi.CatalogService {
 
 	return catalog.NewService(catalog.ServiceConfig{
 		Store: store.Catalog(),
+	})
+}
+
+// newSimpleStreamsService builds the Incus Simple Streams projection service.
+func newSimpleStreamsService(
+	catalogService httpapi.CatalogService,
+	blobs httpapi.BlobService,
+) httpapi.SimpleStreamsService {
+	if catalogService == nil || blobs == nil {
+		return nil
+	}
+
+	return incusmaterialization.NewService(incusmaterialization.Config{
+		Catalog: catalogService,
+		Blobs:   blobs,
 	})
 }
 

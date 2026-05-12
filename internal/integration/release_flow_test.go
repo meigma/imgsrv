@@ -11,6 +11,9 @@ import (
 	"strconv"
 	"testing"
 
+	simplestreams "github.com/meigma/go-simplestreams"
+	"github.com/meigma/go-simplestreams/adapters/httpmirror"
+	incusschema "github.com/meigma/go-simplestreams/schema/incus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -228,6 +231,75 @@ func TestReleaseFlowManagesAliases(t *testing.T) {
 	exact, err := catalog.GetVersionManifest(ctx, image.Name, first.Version)
 	require.NoError(t, err)
 	assert.Equal(t, first.Version, exact.Version.Version)
+}
+
+func TestReleaseFlowServesIncusSimpleStreams(t *testing.T) {
+	env := startIntegrationEnv(t)
+	ctx := t.Context()
+	client := newClient(t, env)
+	catalog := client.Catalog()
+	diskBlob := uploadBlobToCAS(ctx, t, env, client, []byte("imgsrv incus qcow2 artifact"))
+	metadataBlob := uploadBlobToCAS(ctx, t, env, client, []byte("imgsrv incus metadata artifact"))
+
+	image, err := catalog.CreateImage(ctx, imgsrv.CreateImageRequest{Name: "incus-flow"})
+	require.NoError(t, err)
+	draft, err := catalog.CreateDraftVersion(
+		ctx,
+		image.Name,
+		imgsrv.CreateDraftVersionRequest{Version: "20260511_0524"},
+	)
+	require.NoError(t, err)
+	artifact, err := catalog.AddArtifact(
+		ctx,
+		image.Name,
+		draft.Version,
+		artifactRequest(diskBlob),
+	)
+	require.NoError(t, err)
+	_, err = catalog.AddAttachment(
+		ctx,
+		image.Name,
+		draft.Version,
+		artifact.ID.String(),
+		attachmentRequest("incus.tar.xz", metadataBlob),
+	)
+	require.NoError(t, err)
+	published, err := catalog.PublishVersion(ctx, image.Name, draft.Version)
+	require.NoError(t, err)
+	_, err = catalog.PutAlias(ctx, image.Name, "latest", imgsrv.PutAliasRequest{Version: published.Version})
+	require.NoError(t, err)
+
+	source, err := httpmirror.New(env.BaseURL(), httpmirror.WithHTTPClient(env.HTTPClient()))
+	require.NoError(t, err)
+	mirror, err := simplestreams.NewMirror(source)
+	require.NoError(t, err)
+	index, err := mirror.Index(ctx)
+	require.NoError(t, err)
+	entry := index.Entries[incusschema.ContentIDImages]
+	require.NotNil(t, entry)
+	assert.Equal(t, simplestreams.ProductsFormat, entry.Format)
+	assert.Equal(t, incusschema.DataTypeImageDownloads, entry.DataType)
+	assert.Equal(t, []string{"incus-flow:20260511_0524:amd64:default"}, entry.Products)
+
+	productFile, err := entry.ProductFile(ctx)
+	require.NoError(t, err)
+	require.NoError(t, incusschema.ValidateRuntimeProductFile(productFile))
+	items := productFile.Items()
+	require.Len(t, items, 2)
+	metadataItems := simplestreams.FilterItems(items, simplestreams.MatchItemName("incus.tar.xz"))
+	require.Len(t, metadataItems, 1)
+	metadataItem := metadataItems[0]
+	assert.Equal(t, "incus-flow/20260511_0524,incus-flow/latest", metadataItem.Metadata["aliases"])
+	assert.Equal(t, "amd64", metadataItem.Metadata["arch"])
+	assert.Equal(t, "incus-flow:20260511_0524:amd64:default", metadataItem.Ref.ProductName)
+	assert.Equal(t, metadataBlob.SizeBytes, *metadataItem.Item.Size)
+	assert.NotEmpty(t, metadataItem.Metadata["combined_disk-kvm-img_sha256"])
+
+	diskItems := simplestreams.FilterItems(items, simplestreams.MatchItemName("disk-kvm.img"))
+	require.Len(t, diskItems, 1)
+	diskItem := diskItems[0]
+	assert.Equal(t, "disk-kvm.img", diskItem.Item.FileType)
+	assert.Equal(t, diskBlob.SizeBytes, *diskItem.Item.Size)
 }
 
 func TestReleaseFlowBrowsesAndDeletesDraftCatalog(t *testing.T) {

@@ -6,6 +6,38 @@ info:
 servers:
   - url: /
 paths:
+  /streams/v1/index.json:
+    get:
+      operationId: getSimpleStreamsIndex
+      summary: Get the Incus Simple Streams index document.
+      responses:
+        '200':
+          description: Simple Streams index document.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /streams/v1/images.json:
+    get:
+      operationId: getSimpleStreamsImages
+      summary: Get the Incus Simple Streams image product document.
+      responses:
+        '200':
+          description: Incus-compatible Simple Streams product document.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /v1/auth/roles:
     get:
       operationId: listAuthRoles

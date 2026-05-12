@@ -21,6 +21,7 @@ import (
 	"github.com/meigma/imgsrv/internal/httpapi"
 	"github.com/meigma/imgsrv/internal/jobs"
 	"github.com/meigma/imgsrv/internal/jobs/promote"
+	incusmaterialization "github.com/meigma/imgsrv/internal/materialization/incus"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/store/postgres"
 	"github.com/meigma/imgsrv/internal/uploads"
@@ -86,6 +87,10 @@ func startServer(
 		HTTPClient: options.oidcHTTPClient,
 	})
 
+	catalogService := catalog.NewService(catalog.ServiceConfig{
+		Store: store.Catalog(),
+	})
+	blobService := newCASService(store, objects)
 	server, err := app.NewServer(app.Config{
 		Listen:          listener.Addr().String(),
 		ShutdownTimeout: serverShutdownTimeout,
@@ -98,10 +103,12 @@ func startServer(
 			Objects:      objects,
 			TrustedBlobs: trustedBlobLookup(store),
 		}),
-		Catalog: catalog.NewService(catalog.ServiceConfig{
-			Store: store.Catalog(),
+		Catalog: catalogService,
+		Blobs:   blobService,
+		SimpleStreams: incusmaterialization.NewService(incusmaterialization.Config{
+			Catalog: catalogService,
+			Blobs:   blobService,
 		}),
-		Blobs:          newCASService(store, objects),
 		BackgroundJobs: backgroundJobs(options, store, objects),
 	})
 	require.NoError(t, err)
