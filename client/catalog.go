@@ -71,6 +71,9 @@ type CatalogClient interface {
 	// GetPublishJob returns a durable publish job by ID.
 	GetPublishJob(context.Context, string) (PublishJob, error)
 
+	// RetryPublishJob requeues a failed publish job by ID.
+	RetryPublishJob(context.Context, string) (PublishJob, error)
+
 	// PutAlias creates or moves an alias to a published version.
 	PutAlias(context.Context, string, string, PutAliasRequest) (Alias, error)
 
@@ -641,6 +644,24 @@ func (client *HTTPCatalogClient) GetPublishJob(ctx context.Context, jobID string
 	err := client.transport.do(ctx, http.MethodGet, "/v1/publish-jobs/"+url.PathEscape(jobID), nil, 0, nil, &job)
 
 	return job, err
+}
+
+// RetryPublishJob requeues a failed publish job by ID.
+func (client *HTTPCatalogClient) RetryPublishJob(ctx context.Context, jobID string) (PublishJob, error) {
+	var job PublishJob
+	path := "/v1/publish-jobs/" + url.PathEscape(jobID) + "/retry"
+	resp, err := client.transport.doResponse(ctx, http.MethodPost, path, nil, 0, nil, http.StatusAccepted)
+	if err != nil {
+		return PublishJob{}, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	if err := json.NewDecoder(resp.Body).Decode(&job); err != nil {
+		return PublishJob{}, fmt.Errorf("decode imgsrv response: %w", err)
+	}
+
+	return job, nil
 }
 
 // PutAlias creates or moves an alias to a published version.

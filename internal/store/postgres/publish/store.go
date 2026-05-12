@@ -154,6 +154,39 @@ func (store *Store) GetJob(ctx context.Context, params domain.GetJobParams) (dom
 	return job, nil
 }
 
+// RetryJob requeues a failed publish job from its first failed blocking step.
+func (store *Store) RetryJob(ctx context.Context, params domain.RetryJobParams) (domain.Job, error) {
+	if err := domain.ValidateRetryJobParams(params); err != nil {
+		return domain.Job{}, err
+	}
+
+	var job domain.Job
+	err := store.withTx(ctx, func(tx pgx.Tx) error {
+		if err := lockJobForRetry(ctx, tx, params.ID); err != nil {
+			return err
+		}
+		failedSequence, err := firstFailedBlockingStepSequence(ctx, tx, params.ID)
+		if err != nil {
+			return err
+		}
+		if err := markJobQueuedForRetry(ctx, tx, params.ID); err != nil {
+			return err
+		}
+		if err := requeueStepsForRetry(ctx, tx, params.ID, failedSequence); err != nil {
+			return err
+		}
+
+		var scanErr error
+		job, scanErr = getJobByID(ctx, tx, params.ID)
+		return scanErr
+	})
+	if err != nil {
+		return domain.Job{}, mapPublishError(err)
+	}
+
+	return job, nil
+}
+
 // ClaimStep claims the next runnable publish step for a worker.
 func (store *Store) ClaimStep(ctx context.Context, params domain.ClaimStepParams) (domain.Step, error) {
 	if err := domain.ValidateClaimStepParams(params); err != nil {
@@ -394,6 +427,98 @@ func lockVersionByRef(
 	}
 
 	return versionID, state, nil
+}
+
+func lockJobForRetry(ctx context.Context, tx pgx.Tx, jobID uuid.UUID) error {
+	var jobState string
+	var versionState string
+	if err := tx.QueryRow(
+		ctx,
+		`SELECT publish_jobs.state, image_versions.state
+		FROM publish_jobs
+		INNER JOIN image_versions
+			ON image_versions.id = publish_jobs.version_id
+		WHERE publish_jobs.id = $1
+		FOR UPDATE OF publish_jobs, image_versions`,
+		jobID,
+	).Scan(&jobState, &versionState); err != nil {
+		return err
+	}
+	if domain.JobState(jobState) != domain.JobStateFailed {
+		return fmt.Errorf("%w: publish job is not failed", domain.ErrFailedPrecondition)
+	}
+	if catalog.VersionState(versionState) != catalog.VersionStatePublishing {
+		return fmt.Errorf("%w: publish version is not publishing", domain.ErrFailedPrecondition)
+	}
+
+	return nil
+}
+
+func firstFailedBlockingStepSequence(ctx context.Context, tx pgx.Tx, jobID uuid.UUID) (int, error) {
+	var sequence int
+	if err := tx.QueryRow(
+		ctx,
+		`SELECT sequence
+		FROM publish_job_steps
+		WHERE job_id = $1
+			AND blocking
+			AND state = 'failed'
+		ORDER BY sequence
+		FOR UPDATE OF publish_job_steps
+		LIMIT 1`,
+		jobID,
+	).Scan(&sequence); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, fmt.Errorf("%w: publish job has no failed blocking step", domain.ErrFailedPrecondition)
+		}
+
+		return 0, err
+	}
+
+	return sequence, nil
+}
+
+func markJobQueuedForRetry(ctx context.Context, tx pgx.Tx, jobID uuid.UUID) error {
+	tag, err := tx.Exec(
+		ctx,
+		`UPDATE publish_jobs
+		SET state = 'queued',
+			finished_at = NULL,
+			failure_message = NULL,
+			updated_at = now()
+		WHERE id = $1
+			AND state = 'failed'`,
+		jobID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("%w: publish job is not failed", domain.ErrFailedPrecondition)
+	}
+
+	return nil
+}
+
+func requeueStepsForRetry(ctx context.Context, tx pgx.Tx, jobID uuid.UUID, failedSequence int) error {
+	_, err := tx.Exec(
+		ctx,
+		`UPDATE publish_job_steps
+		SET state = 'queued',
+			run_after = now(),
+			locked_by = NULL,
+			locked_at = NULL,
+			finished_at = NULL,
+			failure_message = NULL,
+			updated_at = now()
+		WHERE job_id = $1
+			AND sequence >= $2
+			AND state <> 'succeeded'`,
+		jobID,
+		failedSequence,
+	)
+
+	return err
 }
 
 func requirePublishableVersion(ctx context.Context, tx pgx.Tx, versionID uuid.UUID) error {

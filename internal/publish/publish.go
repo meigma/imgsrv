@@ -184,6 +184,9 @@ type Store interface {
 	// GetJob returns a publish job with its ordered steps.
 	GetJob(context.Context, GetJobParams) (Job, error)
 
+	// RetryJob requeues a failed publish job from its first failed blocking step.
+	RetryJob(context.Context, RetryJobParams) (Job, error)
+
 	// ClaimStep claims the next runnable publish step for a worker.
 	ClaimStep(context.Context, ClaimStepParams) (Step, error)
 
@@ -211,6 +214,12 @@ type EnqueueVersionParams struct {
 
 // GetJobParams identifies a publish job.
 type GetJobParams struct {
+	// ID is the publish job ID.
+	ID uuid.UUID
+}
+
+// RetryJobParams identifies a failed publish job to retry.
+type RetryJobParams struct {
 	// ID is the publish job ID.
 	ID uuid.UUID
 }
@@ -283,6 +292,15 @@ func ValidateEnqueueVersionParams(params EnqueueVersionParams) error {
 
 // ValidateGetJobParams validates the inputs to Store.GetJob.
 func ValidateGetJobParams(params GetJobParams) error {
+	if params.ID == uuid.Nil {
+		return fmt.Errorf("%w: publish job id is required", ErrInvalid)
+	}
+
+	return nil
+}
+
+// ValidateRetryJobParams validates the inputs to Store.RetryJob.
+func ValidateRetryJobParams(params RetryJobParams) error {
 	if params.ID == uuid.Nil {
 		return fmt.Errorf("%w: publish job id is required", ErrInvalid)
 	}

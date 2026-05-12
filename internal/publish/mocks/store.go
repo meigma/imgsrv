@@ -368,6 +368,72 @@ func (_c *MockStore_GetJob_Call) RunAndReturn(run func(context1 context.Context,
 	return _c
 }
 
+// RetryJob provides a mock function for the type MockStore
+func (_mock *MockStore) RetryJob(context1 context.Context, retryJobParams publish.RetryJobParams) (publish.Job, error) {
+	ret := _mock.Called(context1, retryJobParams)
+
+	if len(ret) == 0 {
+		panic("no return value specified for RetryJob")
+	}
+
+	var r0 publish.Job
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, publish.RetryJobParams) (publish.Job, error)); ok {
+		return returnFunc(context1, retryJobParams)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, publish.RetryJobParams) publish.Job); ok {
+		r0 = returnFunc(context1, retryJobParams)
+	} else {
+		r0 = ret.Get(0).(publish.Job)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, publish.RetryJobParams) error); ok {
+		r1 = returnFunc(context1, retryJobParams)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockStore_RetryJob_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RetryJob'
+type MockStore_RetryJob_Call struct {
+	*mock.Call
+}
+
+// RetryJob is a helper method to define mock.On call
+//   - context1 context.Context
+//   - retryJobParams publish.RetryJobParams
+func (_e *MockStore_Expecter) RetryJob(context1 interface{}, retryJobParams interface{}) *MockStore_RetryJob_Call {
+	return &MockStore_RetryJob_Call{Call: _e.mock.On("RetryJob", context1, retryJobParams)}
+}
+
+func (_c *MockStore_RetryJob_Call) Run(run func(context1 context.Context, retryJobParams publish.RetryJobParams)) *MockStore_RetryJob_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 publish.RetryJobParams
+		if args[1] != nil {
+			arg1 = args[1].(publish.RetryJobParams)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockStore_RetryJob_Call) Return(job publish.Job, err error) *MockStore_RetryJob_Call {
+	_c.Call.Return(job, err)
+	return _c
+}
+
+func (_c *MockStore_RetryJob_Call) RunAndReturn(run func(context1 context.Context, retryJobParams publish.RetryJobParams) (publish.Job, error)) *MockStore_RetryJob_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SucceedIncusIndexStep provides a mock function for the type MockStore
 func (_mock *MockStore) SucceedIncusIndexStep(context1 context.Context, succeedIncusIndexStepParams publish.SucceedIncusIndexStepParams) (publish.Step, error) {
 	ret := _mock.Called(context1, succeedIncusIndexStepParams)

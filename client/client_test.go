@@ -587,6 +587,10 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, PublishJobStateSucceeded, gotPublishJob.State)
 
+	retriedPublishJob, err := catalog.RetryPublishJob(ctx, publishJob.ID.String())
+	require.NoError(t, err)
+	assert.Equal(t, PublishJobStateQueued, retriedPublishJob.State)
+
 	alias, err := catalog.PutAlias(
 		ctx,
 		image.Name,
@@ -747,6 +751,14 @@ func registerCatalogVersionHandlers(t *testing.T, mux *http.ServeMux) {
 		func(w http.ResponseWriter, r *http.Request) {
 			assertRequestBasics(t, r, http.MethodGet)
 			writeJSON(t, w, http.StatusOK, publishJobFixture(PublishJobStateSucceeded))
+		},
+	)
+	mux.HandleFunc(
+		"/api/v1/publish-jobs/"+testPublishJobID+"/retry",
+		func(w http.ResponseWriter, r *http.Request) {
+			assertRequestBasics(t, r, http.MethodPost)
+			assert.Zero(t, r.ContentLength)
+			writeJSON(t, w, http.StatusAccepted, publishJobFixture(PublishJobStateQueued))
 		},
 	)
 	mux.HandleFunc(

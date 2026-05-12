@@ -1211,6 +1211,35 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /v1/publish-jobs/{job_id}/retry:
+    post:
+      operationId: retryPublishJob
+      summary: Retry a failed publish job.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PublishJobID'
+      responses:
+        '202':
+          description: Publish job requeued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishJob'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /v1/images/{name}/aliases:
     get:
       operationId: listAliases
