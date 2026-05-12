@@ -5,6 +5,8 @@ package integration
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/url"
@@ -241,8 +243,10 @@ func TestReleaseFlowServesIncusSimpleStreams(t *testing.T) {
 	ctx := t.Context()
 	client := newClient(t, env)
 	catalog := client.Catalog()
-	diskBlob := uploadBlobToCAS(ctx, t, env, client, []byte("imgsrv incus qcow2 artifact"))
-	metadataBlob := uploadBlobToCAS(ctx, t, env, client, []byte("imgsrv incus metadata artifact"))
+	diskPayload := []byte("imgsrv incus qcow2 artifact")
+	metadataPayload := []byte("imgsrv incus metadata artifact")
+	diskBlob := uploadBlobToCAS(ctx, t, env, client, diskPayload)
+	metadataBlob := uploadBlobToCAS(ctx, t, env, client, metadataPayload)
 
 	image, err := catalog.CreateImage(ctx, imgsrv.CreateImageRequest{Name: "incus-flow"})
 	require.NoError(t, err)
@@ -283,27 +287,63 @@ func TestReleaseFlowServesIncusSimpleStreams(t *testing.T) {
 	require.NotNil(t, entry)
 	assert.Equal(t, simplestreams.ProductsFormat, entry.Format)
 	assert.Equal(t, incusschema.DataTypeImageDownloads, entry.DataType)
-	assert.Equal(t, []string{"incus-flow:20260511_0524:amd64:default"}, entry.Products)
+	expectedProductName := "incus-flow:20260511_0524:amd64:default"
+	assert.Equal(t, []string{expectedProductName}, entry.Products)
 
 	productFile, err := entry.ProductFile(ctx)
 	require.NoError(t, err)
 	require.NoError(t, incusschema.ValidateRuntimeProductFile(productFile))
+	require.Contains(t, productFile.Products, expectedProductName)
+	product := productFile.Products[expectedProductName]
+	assert.Equal(t, "amd64", product.Metadata["arch"])
+	assert.Equal(t, "linux", product.Metadata["os"])
+	assert.Equal(t, "20260511_0524", product.Metadata["release"])
+	assert.Equal(t, "default", product.Metadata["variant"])
+	assert.Equal(t, "incus-flow/20260511_0524,incus-flow/latest", product.Metadata["aliases"])
+	require.Len(t, product.Versions, 1)
+	var productVersion *simplestreams.Version
+	for _, version := range product.Versions {
+		productVersion = version
+	}
+	require.NotNil(t, productVersion)
+	assert.Len(t, productVersion.Items, 2)
+	assert.Contains(t, productVersion.Items, "incus.tar.xz")
+	assert.Contains(t, productVersion.Items, "disk-kvm.img")
+
 	items := productFile.Items()
 	require.Len(t, items, 2)
 	metadataItems := simplestreams.FilterItems(items, simplestreams.MatchItemName("incus.tar.xz"))
 	require.Len(t, metadataItems, 1)
 	metadataItem := metadataItems[0]
+	expectedMetadataSHA256 := sha256Hex(metadataPayload)
+	expectedDiskSHA256 := sha256Hex(diskPayload)
+	expectedCombinedSHA256 := combinedSHA256Hex(metadataPayload, diskPayload)
 	assert.Equal(t, "incus-flow/20260511_0524,incus-flow/latest", metadataItem.Metadata["aliases"])
 	assert.Equal(t, "amd64", metadataItem.Metadata["arch"])
-	assert.Equal(t, "incus-flow:20260511_0524:amd64:default", metadataItem.Ref.ProductName)
+	assert.Equal(t, expectedProductName, metadataItem.Ref.ProductName)
+	assert.Equal(t, "incus.tar.xz", metadataItem.Item.FileType)
+	assert.Equal(t, expectedMetadataSHA256, metadataItem.Item.SHA256)
+	assert.NotEmpty(t, metadataItem.Item.Path)
 	assert.Equal(t, metadataBlob.SizeBytes, *metadataItem.Item.Size)
-	assert.NotEmpty(t, metadataItem.Metadata["combined_disk-kvm-img_sha256"])
+	assert.Equal(
+		t,
+		expectedCombinedSHA256,
+		metadataItem.Metadata["combined_disk-kvm-img_sha256"],
+	)
+	assert.Equal(
+		t,
+		metadataPayload,
+		readProjectedSimpleStreamsItem(ctx, t, env, metadataItem),
+	)
 
 	diskItems := simplestreams.FilterItems(items, simplestreams.MatchItemName("disk-kvm.img"))
 	require.Len(t, diskItems, 1)
 	diskItem := diskItems[0]
 	assert.Equal(t, "disk-kvm.img", diskItem.Item.FileType)
+	assert.Equal(t, expectedDiskSHA256, diskItem.Item.SHA256)
+	assert.NotEmpty(t, diskItem.Item.Path)
 	assert.Equal(t, diskBlob.SizeBytes, *diskItem.Item.Size)
+	assert.Equal(t, diskPayload, readProjectedSimpleStreamsItem(ctx, t, env, diskItem))
 }
 
 func TestReleaseFlowRetriesFailedPublishJob(t *testing.T) {
@@ -885,6 +925,43 @@ func putObject(ctx context.Context, t testing.TB, store objectstore.Store, key s
 		}},
 	})
 	require.NoError(t, err)
+}
+
+func readProjectedSimpleStreamsItem(
+	ctx context.Context,
+	t testing.TB,
+	env *harness.Env,
+	item simplestreams.ItemView,
+) []byte {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, env.URL(item.Item.Path.String()), nil)
+	require.NoError(t, err)
+	resp, err := env.HTTPClient().Do(req)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, resp.Body.Close())
+	}()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	return body
+}
+
+func sha256Hex(payload []byte) string {
+	sum := sha256.Sum256(payload)
+
+	return hex.EncodeToString(sum[:])
+}
+
+func combinedSHA256Hex(first []byte, second []byte) string {
+	hasher := sha256.New()
+	_, _ = hasher.Write(first)
+	_, _ = hasher.Write(second)
+
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 func artifactRequest(blob catalogBlob) imgsrv.AddArtifactRequest {
