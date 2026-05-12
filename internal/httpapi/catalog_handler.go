@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/meigma/imgsrv/internal/catalog"
+	"github.com/meigma/imgsrv/internal/publish"
 )
 
 // errCatalogServiceUnavailable signals that catalog routes were called without a configured CatalogService.
@@ -557,23 +558,23 @@ func (a *api) deleteAttachment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// publishVersion handles POST /v1/images/{name}/versions/{version}/publish and publishes a draft version.
+// publishVersion handles POST /v1/images/{name}/versions/{version}/publish and queues a publish job.
 func (a *api) publishVersion(w http.ResponseWriter, r *http.Request) {
-	service, ok := a.catalogService(w)
+	service, ok := a.publishService(w)
 	if !ok {
 		return
 	}
 
-	version, err := service.PublishVersion(r.Context(), catalog.PublishVersionParams{
+	job, err := service.PublishVersion(r.Context(), publish.EnqueueVersionParams{
 		ImageName: r.PathValue("name"),
 		Version:   r.PathValue("version"),
 	})
 	if err != nil {
-		writeCatalogError(w, err)
+		writePublishError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, newVersionResponse(version))
+	writeJSON(w, http.StatusAccepted, newPublishJobResponse(job))
 }
 
 // putAlias handles PUT /v1/images/{name}/aliases/{alias} and creates or moves an alias.

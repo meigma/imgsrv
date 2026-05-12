@@ -16,7 +16,10 @@ import (
 
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
+	"github.com/meigma/imgsrv/internal/materialization/incus"
+	"github.com/meigma/imgsrv/internal/publish"
 	postgrescatalog "github.com/meigma/imgsrv/internal/store/postgres/catalog"
+	postgrespublish "github.com/meigma/imgsrv/internal/store/postgres/publish"
 	postgresuploads "github.com/meigma/imgsrv/internal/store/postgres/uploads"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
@@ -53,6 +56,10 @@ type Store struct {
 	pool *pgxpool.Pool
 	// catalog is the image catalog adapter backed by the shared pool.
 	catalog catalog.Store
+	// publish is the durable publish workflow adapter backed by the shared pool.
+	publish publish.Store
+	// incus is the Incus projection adapter backed by the shared pool.
+	incus incus.ProjectionStore
 	// uploads is the upload-session adapter backed by the shared pool.
 	uploads uploads.Store
 }
@@ -94,12 +101,15 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 	}
 
 	uploadStore := postgresuploads.New(pool)
+	publishStore := postgrespublish.New(pool)
 
 	return &Store{
 		authkit: authkitStore,
 		cas:     uploadStore,
 		pool:    pool,
 		catalog: postgrescatalog.New(pool),
+		publish: publishStore,
+		incus:   publishStore,
 		uploads: uploadStore,
 	}, nil
 }
@@ -135,6 +145,8 @@ func (store *Store) Close() error {
 	store.authkit = nil
 	store.cas = nil
 	store.catalog = nil
+	store.publish = nil
+	store.incus = nil
 	store.uploads = nil
 
 	return nil
@@ -156,6 +168,24 @@ func (store *Store) Catalog() catalog.Store {
 	}
 
 	return store.catalog
+}
+
+// Publish returns the durable publish workflow adapter.
+func (store *Store) Publish() publish.Store {
+	if store == nil {
+		return nil
+	}
+
+	return store.publish
+}
+
+// IncusProjection returns the Incus projection row adapter.
+func (store *Store) IncusProjection() incus.ProjectionStore {
+	if store == nil {
+		return nil
+	}
+
+	return store.incus
 }
 
 // CAS returns the CAS blob and ingest adapter.

@@ -18,6 +18,7 @@ import (
 	"github.com/meigma/imgsrv/internal/catalog"
 	httpmocks "github.com/meigma/imgsrv/internal/httpapi/mocks"
 	"github.com/meigma/imgsrv/internal/objectstore"
+	"github.com/meigma/imgsrv/internal/publish"
 )
 
 func TestCreateImageCreatesNamespace(t *testing.T) {
@@ -544,28 +545,52 @@ func TestDeleteAttachmentDeletesDraftAttachment(t *testing.T) {
 	assert.Empty(t, rec.Body.String())
 }
 
-func TestPublishVersionPublishesDraft(t *testing.T) {
+func TestPublishVersionQueuesPublishJob(t *testing.T) {
 	tc := newCatalogHandlerTestContext(t)
-	wantVersion := catalogVersionFixture(catalog.VersionStatePublished)
+	wantJob := publishJobFixture(publish.JobStateQueued)
 
-	tc.catalog.EXPECT().
-		PublishVersion(mock.Anything, catalog.PublishVersionParams{
+	tc.publish.EXPECT().
+		PublishVersion(mock.Anything, publish.EnqueueVersionParams{
 			ImageName: "debian",
 			Version:   "v1.0.0",
 		}).
-		Return(wantVersion, nil)
+		Return(wantJob, nil)
 
 	req := newHTTPAPIRequest(http.MethodPost, "/v1/images/debian/versions/v1.0.0/publish", nil)
 	rec := httptest.NewRecorder()
 
 	tc.handler.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	var got versionResponse
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	var got publishJobResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	assert.Equal(t, catalog.VersionStatePublished, got.State)
-	require.NotNil(t, got.PublishedAt)
-	assert.Equal(t, catalogPublishedAtFixture().Format(time.RFC3339Nano), *got.PublishedAt)
+	assert.Equal(t, publish.JobStateQueued, got.State)
+	assert.Equal(t, "debian", got.ImageName)
+	assert.Equal(t, "v1.0.0", got.Version)
+	require.Len(t, got.Steps, 3)
+	assert.Equal(t, publish.StepValidateCatalog, got.Steps[0].Name)
+}
+
+func TestGetPublishJobReturnsJob(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+	wantJob := publishJobFixture(publish.JobStateSucceeded)
+
+	tc.publish.EXPECT().
+		GetPublishJob(mock.Anything, publish.GetJobParams{ID: publishJobIDFixture()}).
+		Return(wantJob, nil)
+
+	req := newHTTPAPIRequest(http.MethodGet, "/v1/publish-jobs/"+publishJobIDFixture().String(), nil)
+	req.Header.Set("Authorization", "Bearer "+testBearerToken)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var got publishJobResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, publishJobIDFixture().String(), got.ID)
+	assert.Equal(t, publish.JobStateSucceeded, got.State)
+	require.Len(t, got.Steps, 3)
 }
 
 func TestPutAliasCreatesOrMovesAlias(t *testing.T) {
@@ -828,7 +853,6 @@ func TestCatalogHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 				"/attachments/" +
 				catalogAttachmentIDFixture().String(),
 		},
-		{name: "publish", method: http.MethodPost, path: "/v1/images/debian/versions/v1.0.0/publish"},
 		{name: "put alias", method: http.MethodPut, path: "/v1/images/debian/aliases/latest", body: `{}`},
 		{name: "list aliases", method: http.MethodGet, path: "/v1/images/debian/aliases"},
 		{name: "get alias", method: http.MethodGet, path: "/v1/images/debian/aliases/latest"},
@@ -860,8 +884,36 @@ func TestCatalogHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 	}
 }
 
+func TestPublishHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "publish", method: http.MethodPost, path: "/v1/images/debian/versions/v1.0.0/publish"},
+		{name: "get job", method: http.MethodGet, path: "/v1/publish-jobs/" + publishJobIDFixture().String()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := New(Dependencies{
+				Auth: newAcceptingAuthService(t),
+			})
+			req := newHTTPAPIRequest(tt.method, tt.path, nil)
+			req.Header.Set("Authorization", "Bearer "+testBearerToken)
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+			assertProblem(t, rec, http.StatusServiceUnavailable, errPublishServiceUnavailable.Error())
+		})
+	}
+}
+
 type catalogHandlerTestContext struct {
 	catalog *httpmocks.MockCatalogService
+	publish *httpmocks.MockPublishService
 	blobs   *httpmocks.MockBlobService
 	handler http.Handler
 }
@@ -870,12 +922,15 @@ func newCatalogHandlerTestContext(t *testing.T) *catalogHandlerTestContext {
 	t.Helper()
 
 	catalogService := httpmocks.NewMockCatalogService(t)
+	publishService := httpmocks.NewMockPublishService(t)
 	blobService := httpmocks.NewMockBlobService(t)
 	return &catalogHandlerTestContext{
 		catalog: catalogService,
+		publish: publishService,
 		blobs:   blobService,
 		handler: New(Dependencies{
 			Catalog: catalogService,
+			Publish: publishService,
 			Blobs:   blobService,
 			Auth:    newAcceptingAuthService(t),
 		}),
@@ -906,6 +961,54 @@ func catalogVersionFixture(state catalog.VersionState) catalog.Version {
 	}
 
 	return version
+}
+
+func publishJobFixture(state publish.JobState) publish.Job {
+	job := publish.Job{
+		ID:        publishJobIDFixture(),
+		VersionID: catalogVersionIDFixture(),
+		ImageName: "debian",
+		Version:   "v1.0.0",
+		State:     state,
+		CreatedAt: catalogCreatedAtFixture(),
+		UpdatedAt: catalogUpdatedAtFixture(),
+		Steps: []publish.Step{
+			publishStepFixture(publishStepIDFixture(1), publish.StepValidateCatalog, 10, publish.StepStateQueued),
+			publishStepFixture(publishStepIDFixture(2), publish.StepIncusIndex, 20, publish.StepStateQueued),
+			publishStepFixture(publishStepIDFixture(3), publish.StepFinalizePublish, 30, publish.StepStateQueued),
+		},
+	}
+	if state == publish.JobStateSucceeded {
+		startedAt := catalogCreatedAtFixture()
+		finishedAt := catalogUpdatedAtFixture()
+		job.StartedAt = &startedAt
+		job.FinishedAt = &finishedAt
+		for index := range job.Steps {
+			job.Steps[index].State = publish.StepStateSucceeded
+			job.Steps[index].StartedAt = &startedAt
+			job.Steps[index].FinishedAt = &finishedAt
+		}
+	}
+
+	return job
+}
+
+func publishStepFixture(id uuid.UUID, name string, sequence int, state publish.StepState) publish.Step {
+	return publish.Step{
+		ID:           id,
+		JobID:        publishJobIDFixture(),
+		VersionID:    catalogVersionIDFixture(),
+		ImageName:    "debian",
+		Version:      "v1.0.0",
+		Name:         name,
+		State:        state,
+		Blocking:     true,
+		Sequence:     sequence,
+		AttemptCount: 0,
+		RunAfter:     catalogCreatedAtFixture(),
+		CreatedAt:    catalogCreatedAtFixture(),
+		UpdatedAt:    catalogUpdatedAtFixture(),
+	}
 }
 
 func catalogArtifactFixture() catalog.Artifact {
@@ -977,6 +1080,20 @@ func catalogAttachmentIDFixture() uuid.UUID {
 
 func catalogAliasIDFixture() uuid.UUID {
 	return uuid.MustParse("eeeeeeee-ffff-0000-1111-222222222222")
+}
+
+func publishJobIDFixture() uuid.UUID {
+	return uuid.MustParse("11111111-2222-3333-4444-555555555555")
+}
+
+func publishStepIDFixture(index int) uuid.UUID {
+	return uuid.MustParse(
+		[]string{
+			"21111111-2222-3333-4444-555555555555",
+			"22111111-2222-3333-4444-555555555555",
+			"23111111-2222-3333-4444-555555555555",
+		}[index-1],
+	)
 }
 
 func catalogDigestFixture() catalog.Digest {

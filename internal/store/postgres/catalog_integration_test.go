@@ -199,11 +199,7 @@ func TestCatalogDraftDeletesArePathScopedAndDraftOnly(t *testing.T) {
 		"checksums",
 		publishedAttachmentDigest,
 	)
-	_, err = catalogStore.PublishVersion(ctx, domain.PublishVersionParams{
-		ImageName: "published-delete",
-		Version:   "v1.0.0",
-	})
-	require.NoError(t, err)
+	publishCatalogVersionByRef(t, store, "published-delete", "v1.0.0")
 
 	err = catalogStore.DeleteAttachment(ctx, domain.DeleteAttachmentParams{
 		ImageName:    "published-delete",
@@ -270,11 +266,7 @@ func TestCatalogPublishedArtifactReadsArePublishedAndPathScoped(t *testing.T) {
 		foreignAttachmentDigest,
 	)
 	draftArtifact := createArtifact(t, ctx, catalogStore, "published-artifacts", "draft-only", primaryDigest)
-	_, err := catalogStore.PublishVersion(ctx, domain.PublishVersionParams{
-		ImageName: "published-artifacts",
-		Version:   "v1.0.0",
-	})
-	require.NoError(t, err)
+	publishCatalogVersionByRef(t, store, "published-artifacts", "v1.0.0")
 
 	artifacts, err := catalogStore.ListPublishedArtifacts(ctx, domain.ListPublishedArtifactsParams{
 		ImageName: "published-artifacts",
@@ -444,6 +436,16 @@ func insertPublishedCatalogVersion(t *testing.T, store *Store, imageID uuid.UUID
 	_, err = store.pool.Exec(
 		ctx,
 		`UPDATE image_versions
+		SET state = 'publishing',
+			updated_at = $2
+		WHERE id = $1`,
+		versionID,
+		createdAt,
+	)
+	require.NoError(t, err)
+	_, err = store.pool.Exec(
+		ctx,
+		`UPDATE image_versions
 		SET state = 'published',
 			published_at = $2,
 			updated_at = $2
@@ -452,6 +454,44 @@ func insertPublishedCatalogVersion(t *testing.T, store *Store, imageID uuid.UUID
 		createdAt,
 	)
 	require.NoError(t, err)
+}
+
+func publishCatalogVersionByRef(t *testing.T, store *Store, imageName string, version string) {
+	t.Helper()
+
+	ctx := t.Context()
+	tag, err := store.pool.Exec(
+		ctx,
+		`UPDATE image_versions
+		SET state = 'publishing',
+			updated_at = now()
+		FROM images
+		WHERE images.id = image_versions.image_id
+			AND images.name = $1
+			AND image_versions.version = $2
+			AND image_versions.state = 'draft'`,
+		imageName,
+		version,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), tag.RowsAffected())
+
+	tag, err = store.pool.Exec(
+		ctx,
+		`UPDATE image_versions
+		SET state = 'published',
+			published_at = now(),
+			updated_at = now()
+		FROM images
+		WHERE images.id = image_versions.image_id
+			AND images.name = $1
+			AND image_versions.version = $2
+			AND image_versions.state = 'publishing'`,
+		imageName,
+		version,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), tag.RowsAffected())
 }
 
 func insertTrustedBlob(t *testing.T, store *Store, digest domain.Digest, sizeBytes int64) {

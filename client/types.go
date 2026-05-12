@@ -37,8 +37,56 @@ const (
 	// ImageVersionStateDraft means a version manifest can still be edited.
 	ImageVersionStateDraft ImageVersionState = "draft"
 
+	// ImageVersionStatePublishing means a version manifest is frozen while publish steps run.
+	ImageVersionStatePublishing ImageVersionState = "publishing"
+
 	// ImageVersionStatePublished means a version manifest is immutable.
 	ImageVersionStatePublished ImageVersionState = "published"
+)
+
+// PublishJobID identifies a durable publish job.
+type PublishJobID string
+
+// String returns the publish job ID string.
+func (id PublishJobID) String() string {
+	return string(id)
+}
+
+// PublishJobState is the lifecycle state of a durable publish job.
+type PublishJobState string
+
+const (
+	// PublishJobStateQueued means no publish step has started yet.
+	PublishJobStateQueued PublishJobState = "queued"
+
+	// PublishJobStateRunning means at least one publish step is running or has run.
+	PublishJobStateRunning PublishJobState = "running"
+
+	// PublishJobStateSucceeded means the version is published.
+	PublishJobStateSucceeded PublishJobState = "succeeded"
+
+	// PublishJobStateFailed means a blocking publish step failed.
+	PublishJobStateFailed PublishJobState = "failed"
+)
+
+// PublishStepState is the lifecycle state of one durable publish step.
+type PublishStepState string
+
+const (
+	// PublishStepStateQueued means the step is waiting to be claimed.
+	PublishStepStateQueued PublishStepState = "queued"
+
+	// PublishStepStateRunning means a worker has claimed the step.
+	PublishStepStateRunning PublishStepState = "running"
+
+	// PublishStepStateSucceeded means the step completed successfully.
+	PublishStepStateSucceeded PublishStepState = "succeeded"
+
+	// PublishStepStateFailed means the step failed.
+	PublishStepStateFailed PublishStepState = "failed"
+
+	// PublishStepStateSkipped means the step was intentionally skipped.
+	PublishStepStateSkipped PublishStepState = "skipped"
 )
 
 // UploadID identifies an upload session.

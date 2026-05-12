@@ -19,9 +19,11 @@ import (
 	"github.com/meigma/imgsrv/internal/httpapi"
 	"github.com/meigma/imgsrv/internal/jobs"
 	"github.com/meigma/imgsrv/internal/jobs/promote"
+	"github.com/meigma/imgsrv/internal/jobs/publishflow"
 	incusmaterialization "github.com/meigma/imgsrv/internal/materialization/incus"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/objectstore/s3"
+	"github.com/meigma/imgsrv/internal/publish"
 	"github.com/meigma/imgsrv/internal/store/postgres"
 	"github.com/meigma/imgsrv/internal/telemetry"
 	"github.com/meigma/imgsrv/internal/uploads"
@@ -49,6 +51,9 @@ type Dependencies struct {
 
 	// Catalog coordinates client-facing image catalog operations.
 	Catalog httpapi.CatalogService
+
+	// Publish coordinates durable publish workflows.
+	Publish httpapi.PublishService
 
 	// Blobs coordinates client-facing raw CAS blob reads.
 	Blobs httpapi.BlobService
@@ -125,14 +130,24 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 
 	catalogService := newCatalogService(store)
+	publishService := newPublishService(store)
+	publishJobs, err := newPublishJobs(cfg, store, catalogService, uploadDependency.blobs, logger)
+	if err != nil {
+		if store != nil {
+			return joinError(err, store.Close())
+		}
+		return err
+	}
+	backgroundJobs = append(backgroundJobs, publishJobs...)
 	server, err := NewServer(cfg, Dependencies{
 		Logger:         logger,
 		Auth:           authDependency.service,
 		AuthManagement: authDependency.management,
 		Uploads:        uploadDependency.service,
 		Catalog:        catalogService,
+		Publish:        publishService,
 		Blobs:          uploadDependency.blobs,
-		SimpleStreams:  newSimpleStreamsService(catalogService, uploadDependency.blobs),
+		SimpleStreams:  newSimpleStreamsService(catalogService, store),
 		BackgroundJobs: backgroundJobs,
 	})
 	if err != nil {
@@ -179,6 +194,7 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 		AuthManagement: deps.AuthManagement,
 		Uploads:        deps.Uploads,
 		Catalog:        deps.Catalog,
+		Publish:        deps.Publish,
 		Blobs:          deps.Blobs,
 		SimpleStreams:  deps.SimpleStreams,
 		UploadTTL:      cfg.UploadTTL,
@@ -258,18 +274,29 @@ func newCatalogService(store *postgres.Store) httpapi.CatalogService {
 	})
 }
 
+// newPublishService builds the durable publish workflow service from the shared Postgres store.
+func newPublishService(store *postgres.Store) httpapi.PublishService {
+	if store == nil {
+		return nil
+	}
+
+	return publish.NewService(publish.ServiceConfig{
+		Store: store.Publish(),
+	})
+}
+
 // newSimpleStreamsService builds the Incus Simple Streams projection service.
 func newSimpleStreamsService(
 	catalogService httpapi.CatalogService,
-	blobs httpapi.BlobService,
+	store *postgres.Store,
 ) httpapi.SimpleStreamsService {
-	if catalogService == nil || blobs == nil {
+	if catalogService == nil || store == nil {
 		return nil
 	}
 
 	return incusmaterialization.NewService(incusmaterialization.Config{
 		Catalog: catalogService,
-		Blobs:   blobs,
+		Store:   store.IncusProjection(),
 	})
 }
 
@@ -535,6 +562,46 @@ func newCASPromotionJobs(
 		CircuitBreakerFailures: cfg.CASPromotionCircuitBreakerFailures,
 		CircuitBreakerCooldown: cfg.CASPromotionCircuitBreakerCooldown,
 		Logger:                 logger.With("component", "cas-promotion"),
+	})}, nil
+}
+
+// newPublishJobs constructs the in-process durable publish background job when Postgres is configured.
+func newPublishJobs(
+	cfg Config,
+	store *postgres.Store,
+	catalogService httpapi.CatalogService,
+	blobs httpapi.BlobService,
+	logger *slog.Logger,
+) ([]BackgroundJob, error) {
+	cfg = cfg.withDefaults()
+	if store == nil {
+		return []BackgroundJob{}, nil
+	}
+	if catalogService == nil {
+		return nil, errors.New("catalog service is required when publish worker is enabled")
+	}
+	if blobs == nil {
+		return nil, errors.New("blob service is required when publish worker is enabled")
+	}
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+
+	return []BackgroundJob{jobs.New(jobs.Config{
+		Handler: publishflow.New(publishflow.Config{
+			Store: store.Publish(),
+			Incus: incusmaterialization.NewIndexer(incusmaterialization.IndexerConfig{
+				Catalog: catalogService,
+				Blobs:   blobs,
+			}),
+		}),
+		WorkerID:               jobs.Identity{NodeName: cfg.NodeName, RunID: cfg.RunID}.WorkerID("publish"),
+		Interval:               defaultCASPollInterval,
+		ErrorBackoffInitial:    defaultCASErrorBackoff,
+		ErrorBackoffMax:        defaultCASErrorMax,
+		CircuitBreakerFailures: defaultCASBreakerLimit,
+		CircuitBreakerCooldown: defaultCASBreakerPause,
+		Logger:                 logger.With("component", "publish"),
 	})}, nil
 }
 

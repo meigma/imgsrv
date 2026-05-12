@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 )
@@ -63,8 +65,11 @@ type CatalogClient interface {
 	// DeleteAttachment removes an attachment from a draft artifact.
 	DeleteAttachment(context.Context, string, string, string, string) error
 
-	// PublishVersion publishes a draft version.
-	PublishVersion(context.Context, string, string) (ImageVersion, error)
+	// PublishVersion queues durable publish work for a draft version.
+	PublishVersion(context.Context, string, string) (PublishJob, error)
+
+	// GetPublishJob returns a durable publish job by ID.
+	GetPublishJob(context.Context, string) (PublishJob, error)
 
 	// PutAlias creates or moves an alias to a published version.
 	PutAlias(context.Context, string, string, PutAliasRequest) (Alias, error)
@@ -198,6 +203,81 @@ type ImageVersion struct {
 	CreatedAt string `json:"created_at"`
 
 	// UpdatedAt is the RFC3339 timestamp when mutable version metadata last changed.
+	UpdatedAt string `json:"updated_at"`
+}
+
+// PublishJob describes one durable publish workflow.
+type PublishJob struct {
+	// ID is the stable publish-job identity.
+	ID PublishJobID `json:"id"`
+
+	// VersionID identifies the image version being published.
+	VersionID string `json:"version_id"`
+
+	// ImageName is the image namespace for the version being published.
+	ImageName string `json:"image_name"`
+
+	// Version is the operator-defined version string being published.
+	Version string `json:"version"`
+
+	// State is the durable publish-job lifecycle state.
+	State PublishJobState `json:"state"`
+
+	// StartedAt is set when a worker first claims a step.
+	StartedAt *string `json:"started_at,omitempty"`
+
+	// FinishedAt is set when the job reaches a terminal state.
+	FinishedAt *string `json:"finished_at,omitempty"`
+
+	// FailureMessage describes the blocking failure when State is failed.
+	FailureMessage *string `json:"failure_message,omitempty"`
+
+	// CreatedAt is the RFC3339 timestamp when the job was queued.
+	CreatedAt string `json:"created_at"`
+
+	// UpdatedAt is the RFC3339 timestamp when the job last changed.
+	UpdatedAt string `json:"updated_at"`
+
+	// Steps are the durable units of publish progress in execution order.
+	Steps []PublishJobStep `json:"steps"`
+}
+
+// PublishJobStep describes one durable unit of publish progress.
+type PublishJobStep struct {
+	// ID is the stable publish-step identity.
+	ID string `json:"id"`
+
+	// JobID identifies the parent publish job.
+	JobID PublishJobID `json:"job_id"`
+
+	// Name identifies the publish step handler.
+	Name string `json:"name"`
+
+	// State is the durable publish-step lifecycle state.
+	State PublishStepState `json:"state"`
+
+	// Blocking controls whether failure blocks later publish steps.
+	Blocking bool `json:"blocking"`
+
+	// Sequence orders steps within the parent job.
+	Sequence int `json:"sequence"`
+
+	// AttemptCount counts durable claims of this step.
+	AttemptCount int `json:"attempt_count"`
+
+	// StartedAt is set when the step is first claimed.
+	StartedAt *string `json:"started_at,omitempty"`
+
+	// FinishedAt is set when the step reaches a terminal state.
+	FinishedAt *string `json:"finished_at,omitempty"`
+
+	// FailureMessage describes the failure when State is failed.
+	FailureMessage *string `json:"failure_message,omitempty"`
+
+	// CreatedAt is the RFC3339 timestamp when the step was queued.
+	CreatedAt string `json:"created_at"`
+
+	// UpdatedAt is the RFC3339 timestamp when the step last changed.
 	UpdatedAt string `json:"updated_at"`
 }
 
@@ -533,17 +613,34 @@ func (client *HTTPCatalogClient) DeleteAttachment(
 	return client.deleteNoContent(ctx, path)
 }
 
-// PublishVersion publishes a draft version.
+// PublishVersion queues durable publish work for a draft version.
 func (client *HTTPCatalogClient) PublishVersion(
 	ctx context.Context,
 	imageName string,
 	version string,
-) (ImageVersion, error) {
-	var published ImageVersion
+) (PublishJob, error) {
+	var job PublishJob
 	path := versionPath(imageName, version) + "/publish"
-	err := client.transport.do(ctx, http.MethodPost, path, nil, 0, nil, &published)
+	resp, err := client.transport.doResponse(ctx, http.MethodPost, path, nil, 0, nil, http.StatusAccepted)
+	if err != nil {
+		return PublishJob{}, err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	if err := json.NewDecoder(resp.Body).Decode(&job); err != nil {
+		return PublishJob{}, fmt.Errorf("decode imgsrv response: %w", err)
+	}
 
-	return published, err
+	return job, nil
+}
+
+// GetPublishJob returns a durable publish job by ID.
+func (client *HTTPCatalogClient) GetPublishJob(ctx context.Context, jobID string) (PublishJob, error) {
+	var job PublishJob
+	err := client.transport.do(ctx, http.MethodGet, "/v1/publish-jobs/"+url.PathEscape(jobID), nil, 0, nil, &job)
+
+	return job, err
 }
 
 // PutAlias creates or moves an alias to a published version.

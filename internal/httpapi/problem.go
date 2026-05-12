@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/meigma/imgsrv/internal/catalog"
+	"github.com/meigma/imgsrv/internal/publish"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
 
@@ -85,6 +86,11 @@ func writeCatalogError(w http.ResponseWriter, err error) {
 	writeProblem(w, catalogErrorStatus(err), err.Error())
 }
 
+// writePublishError translates a publish-package error into a problem response.
+func writePublishError(w http.ResponseWriter, err error) {
+	writeProblem(w, publishErrorStatus(err), err.Error())
+}
+
 // uploadErrorStatus maps an uploads-package sentinel error to an HTTP status code.
 func uploadErrorStatus(err error) int {
 	switch {
@@ -111,6 +117,20 @@ func catalogErrorStatus(err error) int {
 	case errors.Is(err, catalog.ErrConflict):
 		return http.StatusConflict
 	case errors.Is(err, catalog.ErrFailedPrecondition):
+		return http.StatusPreconditionFailed
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+// publishErrorStatus maps a publish-package sentinel error to an HTTP status code.
+func publishErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, publish.ErrInvalid):
+		return http.StatusBadRequest
+	case errors.Is(err, publish.ErrNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, publish.ErrFailedPrecondition):
 		return http.StatusPreconditionFailed
 	default:
 		return http.StatusInternalServerError

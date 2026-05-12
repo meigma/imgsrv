@@ -263,48 +263,6 @@ func (store *Store) DeleteAttachment(ctx context.Context, params domain.DeleteAt
 	return nil
 }
 
-// PublishVersion publishes a draft version.
-func (store *Store) PublishVersion(
-	ctx context.Context,
-	params domain.PublishVersionParams,
-) (domain.Version, error) {
-	if err := validatePublishVersionParams(params); err != nil {
-		return domain.Version{}, err
-	}
-
-	var version domain.Version
-	err := store.withTx(ctx, func(tx pgx.Tx) error {
-		var scanErr error
-		version, scanErr = scanVersion(tx.QueryRow(
-			ctx,
-			`UPDATE image_versions
-			SET state = 'published',
-				published_at = now(),
-				updated_at = now()
-			FROM images
-			WHERE images.id = image_versions.image_id
-				AND images.name = $1
-				AND image_versions.version = $2
-			RETURNING image_versions.id,
-				image_versions.image_id,
-				image_versions.version,
-				image_versions.state,
-				image_versions.published_at,
-				image_versions.created_at,
-				image_versions.updated_at`,
-			params.ImageName,
-			params.Version,
-		))
-
-		return scanErr
-	})
-	if err != nil {
-		return domain.Version{}, mapCatalogError(err)
-	}
-
-	return version, nil
-}
-
 // PutAlias creates or moves an alias to a published version.
 func (store *Store) PutAlias(ctx context.Context, params domain.PutAliasParams) (domain.Alias, error) {
 	if err := validatePutAliasParams(params); err != nil {

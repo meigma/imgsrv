@@ -154,16 +154,6 @@ func (service *Service) DeleteAttachment(ctx context.Context, params DeleteAttac
 	return store.DeleteAttachment(ctx, params)
 }
 
-// PublishVersion marks a draft version immutable and publishable.
-func (service *Service) PublishVersion(ctx context.Context, params PublishVersionParams) (Version, error) {
-	store, err := service.dependencies()
-	if err != nil {
-		return Version{}, err
-	}
-
-	return store.PublishVersion(ctx, params)
-}
-
 // PutAlias creates or moves an alias to a published version.
 func (service *Service) PutAlias(ctx context.Context, params PutAliasParams) (Alias, error) {
 	store, err := service.dependencies()
