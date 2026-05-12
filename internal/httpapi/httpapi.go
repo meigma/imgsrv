@@ -46,6 +46,9 @@ type Dependencies struct {
 	// Blobs coordinates client-facing raw CAS blob reads. Nil leaves blob routes unavailable.
 	Blobs BlobService
 
+	// SimpleStreams coordinates Incus Simple Streams metadata reads. Nil leaves stream routes unavailable.
+	SimpleStreams SimpleStreamsService
+
 	// Now returns the current time for upload HTTP policy. Nil selects time.Now.
 	Now func() time.Time
 
@@ -163,6 +166,15 @@ type BlobService interface {
 	OpenBlob(context.Context, cas.OpenBlobParams) (objectstore.ObjectReader, error)
 }
 
+// SimpleStreamsService coordinates read-only Simple Streams metadata generation.
+type SimpleStreamsService interface {
+	// Index renders the Simple Streams index document.
+	Index(context.Context) ([]byte, error)
+
+	// ProductFile renders the Incus image product document.
+	ProductFile(context.Context) ([]byte, error)
+}
+
 // AuthManagementService coordinates auth-management operations for HTTP callers.
 type AuthManagementService interface {
 	// ListRoles returns imgsrv's built-in auth roles.
@@ -235,6 +247,7 @@ type api struct {
 	uploads   UploadService
 	catalog   CatalogService
 	blobs     BlobService
+	streams   SimpleStreamsService
 	now       func() time.Time
 	uploadTTL time.Duration
 }
@@ -268,6 +281,7 @@ func New(deps Dependencies) http.Handler {
 		uploads:   deps.Uploads,
 		catalog:   deps.Catalog,
 		blobs:     deps.Blobs,
+		streams:   deps.SimpleStreams,
 		now:       now,
 		uploadTTL: uploadTTL,
 	}
@@ -282,6 +296,8 @@ func New(deps Dependencies) http.Handler {
 func (a *api) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.HandleFunc("GET /readyz", a.readyz)
+	mux.HandleFunc("GET /streams/v1/index.json", a.simpleStreamsIndex)
+	mux.HandleFunc("GET /streams/v1/images.json", a.simpleStreamsProductFile)
 	a.registerAuthRoutes(mux)
 	mux.HandleFunc("POST /v1/uploads", a.requireAction(authz.ActionContentWrite, a.beginUpload))
 	mux.HandleFunc("GET /v1/uploads/{upload_id}", a.getUpload)
