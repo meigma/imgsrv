@@ -165,6 +165,9 @@ type PublishService interface {
 
 	// GetPublishJob returns a publish job with its durable steps.
 	GetPublishJob(context.Context, publish.GetJobParams) (publish.Job, error)
+
+	// RetryPublishJob requeues a failed publish job from its first failed blocking step.
+	RetryPublishJob(context.Context, publish.RetryJobParams) (publish.Job, error)
 }
 
 // BlobService coordinates raw CAS blob reads for HTTP callers.
@@ -371,6 +374,10 @@ func (a *api) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc(
 		"GET /v1/publish-jobs/{job_id}",
 		a.requireAction(authz.ActionContentWrite, a.getPublishJob),
+	)
+	mux.HandleFunc(
+		"POST /v1/publish-jobs/{job_id}/retry",
+		a.requireAction(authz.ActionContentWrite, a.retryPublishJob),
 	)
 	mux.HandleFunc(
 		"PUT /v1/images/{name}/aliases/{alias}",

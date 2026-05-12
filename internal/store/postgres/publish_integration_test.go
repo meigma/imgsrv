@@ -4,6 +4,7 @@ package postgres
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -277,6 +278,220 @@ func TestIncusProjectionRowsRequireCatalogOwnership(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestPublishRetryRequeuesFromFailedStep(t *testing.T) {
+	ctx := t.Context()
+
+	tests := []struct {
+		name         string
+		failStepName string
+		wantStates   map[string]publishdomain.StepState
+		wantAttempts map[string]int
+	}{
+		{
+			name:         "validate catalog",
+			failStepName: publishdomain.StepValidateCatalog,
+			wantStates: map[string]publishdomain.StepState{
+				publishdomain.StepValidateCatalog: publishdomain.StepStateQueued,
+				publishdomain.StepIncusIndex:      publishdomain.StepStateQueued,
+				publishdomain.StepFinalizePublish: publishdomain.StepStateQueued,
+			},
+			wantAttempts: map[string]int{
+				publishdomain.StepValidateCatalog: 1,
+				publishdomain.StepIncusIndex:      0,
+				publishdomain.StepFinalizePublish: 0,
+			},
+		},
+		{
+			name:         "incus index",
+			failStepName: publishdomain.StepIncusIndex,
+			wantStates: map[string]publishdomain.StepState{
+				publishdomain.StepValidateCatalog: publishdomain.StepStateSucceeded,
+				publishdomain.StepIncusIndex:      publishdomain.StepStateQueued,
+				publishdomain.StepFinalizePublish: publishdomain.StepStateQueued,
+			},
+			wantAttempts: map[string]int{
+				publishdomain.StepValidateCatalog: 1,
+				publishdomain.StepIncusIndex:      1,
+				publishdomain.StepFinalizePublish: 0,
+			},
+		},
+		{
+			name:         "finalize publish",
+			failStepName: publishdomain.StepFinalizePublish,
+			wantStates: map[string]publishdomain.StepState{
+				publishdomain.StepValidateCatalog: publishdomain.StepStateSucceeded,
+				publishdomain.StepIncusIndex:      publishdomain.StepStateSucceeded,
+				publishdomain.StepFinalizePublish: publishdomain.StepStateQueued,
+			},
+			wantAttempts: map[string]int{
+				publishdomain.StepValidateCatalog: 1,
+				publishdomain.StepIncusIndex:      1,
+				publishdomain.StepFinalizePublish: 1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := startCatalogIntegrationStore(t)
+			catalogStore := store.Catalog()
+			publishStore := store.Publish()
+			imageName := "retry-" + strings.ReplaceAll(tt.name, " ", "-")
+			version, job := enqueuePublishableRawJob(t, ctx, store, catalogStore, publishStore, imageName)
+			failPublishStep(t, ctx, publishStore, version.ID, tt.failStepName)
+			failedJob, err := publishStore.GetJob(ctx, publishdomain.GetJobParams{ID: job.ID})
+			require.NoError(t, err)
+			require.Equal(t, publishdomain.JobStateFailed, failedJob.State)
+			require.NotNil(t, failedJob.StartedAt)
+			require.NotNil(t, failedJob.FinishedAt)
+			require.NotNil(t, failedJob.FailureMessage)
+
+			retriedJob, err := publishStore.RetryJob(ctx, publishdomain.RetryJobParams{ID: job.ID})
+			require.NoError(t, err)
+			assert.Equal(t, publishdomain.JobStateQueued, retriedJob.State)
+			require.NotNil(t, retriedJob.StartedAt)
+			assert.Equal(t, *failedJob.StartedAt, *retriedJob.StartedAt)
+			assert.Nil(t, retriedJob.FinishedAt)
+			assert.Nil(t, retriedJob.FailureMessage)
+
+			for name, wantState := range tt.wantStates {
+				step := publishStepByName(t, retriedJob, name)
+				assert.Equal(t, wantState, step.State, name)
+				assert.Equal(t, tt.wantAttempts[name], step.AttemptCount, name)
+				assert.Nil(t, step.LockedBy, name)
+				assert.Nil(t, step.LockedAt, name)
+				assert.Nil(t, step.FailureMessage, name)
+				if wantState == publishdomain.StepStateQueued {
+					assert.Nil(t, step.FinishedAt, name)
+				}
+			}
+		})
+	}
+}
+
+func TestPublishRetryRejectsNonRetryableJobs(t *testing.T) {
+	ctx := t.Context()
+	store := startCatalogIntegrationStore(t)
+	publishStore := store.Publish()
+
+	_, err := publishStore.RetryJob(ctx, publishdomain.RetryJobParams{})
+	assert.ErrorIs(t, err, publishdomain.ErrInvalid)
+	_, err = publishStore.RetryJob(ctx, publishdomain.RetryJobParams{ID: uuid.New()})
+	assert.ErrorIs(t, err, publishdomain.ErrNotFound)
+
+	t.Run("queued", func(t *testing.T) {
+		store := startCatalogIntegrationStore(t)
+		catalogStore := store.Catalog()
+		publishStore := store.Publish()
+		_, job := enqueuePublishableRawJob(t, ctx, store, catalogStore, publishStore, "retry-reject-queued")
+
+		_, err := publishStore.RetryJob(ctx, publishdomain.RetryJobParams{ID: job.ID})
+		assert.ErrorIs(t, err, publishdomain.ErrFailedPrecondition)
+	})
+
+	t.Run("running", func(t *testing.T) {
+		store := startCatalogIntegrationStore(t)
+		catalogStore := store.Catalog()
+		publishStore := store.Publish()
+		_, job := enqueuePublishableRawJob(t, ctx, store, catalogStore, publishStore, "retry-reject-running")
+		claimStep(t, ctx, publishStore, publishdomain.StepValidateCatalog)
+
+		_, err := publishStore.RetryJob(ctx, publishdomain.RetryJobParams{ID: job.ID})
+		assert.ErrorIs(t, err, publishdomain.ErrFailedPrecondition)
+	})
+
+	t.Run("succeeded", func(t *testing.T) {
+		store := startCatalogIntegrationStore(t)
+		catalogStore := store.Catalog()
+		publishStore := store.Publish()
+		version, job := enqueuePublishableRawJob(t, ctx, store, catalogStore, publishStore, "retry-reject-succeeded")
+		completePublishJob(t, ctx, publishStore, version.ID)
+
+		_, err := publishStore.RetryJob(ctx, publishdomain.RetryJobParams{ID: job.ID})
+		assert.ErrorIs(t, err, publishdomain.ErrFailedPrecondition)
+	})
+
+	t.Run("version no longer publishing", func(t *testing.T) {
+		store := startCatalogIntegrationStore(t)
+		catalogStore := store.Catalog()
+		publishStore := store.Publish()
+		version, job := enqueuePublishableRawJob(t, ctx, store, catalogStore, publishStore, "retry-reject-published")
+		failPublishStep(t, ctx, publishStore, version.ID, publishdomain.StepValidateCatalog)
+		_, err := store.pool.Exec(
+			ctx,
+			`UPDATE image_versions
+			SET state = 'published',
+				published_at = now(),
+				updated_at = now()
+			WHERE id = $1`,
+			version.ID,
+		)
+		require.NoError(t, err)
+
+		_, err = publishStore.RetryJob(ctx, publishdomain.RetryJobParams{ID: job.ID})
+		assert.ErrorIs(t, err, publishdomain.ErrFailedPrecondition)
+	})
+
+	t.Run("no failed blocking step", func(t *testing.T) {
+		store := startCatalogIntegrationStore(t)
+		catalogStore := store.Catalog()
+		publishStore := store.Publish()
+		_, job := enqueuePublishableRawJob(t, ctx, store, catalogStore, publishStore, "retry-reject-no-step")
+		_, err := store.pool.Exec(
+			ctx,
+			`UPDATE publish_jobs
+			SET state = 'failed',
+				finished_at = now(),
+				failure_message = 'failed without a failed step',
+				updated_at = now()
+			WHERE id = $1`,
+			job.ID,
+		)
+		require.NoError(t, err)
+
+		_, err = publishStore.RetryJob(ctx, publishdomain.RetryJobParams{ID: job.ID})
+		assert.ErrorIs(t, err, publishdomain.ErrFailedPrecondition)
+	})
+}
+
+func TestPublishRetryAllowsWorkerToCompleteRequeuedSequence(t *testing.T) {
+	ctx := t.Context()
+	store := startCatalogIntegrationStore(t)
+	catalogStore := store.Catalog()
+	publishStore := store.Publish()
+
+	version, job := enqueuePublishableRawJob(t, ctx, store, catalogStore, publishStore, "retry-complete")
+	failPublishStep(t, ctx, publishStore, version.ID, publishdomain.StepIncusIndex)
+
+	retriedJob, err := publishStore.RetryJob(ctx, publishdomain.RetryJobParams{ID: job.ID})
+	require.NoError(t, err)
+	assert.Equal(
+		t,
+		publishdomain.StepStateSucceeded,
+		publishStepByName(t, retriedJob, publishdomain.StepValidateCatalog).State,
+	)
+
+	incusStep := claimStep(t, ctx, publishStore, publishdomain.StepIncusIndex)
+	_, err = publishStore.SucceedIncusIndexStep(ctx, publishdomain.SucceedIncusIndexStepParams{
+		ID:           incusStep.ID,
+		WorkerID:     testPublishWorkerID,
+		AttemptCount: incusStep.AttemptCount,
+		VersionID:    version.ID,
+	})
+	require.NoError(t, err)
+	finalizeStep := claimStep(t, ctx, publishStore, publishdomain.StepFinalizePublish)
+	finalJob, err := publishStore.FinalizePublishStep(ctx, succeedStepParams(finalizeStep))
+	require.NoError(t, err)
+	assert.Equal(t, publishdomain.JobStateSucceeded, finalJob.State)
+
+	manifest, err := catalogStore.GetVersionManifest(ctx, catalogdomain.GetVersionManifestParams{
+		ImageName: "retry-complete",
+		Version:   version.Version,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, catalogdomain.VersionStatePublished, manifest.Version.State)
+}
+
 func claimStep(
 	t testing.TB,
 	ctx context.Context,
@@ -294,6 +509,116 @@ func claimStep(
 	assert.Equal(t, publishdomain.StepStateRunning, step.State)
 
 	return step
+}
+
+func enqueuePublishableRawJob(
+	t *testing.T,
+	ctx context.Context,
+	store *Store,
+	catalogStore catalogdomain.Store,
+	publishStore publishdomain.Store,
+	imageName string,
+) (catalogdomain.Version, publishdomain.Job) {
+	t.Helper()
+
+	image := createImage(t, ctx, catalogStore, imageName)
+	version := createVersion(t, ctx, catalogStore, imageName, "v1.0.0")
+	digest := publishedCatalogDigest(image.ID, version.Version)
+	insertTrustedBlob(t, store, digest, 4096)
+	createArtifact(t, ctx, catalogStore, imageName, version.Version, digest)
+	job, err := publishStore.EnqueueVersion(ctx, publishdomain.EnqueueVersionParams{
+		ImageName: imageName,
+		Version:   version.Version,
+	})
+	require.NoError(t, err)
+
+	return version, job
+}
+
+func failPublishStep(
+	t testing.TB,
+	ctx context.Context,
+	publishStore publishdomain.Store,
+	versionID uuid.UUID,
+	stepName string,
+) {
+	t.Helper()
+
+	validateStep := claimStep(t, ctx, publishStore, publishdomain.StepValidateCatalog)
+	if stepName == publishdomain.StepValidateCatalog {
+		failStep(t, ctx, publishStore, validateStep)
+		return
+	}
+	_, err := publishStore.SucceedValidateCatalogStep(ctx, succeedStepParams(validateStep))
+	require.NoError(t, err)
+
+	incusStep := claimStep(t, ctx, publishStore, publishdomain.StepIncusIndex)
+	if stepName == publishdomain.StepIncusIndex {
+		failStep(t, ctx, publishStore, incusStep)
+		return
+	}
+	_, err = publishStore.SucceedIncusIndexStep(ctx, publishdomain.SucceedIncusIndexStepParams{
+		ID:           incusStep.ID,
+		WorkerID:     testPublishWorkerID,
+		AttemptCount: incusStep.AttemptCount,
+		VersionID:    versionID,
+	})
+	require.NoError(t, err)
+
+	finalizeStep := claimStep(t, ctx, publishStore, publishdomain.StepFinalizePublish)
+	require.Equal(t, publishdomain.StepFinalizePublish, stepName)
+	failStep(t, ctx, publishStore, finalizeStep)
+}
+
+func failStep(t testing.TB, ctx context.Context, publishStore publishdomain.Store, step publishdomain.Step) {
+	t.Helper()
+
+	_, err := publishStore.FailStep(ctx, publishdomain.FailStepParams{
+		ID:             step.ID,
+		WorkerID:       testPublishWorkerID,
+		AttemptCount:   step.AttemptCount,
+		FailureMessage: "test failure",
+	})
+	require.NoError(t, err)
+}
+
+func completePublishJob(
+	t testing.TB,
+	ctx context.Context,
+	publishStore publishdomain.Store,
+	versionID uuid.UUID,
+) publishdomain.Job {
+	t.Helper()
+
+	validateStep := claimStep(t, ctx, publishStore, publishdomain.StepValidateCatalog)
+	_, err := publishStore.SucceedValidateCatalogStep(ctx, succeedStepParams(validateStep))
+	require.NoError(t, err)
+	incusStep := claimStep(t, ctx, publishStore, publishdomain.StepIncusIndex)
+	_, err = publishStore.SucceedIncusIndexStep(ctx, publishdomain.SucceedIncusIndexStepParams{
+		ID:           incusStep.ID,
+		WorkerID:     testPublishWorkerID,
+		AttemptCount: incusStep.AttemptCount,
+		VersionID:    versionID,
+	})
+	require.NoError(t, err)
+	finalizeStep := claimStep(t, ctx, publishStore, publishdomain.StepFinalizePublish)
+	job, err := publishStore.FinalizePublishStep(ctx, succeedStepParams(finalizeStep))
+	require.NoError(t, err)
+
+	return job
+}
+
+func publishStepByName(t testing.TB, job publishdomain.Job, name string) publishdomain.Step {
+	t.Helper()
+
+	for _, step := range job.Steps {
+		if step.Name == name {
+			return step
+		}
+	}
+	require.FailNowf(t, "missing publish step", "job %s has no step named %s", job.ID, name)
+
+	return publishdomain.Step{}
 }
 
 func createIncusArtifactFixture(

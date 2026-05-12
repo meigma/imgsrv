@@ -41,6 +41,16 @@ func (service *Service) GetPublishJob(ctx context.Context, params GetJobParams) 
 	return store.GetJob(ctx, params)
 }
 
+// RetryPublishJob requeues a failed publish job from its first failed blocking step.
+func (service *Service) RetryPublishJob(ctx context.Context, params RetryJobParams) (Job, error) {
+	store, err := service.dependencies()
+	if err != nil {
+		return Job{}, err
+	}
+
+	return store.RetryJob(ctx, params)
+}
+
 func (service *Service) dependencies() (Store, error) {
 	if service == nil || service.store == nil {
 		return nil, errors.New("publish service is not configured")

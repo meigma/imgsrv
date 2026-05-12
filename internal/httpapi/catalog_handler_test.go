@@ -593,6 +593,41 @@ func TestGetPublishJobReturnsJob(t *testing.T) {
 	require.Len(t, got.Steps, 3)
 }
 
+func TestRetryPublishJobReturnsJob(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+	wantJob := publishJobFixture(publish.JobStateQueued)
+
+	tc.publish.EXPECT().
+		RetryPublishJob(mock.Anything, publish.RetryJobParams{ID: publishJobIDFixture()}).
+		Return(wantJob, nil)
+
+	req := newHTTPAPIRequest(http.MethodPost, "/v1/publish-jobs/"+publishJobIDFixture().String()+"/retry", nil)
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	var got publishJobResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, publishJobIDFixture().String(), got.ID)
+	assert.Equal(t, publish.JobStateQueued, got.State)
+	require.Len(t, got.Steps, 3)
+}
+
+func TestRetryPublishJobRequiresContentWrite(t *testing.T) {
+	handler := New(Dependencies{
+		Publish: httpmocks.NewMockPublishService(t),
+		Auth:    newDenyingAuthService(t),
+	})
+	req := newHTTPAPIRequest(http.MethodPost, "/v1/publish-jobs/"+publishJobIDFixture().String()+"/retry", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	assertProblem(t, rec, http.StatusForbidden, "principal is not authorized for action content.write")
+}
+
 func TestPutAliasCreatesOrMovesAlias(t *testing.T) {
 	tc := newCatalogHandlerTestContext(t)
 	wantAlias := catalogAliasFixture()
@@ -802,6 +837,55 @@ func TestCatalogHandlersMapDomainErrors(t *testing.T) {
 	}
 }
 
+func TestRetryPublishJobMapsErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		jobID    string
+		err      error
+		wantCode int
+		want     string
+	}{
+		{
+			name:     "invalid uuid",
+			jobID:    "not-a-uuid",
+			wantCode: http.StatusBadRequest,
+			want:     "publish job id must be a UUID",
+		},
+		{
+			name:     "not found",
+			jobID:    publishJobIDFixture().String(),
+			err:      publish.ErrNotFound,
+			wantCode: http.StatusNotFound,
+			want:     publish.ErrNotFound.Error(),
+		},
+		{
+			name:     "failed precondition",
+			jobID:    publishJobIDFixture().String(),
+			err:      publish.ErrFailedPrecondition,
+			wantCode: http.StatusPreconditionFailed,
+			want:     publish.ErrFailedPrecondition.Error(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := newCatalogHandlerTestContext(t)
+			if tt.err != nil {
+				tc.publish.EXPECT().
+					RetryPublishJob(mock.Anything, publish.RetryJobParams{ID: publishJobIDFixture()}).
+					Return(publish.Job{}, tt.err)
+			}
+			req := newHTTPAPIRequest(http.MethodPost, "/v1/publish-jobs/"+tt.jobID+"/retry", nil)
+			rec := httptest.NewRecorder()
+
+			tc.handler.ServeHTTP(rec, req)
+
+			require.Equal(t, tt.wantCode, rec.Code)
+			assertProblem(t, rec, tt.wantCode, tt.want)
+		})
+	}
+}
+
 func TestCatalogHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -892,6 +976,11 @@ func TestPublishHandlersReturnUnavailableWhenServiceMissing(t *testing.T) {
 	}{
 		{name: "publish", method: http.MethodPost, path: "/v1/images/debian/versions/v1.0.0/publish"},
 		{name: "get job", method: http.MethodGet, path: "/v1/publish-jobs/" + publishJobIDFixture().String()},
+		{
+			name:   "retry job",
+			method: http.MethodPost,
+			path:   "/v1/publish-jobs/" + publishJobIDFixture().String() + "/retry",
+		},
 	}
 
 	for _, tt := range tests {

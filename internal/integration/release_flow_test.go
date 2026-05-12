@@ -22,6 +22,7 @@ import (
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/integration/harness"
 	"github.com/meigma/imgsrv/internal/jobs/promote"
+	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
 
@@ -303,6 +304,61 @@ func TestReleaseFlowServesIncusSimpleStreams(t *testing.T) {
 	diskItem := diskItems[0]
 	assert.Equal(t, "disk-kvm.img", diskItem.Item.FileType)
 	assert.Equal(t, diskBlob.SizeBytes, *diskItem.Item.Size)
+}
+
+func TestReleaseFlowRetriesFailedPublishJob(t *testing.T) {
+	env := startIntegrationEnv(t)
+	ctx := t.Context()
+	client := newClient(t, env)
+	catalog := client.Catalog()
+	diskPayload := []byte("imgsrv retry qcow2 artifact")
+	metadataPayload := []byte("imgsrv retry incus metadata")
+	diskBlob := uploadBlobToCAS(ctx, t, env, client, diskPayload)
+	metadataBlob := uploadBlobToCAS(ctx, t, env, client, metadataPayload)
+	metadataKey := cas.StorageKey(uploads.Digest(metadataBlob.Digest.String()))
+	require.NoError(t, env.ObjectStore().DeleteObject(ctx, objectstore.DeleteObjectParams{Key: metadataKey}))
+
+	image, err := catalog.CreateImage(ctx, imgsrv.CreateImageRequest{Name: "release-retry-publish"})
+	require.NoError(t, err)
+	draft, err := catalog.CreateDraftVersion(
+		ctx,
+		image.Name,
+		imgsrv.CreateDraftVersionRequest{Version: "20260512_0001"},
+	)
+	require.NoError(t, err)
+	artifact, err := catalog.AddArtifact(
+		ctx,
+		image.Name,
+		draft.Version,
+		artifactRequest(diskBlob),
+	)
+	require.NoError(t, err)
+	_, err = catalog.AddAttachment(
+		ctx,
+		image.Name,
+		draft.Version,
+		artifact.ID.String(),
+		attachmentRequest("incus.tar.xz", metadataBlob),
+	)
+	require.NoError(t, err)
+
+	publishJob, err := catalog.PublishVersion(ctx, image.Name, draft.Version)
+	require.NoError(t, err)
+	failedJob := waitForPublishJobFailure(ctx, t, catalog, publishJob.ID)
+	assert.Equal(t, imgsrv.PublishJobStateFailed, failedJob.State)
+	require.NotNil(t, failedJob.FailureMessage)
+
+	putObject(ctx, t, env.ObjectStore(), metadataKey, metadataPayload)
+	retriedJob, err := catalog.RetryPublishJob(ctx, publishJob.ID.String())
+	require.NoError(t, err)
+	assert.Equal(t, imgsrv.PublishJobStateQueued, retriedJob.State)
+	assert.Equal(t, imgsrv.PublishStepStateSucceeded, publishJobStepByName(t, retriedJob, "validate_catalog").State)
+	assert.Equal(t, imgsrv.PublishStepStateQueued, publishJobStepByName(t, retriedJob, "incus_index").State)
+
+	waitForPublishJob(ctx, t, catalog, publishJob.ID)
+	manifest, err := catalog.GetVersionManifest(ctx, image.Name, draft.Version)
+	require.NoError(t, err)
+	assert.Equal(t, imgsrv.ImageVersionStatePublished, manifest.Version.State)
 }
 
 func TestReleaseFlowBrowsesAndDeletesDraftCatalog(t *testing.T) {
@@ -760,6 +816,75 @@ func waitForPublishJob(
 		case <-ticker.C:
 		}
 	}
+}
+
+func waitForPublishJobFailure(
+	ctx context.Context,
+	t testing.TB,
+	catalog imgsrv.CatalogClient,
+	jobID imgsrv.PublishJobID,
+) imgsrv.PublishJob {
+	t.Helper()
+
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		job, err := catalog.GetPublishJob(waitCtx, jobID.String())
+		require.NoError(t, err)
+		switch job.State {
+		case imgsrv.PublishJobStateFailed:
+			return job
+		case imgsrv.PublishJobStateSucceeded:
+			require.FailNow(t, "publish job succeeded unexpectedly", job.ID.String())
+		}
+
+		select {
+		case <-waitCtx.Done():
+			require.NoError(t, waitCtx.Err(), "timed out waiting for publish job %s to fail", jobID)
+		case <-ticker.C:
+		}
+	}
+}
+
+func publishJobStepByName(t testing.TB, job imgsrv.PublishJob, name string) imgsrv.PublishJobStep {
+	t.Helper()
+
+	for _, step := range job.Steps {
+		if step.Name == name {
+			return step
+		}
+	}
+	require.FailNowf(t, "missing publish job step", "job %s has no step named %s", job.ID, name)
+
+	return imgsrv.PublishJobStep{}
+}
+
+func putObject(ctx context.Context, t testing.TB, store objectstore.Store, key string, payload []byte) {
+	t.Helper()
+
+	upload, err := store.CreateMultipartUpload(ctx, objectstore.CreateMultipartUploadParams{Key: key})
+	require.NoError(t, err)
+	part, err := store.PutPart(ctx, objectstore.PutPartParams{
+		Key:        key,
+		UploadID:   upload.UploadID,
+		PartNumber: 1,
+		Body:       bytes.NewReader(payload),
+		SizeBytes:  int64(len(payload)),
+	})
+	require.NoError(t, err)
+	_, err = store.CompleteMultipartUpload(ctx, objectstore.CompleteMultipartUploadParams{
+		Key:      key,
+		UploadID: upload.UploadID,
+		Parts: []objectstore.CompletePart{{
+			Number:    part.Number,
+			ETag:      part.ETag,
+			SizeBytes: part.SizeBytes,
+		}},
+	})
+	require.NoError(t, err)
 }
 
 func artifactRequest(blob catalogBlob) imgsrv.AddArtifactRequest {

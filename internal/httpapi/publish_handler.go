@@ -110,6 +110,28 @@ func (a *api) getPublishJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, newPublishJobResponse(job))
 }
 
+// retryPublishJob handles POST /v1/publish-jobs/{job_id}/retry.
+func (a *api) retryPublishJob(w http.ResponseWriter, r *http.Request) {
+	service, ok := a.publishService(w)
+	if !ok {
+		return
+	}
+
+	jobID, err := uuid.Parse(r.PathValue("job_id"))
+	if err != nil {
+		writeProblem(w, http.StatusBadRequest, "publish job id must be a UUID")
+		return
+	}
+
+	job, err := service.RetryPublishJob(r.Context(), publish.RetryJobParams{ID: jobID})
+	if err != nil {
+		writePublishError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, newPublishJobResponse(job))
+}
+
 // publishService returns the configured PublishService or writes a 503 problem and reports false.
 func (a *api) publishService(w http.ResponseWriter) (PublishService, bool) {
 	if a.publish == nil {
