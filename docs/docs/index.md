@@ -6,12 +6,16 @@ description: Documentation for the imgsrv image artifact service.
 
 # imgsrv Docs
 
-`imgsrv` is an early-stage image artifact service for operational teams working
-with disk and VM images outside cloud-native container registries.
+`imgsrv` stores, catalogs, publishes, and serves disk and VM image artifacts for
+operators who need image distribution outside container registries.
 
-## Current Documents
+## Start Here
 
-- [v0 design](./design.md): temporary working design for the first prototype
+- [Server guide](./server.md): runtime configuration, auth onboarding, and the
+  publishing workflow.
+- [Architecture](./design.md): storage model, API shape, publish jobs, and the
+  Incus Simple Streams projection.
+- [OpenAPI contract](/openapi/v1.yaml): implemented HTTP endpoint contract.
 
 ## Repository Links
 

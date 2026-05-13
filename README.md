@@ -1,76 +1,87 @@
 # imgsrv
 
-`imgsrv` is an early-stage Go service for storing, cataloging, and serving disk
-and VM image artifacts through a native HTTP API.
-
-The v0 prototype is intended to prove verified content-addressed uploads,
-immutable published image versions, aliases, and proxied downloads backed by
-PostgreSQL and Garage. The initial service foundation is in place; the current
-implementation exposes operational health endpoints while the v0 API is built
-out in focused slices.
+`imgsrv` is a Go HTTP service for storing, cataloging, publishing, and serving
+disk and VM image artifacts. It gives operators a native API for verified
+content-addressed uploads, immutable image versions, movable aliases, proxied
+artifact downloads, API-token and OIDC publisher auth, and an Incus-compatible
+Simple Streams read surface.
 
 ## Quick Start
 
-Current repository commands exercise the documentation site and initial Go
-service foundation.
-
 ### Prerequisites
 
-- Node.js 22, matching [.nvmrc](.nvmrc)
-- npm
 - Go 1.26
-- Moon
-- uv, for repository setup automation
-- gh, authenticated with access to `meigma/imgsrv`
+- PostgreSQL for the control plane
+- S3-compatible object storage for image bytes
 
-### Setup
-
-```sh
-npm --prefix docs ci
-```
-
-### Verify
+### Verify The Repository
 
 ```sh
-moon ci --summary minimal
 go test ./...
 ```
 
-### Run Docs Locally
+### Run The Server
 
-```sh
-npm --prefix docs run start
-```
-
-### Run Service Locally
+Start the server with only operational endpoints:
 
 ```sh
 go run ./cmd/imgsrv --listen :8080
 ```
 
-The initial service foundation exposes `GET /healthz` and `GET /readyz`.
-Logs default to text output and can be switched to JSON with `--log-format json`;
-verbosity is controlled with `--verbosity`. Prometheus metrics are served from
-`127.0.0.1:9464/metrics` by default and can be disabled with
-`--metrics-listen ""`.
+That process serves:
 
-Set `--postgres-url` or `IMGSRV_POSTGRES_URL` to open PostgreSQL at startup and
-apply embedded Goose migrations before the HTTP listener starts.
+- `GET /healthz`
+- `GET /readyz`
+- Prometheus metrics on `127.0.0.1:9464/metrics`
 
-## Planned Service Shape
+Set `--metrics-listen ""` to disable the metrics server.
 
-The service is planned as a single Go binary using standard-library HTTP,
-PostgreSQL for the control plane, Garage through its S3-compatible API for
-object storage, `log/slog` for logging, OpenTelemetry metrics with a Prometheus
-endpoint, and a hand-written OpenAPI v3 specification.
+Run the API with PostgreSQL and S3-compatible object storage:
 
-See [docs/docs/design.md](docs/docs/design.md) for the current working design.
+```sh
+IMGSRV_POSTGRES_URL='postgres://imgsrv:imgsrv@localhost:5432/imgsrv?sslmode=disable' \
+IMGSRV_S3_ENDPOINT='127.0.0.1:3900' \
+IMGSRV_S3_BUCKET='imgsrv' \
+IMGSRV_S3_ACCESS_KEY_ID='imgsrv' \
+IMGSRV_S3_SECRET_ACCESS_KEY='imgsrv-secret' \
+IMGSRV_S3_PATH_STYLE=true \
+IMGSRV_CAS_PROMOTION_ENABLED=true \
+go run ./cmd/imgsrv --listen :8080
+```
+
+At startup, `imgsrv` applies embedded PostgreSQL migrations. A fresh
+PostgreSQL-backed deployment with no `auth-manager` principal prints one
+bootstrap API token to stdout. Use that token to create service principals,
+assign roles, issue API tokens, and configure OIDC provisioning rules through
+the `/v1/auth/*` API.
+
+## Server Usage
+
+Write operations require a bearer principal with the right role:
+
+- `auth-manager` manages principals, local roles, API tokens, and OIDC
+  provisioning rules.
+- `content-writer` creates uploads, edits draft versions, publishes versions,
+  retries failed publish jobs, and manages aliases.
+
+The normal publishing flow is:
+
+1. Upload bytes into CAS with `/v1/uploads`.
+2. Create an image and draft version under `/v1/images`.
+3. Attach primary artifacts and any metadata attachments by CAS digest.
+4. Publish the draft version and track `/v1/publish-jobs/{job_id}`.
+5. Move aliases with `/v1/images/{name}/aliases/{alias}`.
+6. Read published artifacts through `/v1/images/*` or the Incus Simple Streams
+   documents under `/streams/v1/`.
+
+The OpenAPI contract for the implemented HTTP surface is
+[docs/static/openapi/v1.yaml](docs/static/openapi/v1.yaml).
 
 ## Documentation
 
-- Docs home: [docs/docs/index.md](docs/docs/index.md)
-- Working v0 design: [docs/docs/design.md](docs/docs/design.md)
-- Repository settings manifest: [.github/repository-settings.toml](.github/repository-settings.toml)
+The published documentation is available at
+[meigma.github.io/imgsrv](https://meigma.github.io/imgsrv/). The source lives
+under [docs/docs](docs/docs).
 
 ## Support
 
