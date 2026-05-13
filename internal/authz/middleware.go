@@ -3,6 +3,7 @@ package authz
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/meigma/authkit/httpauth"
 	authkitoidc "github.com/meigma/authkit/oidc"
 	"github.com/meigma/authkit/roleauth"
+
+	safelog "github.com/meigma/imgsrv/internal/logging"
 )
 
 const (
@@ -39,12 +42,17 @@ type Config struct {
 
 	HTTPClient    *http.Client
 	ErrorRenderer httpauth.ErrorRenderer
+	Logger        *slog.Logger
 }
 
 // NewMiddleware builds the authkit HTTP middleware used by protected imgsrv routes.
 func NewMiddleware(_ context.Context, cfg Config) (*httpauth.Middleware, error) {
 	if cfg.Store == nil {
 		return nil, errors.New("authz: authkit store is required")
+	}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = safelog.Nop()
 	}
 
 	authenticators, err := authenticators(cfg)
@@ -59,7 +67,8 @@ func NewMiddleware(_ context.Context, cfg Config) (*httpauth.Middleware, error) 
 		roles: roleAuthorizer,
 	}
 	resolver := policyResolver{
-		store: cfg.Store,
+		store:  cfg.Store,
+		logger: logger.With("component", "authz-resolver"),
 	}
 	pipeline, err := authkit.NewPipeline(authkit.PipelineOptions{
 		Authenticators: authenticators,

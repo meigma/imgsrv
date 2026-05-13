@@ -6,11 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"slices"
 
 	"github.com/meigma/authkit"
 	"github.com/meigma/authkit/apikey"
 	"github.com/meigma/authkit/provisioning"
+
+	safelog "github.com/meigma/imgsrv/internal/logging"
 )
 
 type identityStore interface {
@@ -21,7 +24,8 @@ type identityStore interface {
 }
 
 type policyResolver struct {
-	store identityStore
+	store  identityStore
+	logger *slog.Logger
 }
 
 func (r *policyResolver) ResolveIdentity(
@@ -31,6 +35,7 @@ func (r *policyResolver) ResolveIdentity(
 	localIdentity := claimFingerprintIdentity(identity)
 	principal, err := r.store.ResolveIdentity(ctx, localIdentity)
 	if err == nil {
+		r.logResolved(ctx, identity, principal, "linked")
 		return principal, nil
 	}
 	if !errors.Is(err, authkit.ErrUnresolvedIdentity) {
@@ -41,23 +46,45 @@ func (r *policyResolver) ResolveIdentity(
 	case apikey.Provider:
 		return nil, err
 	default:
-		prefix, kind := principalShape(identity)
-		req := principalRequest(prefix, kind, identity)
-		if match, ok, roleErr := r.managedMatch(ctx, identity); roleErr != nil {
-			return nil, roleErr
-		} else if ok {
-			if principal, found, findErr := r.existingRulePrincipal(ctx, identity, match.ruleIDs); findErr != nil {
-				return nil, findErr
-			} else if found {
-				return principal, nil
-			}
-			req.Attributes["provisioning_rule_id"] = match.primaryRuleID
-
-			return r.provision(ctx, localIdentity, req, match.roleIDs)
-		}
-
-		return transientPrincipal(identity, req), nil
+		return r.resolveProvisionableIdentity(ctx, localIdentity, identity)
 	}
+}
+
+func (r *policyResolver) resolveProvisionableIdentity(
+	ctx context.Context,
+	localIdentity authkit.Identity,
+	identity authkit.Identity,
+) (*authkit.Principal, error) {
+	prefix, kind := principalShape(identity)
+	req := principalRequest(prefix, kind, identity)
+	match, ok, err := r.managedMatch(ctx, identity)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		principal := transientPrincipal(identity, req)
+		r.logResolved(ctx, identity, principal, "transient")
+
+		return principal, nil
+	}
+
+	principal, found, err := r.existingRulePrincipal(ctx, identity, match.ruleIDs)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		r.logResolved(ctx, identity, principal, "existing_rule_principal")
+		return principal, nil
+	}
+
+	req.Attributes["provisioning_rule_id"] = match.primaryRuleID
+	principal, err = r.provision(ctx, localIdentity, req, match.roleIDs)
+	if err != nil {
+		return nil, err
+	}
+	r.logAutoProvisioned(ctx, identity, principal, match)
+
+	return principal, nil
 }
 
 func (r *policyResolver) provision(
@@ -76,6 +103,61 @@ func (r *policyResolver) provision(
 	}
 
 	return &result.Principal, nil
+}
+
+func (r *policyResolver) logAutoProvisioned(
+	ctx context.Context,
+	identity authkit.Identity,
+	principal *authkit.Principal,
+	match managedRuleMatch,
+) {
+	logger := r.logger
+	if logger == nil {
+		logger = safelog.Nop()
+	}
+	logger.InfoContext(
+		ctx,
+		"identity auto-provisioned",
+		"operation",
+		"auth.resolve_identity",
+		"identity_provider",
+		identity.Provider,
+		"subject_hash",
+		safelog.SubjectHash(identity.Provider, identity.Subject),
+		"principal_id",
+		principal.ID,
+		"provisioning_rule_id",
+		match.primaryRuleID,
+		"rule_count",
+		len(match.ruleIDs),
+		"role_count",
+		len(match.roleIDs),
+	)
+}
+
+func (r *policyResolver) logResolved(
+	ctx context.Context,
+	identity authkit.Identity,
+	principal *authkit.Principal,
+	mode string,
+) {
+	if r == nil || r.logger == nil || principal == nil {
+		return
+	}
+	r.logger.DebugContext(
+		ctx,
+		"identity resolved",
+		"operation",
+		"auth.resolve_identity",
+		"resolution",
+		mode,
+		"identity_provider",
+		identity.Provider,
+		"subject_hash",
+		safelog.SubjectHash(identity.Provider, identity.Subject),
+		"principal_id",
+		principal.ID,
+	)
 }
 
 type managedRuleMatch struct {

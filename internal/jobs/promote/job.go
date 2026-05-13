@@ -4,9 +4,11 @@ package promote
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/jobs"
+	safelog "github.com/meigma/imgsrv/internal/logging"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
 
@@ -32,6 +34,9 @@ type Config struct {
 
 	// CAS commits verified staged uploads into content-addressed storage.
 	CAS Committer
+
+	// Logger receives CAS promotion logs. Nil selects a discarded logger.
+	Logger *slog.Logger
 }
 
 // Job claims one completed upload and promotes it into CAS.
@@ -40,13 +45,21 @@ type Job struct {
 	uploads UploadStore
 	// cas commits verified staged uploads into content-addressed storage.
 	cas Committer
+	// logger receives CAS promotion logs.
+	logger *slog.Logger
 }
 
 // New constructs a CAS promotion job from config.
 func New(config Config) *Job {
+	logger := config.Logger
+	if logger == nil {
+		logger = safelog.Nop()
+	}
+
 	return &Job{
 		uploads: config.Uploads,
 		cas:     config.CAS,
+		logger:  logger,
 	}
 }
 
@@ -70,11 +83,22 @@ func (job *Job) RunOnce(ctx context.Context, workerID string) (jobs.Result, erro
 
 		return jobs.Result{}, err
 	}
+	attrs := ingestJobAttrs(ingestJob)
+	job.logger.LogAttrs(
+		ctx,
+		slog.LevelInfo,
+		"cas promotion job claimed",
+		append(attrs, slog.String("operation", "cas_promotion.claim"))...)
 
 	session, err := uploadStore.GetSession(ctx, uploads.GetSessionParams{ID: ingestJob.UploadID})
 	if err != nil {
-		return jobs.Result{}, err
+		return jobs.Result{Attrs: attrs}, err
 	}
+	attrs = append(attrs,
+		slog.String("upload_id", session.ID.String()),
+		slog.String("expected_digest", session.ExpectedDigest.String()),
+		slog.Int64("expected_size_bytes", session.ExpectedSizeBytes),
+	)
 
 	_, err = committer.CommitStagedUpload(ctx, cas.CommitStagedUploadParams{
 		JobID:             ingestJob.ID,
@@ -85,10 +109,24 @@ func (job *Job) RunOnce(ctx context.Context, workerID string) (jobs.Result, erro
 		MediaType:         session.MediaTypeHint,
 	})
 	if err != nil {
-		return jobs.Result{}, err
+		return jobs.Result{Attrs: attrs}, err
 	}
+	job.logger.LogAttrs(
+		ctx,
+		slog.LevelInfo,
+		"cas promotion job succeeded",
+		append(attrs, slog.String("operation", "cas_promotion.succeed"))...)
 
-	return jobs.Result{Worked: true}, nil
+	return jobs.Result{Worked: true, Attrs: attrs}, nil
+}
+
+func ingestJobAttrs(ingestJob uploads.IngestJob) []slog.Attr {
+	return []slog.Attr{
+		slog.String("ingest_job_id", ingestJob.ID.String()),
+		slog.String("upload_id", ingestJob.UploadID.String()),
+		slog.Int("attempt_count", ingestJob.AttemptCount),
+		slog.String("state", string(ingestJob.State)),
+	}
 }
 
 // dependencies returns the configured upload store and CAS committer or an error when the job is not usable.

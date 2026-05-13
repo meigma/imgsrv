@@ -128,6 +128,24 @@ func (a *api) retryPublishJob(w http.ResponseWriter, r *http.Request) {
 		writePublishError(w, err)
 		return
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"publish job retry accepted",
+		"operation",
+		"publish.retry_job",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"job_id",
+		job.ID.String(),
+		"version_id",
+		job.VersionID.String(),
+		"image_name",
+		job.ImageName,
+		"version",
+		job.Version,
+		"state",
+		string(job.State),
+	)
 
 	writeJSON(w, http.StatusAccepted, newPublishJobResponse(job))
 }

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/meigma/imgsrv/internal/cas"
@@ -30,7 +31,14 @@ func (a *api) downloadPublishedArtifact(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	a.serveCatalogBlob(w, r, catalogArtifactBlob(artifact))
+	a.serveCatalogBlob(
+		w,
+		r,
+		catalogArtifactBlob(artifact),
+		slog.String("image_name", r.PathValue("name")),
+		slog.String("version", r.PathValue("version")),
+		slog.String("artifact_id", artifactID.String()),
+	)
 }
 
 // downloadPublishedAttachment handles GET and HEAD /v1/images/{name}/versions/{version}/artifacts/{artifact_id}/attachments/{attachment_id}/download.
@@ -59,11 +67,19 @@ func (a *api) downloadPublishedAttachment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	a.serveCatalogBlob(w, r, catalogAttachmentBlob(attachment))
+	a.serveCatalogBlob(
+		w,
+		r,
+		catalogAttachmentBlob(attachment),
+		slog.String("image_name", r.PathValue("name")),
+		slog.String("version", r.PathValue("version")),
+		slog.String("artifact_id", artifactID.String()),
+		slog.String("attachment_id", attachmentID.String()),
+	)
 }
 
 // serveCatalogBlob streams a catalog-scoped blob using the same HTTP behavior as raw CAS blob reads.
-func (a *api) serveCatalogBlob(w http.ResponseWriter, r *http.Request, blob cas.Blob) {
+func (a *api) serveCatalogBlob(w http.ResponseWriter, r *http.Request, blob cas.Blob, attrs ...slog.Attr) {
 	service, ok := a.blobService(w, r)
 	if !ok {
 		return
@@ -112,7 +128,21 @@ func (a *api) serveCatalogBlob(w http.ResponseWriter, r *http.Request, blob cas.
 
 	writeBlobSuccess(w, blob, etag, modifiedAt, status, contentLength, rangeRequest, ok)
 	if _, err := io.Copy(w, reader.Body); err != nil {
-		a.logger.Warn("stream catalog blob response failed", "digest", blob.Digest, "error", err)
+		logAttrs := []slog.Attr{
+			slog.String("operation", "catalog_blob.stream"),
+			slog.String("request_id", RequestIDFromContext(r.Context())),
+			slog.String("digest", blob.Digest.String()),
+			slog.Int("status", status),
+			slog.Int64("range_start", rangeRequest.start),
+			slog.Int64("range_end", rangeRequest.end),
+			slog.Any("error", err),
+		}
+		logAttrs = append(logAttrs, attrs...)
+		a.logger.LogAttrs(
+			r.Context(),
+			streamErrorLevel(r.Context(), err),
+			"stream catalog blob response failed",
+			logAttrs...)
 	}
 }
 

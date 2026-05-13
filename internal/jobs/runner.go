@@ -29,6 +29,9 @@ type Handler interface {
 type Result struct {
 	// Worked is true when the handler completed a unit of work.
 	Worked bool
+
+	// Attrs are safe structured attributes describing the attempted work unit.
+	Attrs []slog.Attr
 }
 
 // Config configures a Runner.
@@ -126,6 +129,7 @@ func (runner *Runner) Run(ctx context.Context) error {
 		}
 
 		result, err := handler.RunOnce(ctx, workerID)
+		attrs := result.logAttrs(workerID)
 		if canceled(ctx) {
 			return nil
 		}
@@ -136,27 +140,29 @@ func (runner *Runner) Run(ctx context.Context) error {
 			if runner.circuitBreaker.open(failures) {
 				delay = runner.circuitBreaker.cooldown
 				errorDelay = runner.backoff.initial
-				runner.logger.WarnContext(
+				breakerAttrs := appendLogAttrs(
+					attrs,
+					slog.Int("consecutive_failures", failures),
+					slog.Duration("cooldown", delay),
+				)
+				runner.logger.LogAttrs(
 					ctx,
+					slog.LevelWarn,
 					"background job circuit breaker open",
-					"worker_id",
-					workerID,
-					"consecutive_failures",
-					failures,
-					"cooldown",
-					delay,
+					breakerAttrs...,
 				)
 				failures = 0
 			}
-			runner.logger.ErrorContext(
+			errorAttrs := appendLogAttrs(
+				attrs,
+				slog.Any("error", err),
+				slog.Duration("retry_after", delay),
+			)
+			runner.logger.LogAttrs(
 				ctx,
+				slog.LevelError,
 				"background job attempt failed",
-				"worker_id",
-				workerID,
-				"error",
-				err,
-				"retry_after",
-				delay,
+				errorAttrs...,
 			)
 			if !sleep(ctx, delay) {
 				return nil
@@ -166,15 +172,29 @@ func (runner *Runner) Run(ctx context.Context) error {
 		failures = 0
 		errorDelay = runner.backoff.initial
 		if result.Worked {
-			runner.logger.DebugContext(ctx, "background job completed work", "worker_id", workerID)
+			runner.logger.LogAttrs(ctx, slog.LevelDebug, "background job completed work", attrs...)
 			continue
 		}
 
-		runner.logger.DebugContext(ctx, "background job idle", "worker_id", workerID)
 		if !sleep(ctx, runner.interval) {
 			return nil
 		}
 	}
+}
+
+func (result Result) logAttrs(workerID string) []slog.Attr {
+	attrs := []slog.Attr{slog.String("worker_id", workerID)}
+	attrs = append(attrs, result.Attrs...)
+
+	return attrs
+}
+
+func appendLogAttrs(attrs []slog.Attr, extra ...slog.Attr) []slog.Attr {
+	result := make([]slog.Attr, 0, len(attrs)+len(extra))
+	result = append(result, attrs...)
+	result = append(result, extra...)
+
+	return result
 }
 
 // canceled reports whether ctx has been canceled.

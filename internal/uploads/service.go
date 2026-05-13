@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 
+	safelog "github.com/meigma/imgsrv/internal/logging"
 	"github.com/meigma/imgsrv/internal/objectstore"
 )
 
@@ -25,6 +27,9 @@ type ServiceConfig struct {
 
 	// Now returns the current time for generated upload state. Nil selects time.Now.
 	Now func() time.Time
+
+	// Logger receives upload lifecycle logs. Nil selects a discarded logger.
+	Logger *slog.Logger
 }
 
 // Service coordinates client-facing upload staging before CAS ingest.
@@ -40,6 +45,9 @@ type Service struct {
 
 	// now returns the current time for generated upload state.
 	now func() time.Time
+
+	// logger receives upload lifecycle logs.
+	logger *slog.Logger
 }
 
 // NewService constructs an upload staging service from config.
@@ -48,12 +56,17 @@ func NewService(config ServiceConfig) *Service {
 	if now == nil {
 		now = time.Now
 	}
+	logger := config.Logger
+	if logger == nil {
+		logger = safelog.Nop()
+	}
 
 	return &Service{
 		store:        config.Store,
 		objects:      config.Objects,
 		trustedBlobs: config.TrustedBlobs,
 		now:          now,
+		logger:       logger,
 	}
 }
 
@@ -145,6 +158,20 @@ func (service *Service) BeginUpload(ctx context.Context, params BeginUploadParam
 		return BeginUploadResult{}, err
 	}
 	if skipped {
+		service.logger.InfoContext(
+			ctx,
+			"upload satisfied by trusted blob",
+			"operation",
+			"uploads.begin_ready",
+			"upload_id",
+			readySession.ID.String(),
+			"expected_digest",
+			readySession.ExpectedDigest.String(),
+			"expected_size_bytes",
+			readySession.ExpectedSizeBytes,
+			"state",
+			string(readySession.State),
+		)
 		return BeginUploadResult{Session: readySession, Created: false}, nil
 	}
 
@@ -172,11 +199,38 @@ func (service *Service) BeginUpload(ctx context.Context, params BeginUploadParam
 			UploadID: upload.UploadID,
 		})
 		if abortErr != nil {
+			service.logger.WarnContext(
+				ctx,
+				"staged multipart upload cleanup failed after session create error",
+				"operation",
+				"uploads.begin_cleanup",
+				"upload_id",
+				id.String(),
+				"staging_key",
+				stagingKey,
+				"error",
+				abortErr,
+			)
 			return BeginUploadResult{}, errors.Join(err, fmt.Errorf("abort staged multipart upload: %w", abortErr))
 		}
 
 		return BeginUploadResult{}, err
 	}
+
+	service.logger.InfoContext(
+		ctx,
+		"upload session created",
+		"operation",
+		"uploads.begin",
+		"upload_id",
+		session.ID.String(),
+		"expected_digest",
+		session.ExpectedDigest.String(),
+		"expected_size_bytes",
+		session.ExpectedSizeBytes,
+		"state",
+		string(session.State),
+	)
 
 	return BeginUploadResult{Session: session, Created: true}, nil
 }
@@ -213,12 +267,29 @@ func (service *Service) PutUploadPart(ctx context.Context, params PutUploadPartP
 		return Part{}, err
 	}
 
-	return store.PutPart(ctx, PutPartParams{
+	accepted, err := store.PutPart(ctx, PutPartParams{
 		UploadID:   params.UploadID,
 		PartNumber: part.Number,
 		ETag:       part.ETag,
 		SizeBytes:  part.SizeBytes,
 	})
+	if err != nil {
+		return Part{}, err
+	}
+	service.logger.DebugContext(
+		ctx,
+		"upload part stored",
+		"operation",
+		"uploads.put_part",
+		"upload_id",
+		accepted.UploadID.String(),
+		"part_number",
+		accepted.PartNumber,
+		"size_bytes",
+		accepted.SizeBytes,
+	)
+
+	return accepted, nil
 }
 
 // CompleteUpload completes the staged multipart object and queues CAS ingest.
@@ -236,6 +307,16 @@ func (service *Service) CompleteUpload(ctx context.Context, params CompleteUploa
 		return Session{}, err
 	}
 	if shouldReturnCompletedSession(session.State) {
+		service.logger.DebugContext(
+			ctx,
+			"upload complete returned existing terminal session",
+			"operation",
+			"uploads.complete_idempotent",
+			"upload_id",
+			session.ID.String(),
+			"state",
+			string(session.State),
+		)
 		return session, nil
 	}
 	if stateErr := requireUploadCanComplete(session); stateErr != nil {
@@ -255,7 +336,21 @@ func (service *Service) CompleteUpload(ctx context.Context, params CompleteUploa
 		)
 	}
 	if uploadExpired(session, service.now()) {
-		return recoverExpiredUploadCompletion(ctx, store, objects, session)
+		recovered, recoverErr := recoverExpiredUploadCompletion(ctx, store, objects, session)
+		if recoverErr == nil {
+			service.logger.DebugContext(
+				ctx,
+				"expired upload completion recovered staged object",
+				"operation",
+				"uploads.complete_recover_expired",
+				"upload_id",
+				recovered.ID.String(),
+				"state",
+				string(recovered.State),
+			)
+		}
+
+		return recovered, recoverErr
 	}
 
 	recovered, ok, err := completeMultipartOrRecover(ctx, store, objects, session, parts)
@@ -263,10 +358,41 @@ func (service *Service) CompleteUpload(ctx context.Context, params CompleteUploa
 		return Session{}, err
 	}
 	if ok {
+		service.logger.DebugContext(
+			ctx,
+			"upload completion recovered already-completed staged object",
+			"operation",
+			"uploads.complete_recover",
+			"upload_id",
+			recovered.ID.String(),
+			"state",
+			string(recovered.State),
+		)
 		return recovered, nil
 	}
 
-	return store.CompleteSession(ctx, CompleteSessionParams{ID: params.UploadID})
+	completed, err := store.CompleteSession(ctx, CompleteSessionParams{ID: params.UploadID})
+	if err != nil {
+		return Session{}, err
+	}
+	service.logger.InfoContext(
+		ctx,
+		"upload session completed",
+		"operation",
+		"uploads.complete",
+		"upload_id",
+		completed.ID.String(),
+		"expected_digest",
+		completed.ExpectedDigest.String(),
+		"expected_size_bytes",
+		completed.ExpectedSizeBytes,
+		"state",
+		string(completed.State),
+		"part_count",
+		len(parts),
+	)
+
+	return completed, nil
 }
 
 // AbortUpload aborts staging storage and marks durable upload state aborted.
@@ -284,6 +410,16 @@ func (service *Service) AbortUpload(ctx context.Context, params AbortUploadParam
 		return Session{}, err
 	}
 	if session.State == SessionStateAborted {
+		service.logger.DebugContext(
+			ctx,
+			"upload abort returned existing aborted session",
+			"operation",
+			"uploads.abort_idempotent",
+			"upload_id",
+			session.ID.String(),
+			"state",
+			string(session.State),
+		)
 		return session, nil
 	}
 	if stateErr := requireUploadCanAbort(session); stateErr != nil {
@@ -295,10 +431,35 @@ func (service *Service) AbortUpload(ctx context.Context, params AbortUploadParam
 		return Session{}, err
 	}
 	if ok {
+		service.logger.DebugContext(
+			ctx,
+			"upload abort recovered already-completed staged object",
+			"operation",
+			"uploads.abort_recover",
+			"upload_id",
+			recovered.ID.String(),
+			"state",
+			string(recovered.State),
+		)
 		return recovered, nil
 	}
 
-	return store.AbortSession(ctx, AbortSessionParams{ID: params.UploadID})
+	aborted, err := store.AbortSession(ctx, AbortSessionParams{ID: params.UploadID})
+	if err != nil {
+		return Session{}, err
+	}
+	service.logger.InfoContext(
+		ctx,
+		"upload session aborted",
+		"operation",
+		"uploads.abort",
+		"upload_id",
+		aborted.ID.String(),
+		"state",
+		string(aborted.State),
+	)
+
+	return aborted, nil
 }
 
 // GetUpload returns current durable upload state.

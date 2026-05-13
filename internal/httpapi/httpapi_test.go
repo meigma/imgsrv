@@ -80,24 +80,31 @@ func TestNewLogsRequestsWithRoute(t *testing.T) {
 	logs := new(strings.Builder)
 	logger := slog.New(slog.NewTextHandler(logs, nil))
 	handler := New(Dependencies{Logger: logger})
-	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/healthz?api_token=secret-token", strings.NewReader("body-secret"))
 	req.RemoteAddr = "192.0.2.1:1234"
 	req.Header.Set("User-Agent", "imgsrv-test")
+	req.Header.Set("Authorization", "Bearer secret-token")
+	req.Header.Set(requestIDHeader, "req-test")
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, "req-test", rec.Header().Get(requestIDHeader))
 	got := logs.String()
 	assert.Contains(t, got, "level=INFO")
 	assert.Contains(t, got, `msg="http request"`)
 	assert.Contains(t, got, "method=GET")
 	assert.Contains(t, got, "path=/healthz")
+	assert.Contains(t, got, "request_id=req-test")
 	assert.Contains(t, got, "status=204")
 	assert.Contains(t, got, "bytes=0")
 	assert.Contains(t, got, "remote_addr=192.0.2.1:1234")
 	assert.Contains(t, got, "user_agent=imgsrv-test")
 	assert.Contains(t, got, `route="GET /healthz"`)
+	assert.NotContains(t, got, "api_token")
+	assert.NotContains(t, got, "secret-token")
+	assert.NotContains(t, got, "body-secret")
 }
 
 func TestLogRequestsUsesStatusLevel(t *testing.T) {

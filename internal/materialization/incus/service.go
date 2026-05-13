@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	incusschema "github.com/meigma/go-simplestreams/schema/incus"
 
 	"github.com/meigma/imgsrv/internal/catalog"
+	safelog "github.com/meigma/imgsrv/internal/logging"
 )
 
 const (
@@ -101,19 +103,29 @@ type Config struct {
 
 	// Store reads persisted Incus projection rows.
 	Store ProjectionStore
+
+	// Logger receives Simple Streams materialization logs. Nil selects a discarded logger.
+	Logger *slog.Logger
 }
 
 // Service builds Incus-compatible Simple Streams metadata from persisted projection rows.
 type Service struct {
 	catalog AliasCatalog
 	store   ProjectionStore
+	logger  *slog.Logger
 }
 
 // NewService constructs an Incus projection service.
 func NewService(config Config) *Service {
+	logger := config.Logger
+	if logger == nil {
+		logger = safelog.Nop()
+	}
+
 	return &Service{
 		catalog: config.Catalog,
 		store:   config.Store,
+		logger:  logger,
 	}
 }
 
@@ -132,6 +144,16 @@ func (service *Service) Index(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	service.logger.DebugContext(
+		ctx,
+		"incus simple streams index built",
+		"operation",
+		"incus.render_index",
+		"projection_rows",
+		len(rows),
+		"product_count",
+		len(products),
+	)
 
 	index, err := simplestreams.BuildIndex([]simplestreams.BuildIndexEntry{{
 		ContentID: incusschema.ContentIDImages,
@@ -194,6 +216,18 @@ func (service *Service) BuildProductFile(ctx context.Context) (*simplestreams.Pr
 			return nil, err
 		}
 	}
+	service.logger.DebugContext(
+		ctx,
+		"incus simple streams product file built",
+		"operation",
+		"incus.render_product_file",
+		"projection_rows",
+		len(rows),
+		"product_count",
+		len(productFile.Products),
+		"alias_image_count",
+		len(aliases),
+	)
 
 	return productFile, nil
 }

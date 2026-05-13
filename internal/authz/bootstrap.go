@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/meigma/authkit"
 	"github.com/meigma/authkit/apikey"
 	authkitmanagement "github.com/meigma/authkit/management"
+
+	safelog "github.com/meigma/imgsrv/internal/logging"
 )
 
 const (
@@ -46,6 +49,9 @@ type BootstrapConfig struct {
 
 	// DisplayName labels the generated bootstrap principal.
 	DisplayName string
+
+	// Logger receives non-secret bootstrap lifecycle logs. Nil selects a discarded logger.
+	Logger *slog.Logger
 }
 
 // EnsureBootstrapAdmin creates a one-time auth-manager principal and API token when none exists.
@@ -76,6 +82,10 @@ func EnsureBootstrapAdmin(ctx context.Context, config BootstrapConfig) error {
 	displayName := config.DisplayName
 	if displayName == "" {
 		displayName = defaultBootstrapDisplayName
+	}
+	logger := config.Logger
+	if logger == nil {
+		logger = safelog.Nop()
 	}
 
 	apiTokens, err := apikey.NewService(config.Store, apikey.WithClock(now))
@@ -128,6 +138,18 @@ func EnsureBootstrapAdmin(ctx context.Context, config BootstrapConfig) error {
 	); err != nil {
 		return fmt.Errorf("authz: print bootstrap token: %w", err)
 	}
+	logger.InfoContext(
+		ctx,
+		"bootstrap auth manager created",
+		"operation",
+		"auth.bootstrap_admin",
+		"principal_id",
+		principal.ID,
+		"token_id",
+		issued.ID,
+		"expires_at",
+		issued.ExpiresAt,
+	)
 
 	return nil
 }
