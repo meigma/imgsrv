@@ -1,7 +1,6 @@
 {
   "label": "Concepts",
   "position": 6,
-  "collapsed": false,
   "link": {
     "type": "generated-index",
     "description": "The model behind the system: publishing, authentication, and the trust boundary."

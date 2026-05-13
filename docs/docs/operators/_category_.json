@@ -1,7 +1,6 @@
 {
   "label": "For operators",
   "position": 3,
-  "collapsed": false,
   "link": {
     "type": "generated-index",
     "description": "Documentation for the people who deploy and operate imgsrv."
