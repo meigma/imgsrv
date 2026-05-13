@@ -21,12 +21,20 @@ fileGroups:
     - 'internal/**/*.go'
     - 'internal/**/*.sql'
     - 'test/**/*.go'
+    - '.go-version'
     - 'go.mod'
     - 'go.sum'
   lintConfig:
     - '.golangci.yml'
     - '.prototools'
     - '.moon/proto/golangci-lint.toml'
+  releaseConfig:
+    - '.goreleaser.yaml'
+    - 'ghd.toml'
+    - 'release-please-config.json'
+    - '.release-please-manifest.json'
+    - '.github/workflows/release*.yml'
+    - '.github/workflows/security-scan.yml'
 
 tasks:
   build:
@@ -84,6 +92,10 @@ tasks:
       - 'root:build'
       - 'root:test'
       - 'root:test-integration'
+    inputs:
+      - '@group(go)'
+      - '@group(lintConfig)'
+      - '@group(releaseConfig)'
     options:
       cache: false
       runInCI: true

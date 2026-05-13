@@ -11,6 +11,15 @@ import (
 	"github.com/meigma/imgsrv/internal/cli"
 )
 
+// GoReleaser and release container builds inject these values with ldflags.
+//
+//nolint:gochecknoglobals // Release metadata is process-global by construction.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	os.Exit(run())
 }
@@ -21,7 +30,11 @@ func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := cli.ExecuteContext(ctx, os.Args[1:], app.Run, os.Stdout, os.Stderr); err != nil {
+	if err := cli.ExecuteContextWithBuild(ctx, os.Args[1:], app.Run, cli.BuildInfo{
+		Version: version,
+		Commit:  commit,
+		Date:    date,
+	}, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintf(os.Stderr, "imgsrv: %v\n", err)
 		return 1
 	}

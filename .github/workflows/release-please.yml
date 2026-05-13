@@ -1,0 +1,38 @@
+# Required release app settings:
+# - vars.MEIGMA_RELEASE_APP_ID
+# - secrets.MEIGMA_RELEASE_APP_PRIVATE_KEY
+# - protected-tag ruleset bypass for the release app, because this workflow
+#   creates protected v* tags after the release PR is merged.
+
+name: Release Please
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Create release app token
+        id: release-app
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        with:
+          app-id: ${{ vars.MEIGMA_RELEASE_APP_ID }}
+          private-key: ${{ secrets.MEIGMA_RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Run Release Please
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.release-app.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

@@ -1,0 +1,32 @@
+version = 1
+
+[provenance]
+signer_workflow = "meigma/imgsrv/.github/workflows/release.yml"
+
+[[packages]]
+name = "imgsrv"
+description = "Image artifact service."
+tag_pattern = "v${version}"
+
+[[packages.assets]]
+os = "darwin"
+arch = "amd64"
+pattern = "imgsrv_${version}_darwin_amd64"
+
+[[packages.assets]]
+os = "darwin"
+arch = "arm64"
+pattern = "imgsrv_${version}_darwin_arm64"
+
+[[packages.assets]]
+os = "linux"
+arch = "amd64"
+pattern = "imgsrv_${version}_linux_amd64"
+
+[[packages.assets]]
+os = "linux"
+arch = "arm64"
+pattern = "imgsrv_${version}_linux_arm64"
+
+[[packages.binaries]]
+path = "imgsrv"

@@ -126,7 +126,7 @@ class GitHubApi:
             self.base_url = "https://api.github.com"
         else:
             self.base_url = f"https://{hostname}/api/v3"
-        self._app_slug_cache: dict[tuple[str, str, str], int] = {}
+        self._app_slug_cache: dict[tuple[str, str], int] = {}
 
     def get_repository(self, owner: str, repo: str) -> dict[str, Any]:
         return self._request_json("GET", f"/repos/{owner}/{repo}")
@@ -171,28 +171,17 @@ class GitHubApi:
         return self._request_json("PATCH", f"/repos/{owner}/{repo}/rulesets/{ruleset_id}", payload)
 
     def resolve_app_actor_id(self, owner: str, repo: str, slug: str) -> int:
-        cache_key = (owner, repo, slug)
+        cache_key = (self.hostname, slug)
         if cache_key in self._app_slug_cache:
             return self._app_slug_cache[cache_key]
 
-        installations = self._paginate("/user/installations?per_page=100")
-        full_name = f"{owner}/{repo}".lower()
+        app = self._request_json("GET", f"/apps/{slug}")
+        app_id = app.get("id")
+        if app_id is None:
+            raise ConfigError(f"Unable to resolve GitHub App slug {slug!r} for {owner}/{repo}")
 
-        for installation in installations:
-            if installation.get("app_slug") != slug:
-                continue
-
-            installation_id = installation.get("id")
-            app_id = installation.get("app_id")
-            if installation_id is None or app_id is None:
-                continue
-
-            repos = self._paginate(f"/user/installations/{installation_id}/repositories?per_page=100", array_key="repositories")
-            if any(item.get("full_name", "").lower() == full_name for item in repos):
-                self._app_slug_cache[cache_key] = int(app_id)
-                return int(app_id)
-
-        raise ConfigError(f"Unable to resolve GitHub App slug {slug!r} for {owner}/{repo}")
+        self._app_slug_cache[cache_key] = int(app_id)
+        return int(app_id)
 
     def _toggle_path(self, owner: str, repo: str, toggle_name: str) -> str:
         suffixes = {
