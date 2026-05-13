@@ -24,16 +24,33 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build local scan image
+      - name: Resolve scan metadata
+        id: scan
         run: |
-          docker build \
-            --platform linux/amd64 \
-            --build-arg VERSION="security-scan-${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}" \
-            --build-arg COMMIT="${GITHUB_SHA}" \
-            --build-arg DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --build-arg SOURCE="https://github.com/${GITHUB_REPOSITORY}" \
-            -t imgsrv:security-scan \
-            .
+          {
+            echo "version=security-scan-${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+            echo "commit=${GITHUB_SHA}"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "source=https://github.com/${GITHUB_REPOSITORY}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      - name: Build local scan image
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: imgsrv:security-scan
+          cache-from: type=gha,scope=imgsrv-security-scan
+          cache-to: type=gha,mode=max,scope=imgsrv-security-scan
+          build-args: |
+            VERSION=${{ steps.scan.outputs.version }}
+            COMMIT=${{ steps.scan.outputs.commit }}
+            DATE=${{ steps.scan.outputs.date }}
+            SOURCE=${{ steps.scan.outputs.source }}
 
       - name: Scan local image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
