@@ -1,5 +1,5 @@
 # Required release app settings:
-# - vars.MEIGMA_RELEASE_APP_ID
+# - vars.MEIGMA_RELEASE_APP_CLIENT_ID
 # - secrets.MEIGMA_RELEASE_APP_PRIVATE_KEY
 # - protected-tag ruleset bypass for the release app, because this workflow
 #   creates protected v* tags after the release PR is merged.
@@ -14,6 +14,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release-please:
     name: Release Please
@@ -27,12 +31,121 @@ jobs:
         id: release-app
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.MEIGMA_RELEASE_APP_ID }}
+          client-id: ${{ vars.MEIGMA_RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.MEIGMA_RELEASE_APP_PRIVATE_KEY }}
 
-      - name: Run Release Please
+      - name: Detect release PR merge
+        id: release-merge
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          subject="$(printf '%s\n' "${COMMIT_MESSAGE}" | sed -n '1p')"
+
+          if [[ ! "${subject}" =~ \(\#([0-9]+)\)$ ]]; then
+            echo "value=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          pr_number="${BASH_REMATCH[1]}"
+          if ! pr_json="$(gh pr view "${pr_number}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --json headRefName,labels,state,title)"; then
+            echo "value=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          state="$(jq -r '.state' <<<"${pr_json}")"
+          head_ref="$(jq -r '.headRefName' <<<"${pr_json}")"
+          title="$(jq -r '.title' <<<"${pr_json}")"
+          has_autorelease_label="$(jq -r 'any(.labels[]?; .name == "autorelease: pending" or .name == "autorelease: tagged")' <<<"${pr_json}")"
+
+          echo "Release PR candidate #${pr_number}: ${title}"
+
+          if [[ "${state}" == "MERGED" && "${head_ref}" == release-please--branches--* && "${has_autorelease_label}" == "true" ]]; then
+            echo "value=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "value=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Create release from merged Release Please PR
+        if: steps.release-merge.outputs.value == 'true'
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ steps.release-app.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
+
+      - name: Ensure draft release tag exists
+        if: steps.release-merge.outputs.value == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.release-app.outputs.token }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          tag_names_json="[]"
+          for attempt in {1..12}; do
+            tag_names_json="[]"
+            releases="$(gh release list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --limit 100 \
+              --json tagName,isDraft)"
+
+            while IFS= read -r tag_name; do
+              if ! release_json="$(gh release view "${tag_name}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --json isDraft,tagName,targetCommitish 2>/dev/null)"; then
+                echo "Unable to inspect draft release ${tag_name}; skipping" >&2
+                continue
+              fi
+
+              if jq -e --arg sha "${RELEASE_SHA}" '.isDraft == true and .targetCommitish == $sha' <<<"${release_json}" >/dev/null; then
+                tag_names_json="$(jq -c --arg tag "$(jq -r '.tagName' <<<"${release_json}")" '. + [$tag]' <<<"${tag_names_json}")"
+              fi
+            done < <(jq -r '.[] | select(.isDraft == true) | .tagName' <<<"${releases}")
+
+            if [[ "$(jq 'length' <<<"${tag_names_json}")" -gt 0 ]]; then
+              break
+            fi
+
+            echo "Draft release for ${RELEASE_SHA} not visible yet; retrying (${attempt}/12)"
+            sleep 5
+          done
+
+          if [[ "$(jq 'length' <<<"${tag_names_json}")" -eq 0 ]]; then
+            echo "No draft release found for ${RELEASE_SHA} after retrying" >&2
+            exit 1
+          fi
+
+          mapfile -t tag_names < <(jq -r '.[]' <<<"${tag_names_json}" | sort)
+          for tag_name in "${tag_names[@]}"; do
+            if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag_name}" >/dev/null 2>&1; then
+              echo "Tag ${tag_name} already exists"
+              continue
+            fi
+
+            if ! output="$(gh api \
+              --method POST \
+              "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f "ref=refs/tags/${tag_name}" \
+              -f "sha=${RELEASE_SHA}" \
+              2>&1)"; then
+              echo "${output}" >&2
+              echo "Failed to create ${tag_name}. Confirm the meigma-release-please app bypasses the tag ruleset." >&2
+              exit 1
+            fi
+          done
+
+      - name: Open or update Release Please PR
+        if: steps.release-merge.outputs.value != 'true'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.release-app.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
