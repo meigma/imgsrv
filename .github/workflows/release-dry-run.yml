@@ -150,22 +150,28 @@ jobs:
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
 
       - name: Build Docker test target
-        run: |
-          docker build \
-            --target test \
-            .
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
+        with:
+          context: .
+          target: test
+          push: false
+          cache-from: type=gha,scope=imgsrv-release-dry-run
+          cache-to: type=gha,mode=max,scope=imgsrv-release-dry-run
 
       - name: Build local smoke-test image
-        run: |
-          docker buildx build \
-            --load \
-            --platform linux/amd64 \
-            --build-arg VERSION="${{ steps.dry-run.outputs.version }}" \
-            --build-arg COMMIT="${{ steps.dry-run.outputs.commit }}" \
-            --build-arg DATE="${{ steps.dry-run.outputs.date }}" \
-            --build-arg SOURCE="https://github.com/${GITHUB_REPOSITORY}" \
-            -t imgsrv:dry-run \
-            .
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: imgsrv:dry-run
+          cache-from: type=gha,scope=imgsrv-release-dry-run
+          cache-to: type=gha,mode=max,scope=imgsrv-release-dry-run
+          build-args: |
+            VERSION=${{ steps.dry-run.outputs.version }}
+            COMMIT=${{ steps.dry-run.outputs.commit }}
+            DATE=${{ steps.dry-run.outputs.date }}
+            SOURCE=https://github.com/${{ github.repository }}
 
       - name: Smoke test local image
         run: |
@@ -201,6 +207,8 @@ jobs:
           tags: ghcr.io/meigma/imgsrv:v${{ steps.dry-run.outputs.version }}
           provenance: mode=max
           sbom: true
+          cache-from: type=gha,scope=imgsrv-release-dry-run
+          cache-to: type=gha,mode=max,scope=imgsrv-release-dry-run
           build-args: |
             VERSION=${{ steps.dry-run.outputs.version }}
             COMMIT=${{ steps.dry-run.outputs.commit }}
