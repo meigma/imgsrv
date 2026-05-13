@@ -25,7 +25,7 @@ const (
 
 func TestManagedOIDCProvisioningRulesAuthorizePublishers(t *testing.T) {
 	issuer := testoidc.Start(t, time.Now().UTC())
-	env := harness.Start(
+	env := startEnv(
 		t,
 		harness.WithAPIToken(),
 		harness.WithOIDCHTTPClient(issuer.HTTPClient()),

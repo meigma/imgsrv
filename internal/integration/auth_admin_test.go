@@ -19,7 +19,7 @@ import (
 
 func TestFirstStartBootstrapTokenIsPrintedOnce(t *testing.T) {
 	var output bytes.Buffer
-	env := harness.Start(t, harness.WithBootstrapOutput(&output))
+	env := startEnv(t, harness.WithBootstrapOutput(&output))
 	ctx := t.Context()
 
 	text := output.String()
@@ -56,7 +56,7 @@ func TestFirstStartBootstrapTokenIsPrintedOnce(t *testing.T) {
 }
 
 func TestAuthAdminAPIManagesPrincipalsRolesAndTokens(t *testing.T) {
-	env := harness.Start(t, harness.WithAPIToken())
+	env := startEnv(t, harness.WithAPIToken())
 	ctx := t.Context()
 	adminClient := newBearerClient(t, env, env.APIToken())
 

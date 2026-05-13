@@ -97,12 +97,28 @@ func Start(t testing.TB, opts ...Option) *Env {
 	t.Helper()
 
 	ctx := t.Context()
+	deps, err := StartDependencies(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, deps.Close(context.Background()))
+	})
+
+	return StartWithDependencies(t, deps, opts...)
+}
+
+// StartWithDependencies creates a full imgsrv integration-test environment
+// using already-running shared dependencies.
+func StartWithDependencies(t testing.TB, deps *Dependencies, opts ...Option) *Env {
+	t.Helper()
+	require.NotNil(t, deps)
+
+	ctx := t.Context()
 	startupOptions := newOptions(opts...)
-	postgresURL := startPostgres(ctx, t)
-	s3Config := startGarage(ctx, t)
-	store := openStore(ctx, t, postgresURL)
+	isolation := newIsolationNames(t)
+	store := openIsolatedStore(ctx, t, deps.postgresURL, isolation.schema)
 	apiToken := seedAPIToken(ctx, t, store, startupOptions.apiToken)
-	objectStore := openObjectStore(t, s3Config)
+	baseObjectStore := openObjectStore(t, deps.s3Config)
+	objectStore := newPrefixedObjectStore(baseObjectStore, isolation.objectPrefix)
 	baseURL := startServer(ctx, t, startupOptions, store, objectStore)
 
 	return &Env{
@@ -110,7 +126,7 @@ func Start(t testing.TB, opts ...Option) *Env {
 		httpClient:  newHTTPClient(),
 		store:       store,
 		objectStore: objectStore,
-		s3Config:    s3Config,
+		s3Config:    deps.s3Config,
 		apiToken:    apiToken,
 	}
 }

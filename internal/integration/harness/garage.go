@@ -62,7 +62,26 @@ const (
 func startGarage(ctx context.Context, t testing.TB) s3.Config {
 	t.Helper()
 
-	configPath := writeGarageConfig(t)
+	config, container, tempDir, err := startGarageContainer(ctx)
+	if tempDir != "" {
+		t.Cleanup(func() {
+			require.NoError(t, os.RemoveAll(tempDir))
+		})
+	}
+	if container != nil {
+		testcontainers.CleanupContainer(t, container)
+	}
+	require.NoError(t, err)
+
+	return config
+}
+
+func startGarageContainer(ctx context.Context) (s3.Config, testcontainers.Container, string, error) {
+	configPath, tempDir, err := writeGarageConfig()
+	if err != nil {
+		return s3.Config{}, nil, tempDir, err
+	}
+
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
 			Image:        garageImage,
@@ -83,13 +102,18 @@ func startGarage(ctx context.Context, t testing.TB) s3.Config {
 		},
 		Started: true,
 	})
-	testcontainers.CleanupContainer(t, container)
-	require.NoError(t, err)
+	if err != nil {
+		return s3.Config{}, container, tempDir, fmt.Errorf("start garage container: %w", err)
+	}
 
 	host, err := container.Host(ctx)
-	require.NoError(t, err)
+	if err != nil {
+		return s3.Config{}, container, tempDir, fmt.Errorf("read garage host: %w", err)
+	}
 	mappedPort, err := container.MappedPort(ctx, garageS3Port)
-	require.NoError(t, err)
+	if err != nil {
+		return s3.Config{}, container, tempDir, fmt.Errorf("read garage mapped port: %w", err)
+	}
 
 	config := s3.Config{
 		Endpoint:        net.JoinHostPort(host, mappedPort.Port()),
@@ -99,21 +123,27 @@ func startGarage(ctx context.Context, t testing.TB) s3.Config {
 		Region:          garageRegion,
 		PathStyle:       true,
 	}
-	waitForGarageBucket(ctx, t, config)
+	if err := waitForGarageBucket(ctx, config); err != nil {
+		return s3.Config{}, container, tempDir, err
+	}
 
-	return config
+	return config, container, tempDir, nil
 }
 
 // writeGarageConfig renders the embedded garage.toml into a temporary file and
 // returns the host path for the testcontainers file mount.
-func writeGarageConfig(t testing.TB) string {
-	t.Helper()
+func writeGarageConfig() (string, string, error) {
+	tempDir, err := os.MkdirTemp("", "imgsrv-garage-*")
+	if err != nil {
+		return "", "", fmt.Errorf("create garage config temp dir: %w", err)
+	}
 
-	path := filepath.Join(t.TempDir(), "garage.toml")
-	err := os.WriteFile(path, []byte(garageConfig()), garageConfigFileMode)
-	require.NoError(t, err)
+	path := filepath.Join(tempDir, "garage.toml")
+	if err := os.WriteFile(path, []byte(garageConfig()), garageConfigFileMode); err != nil {
+		return "", tempDir, fmt.Errorf("write garage config: %w", err)
+	}
 
-	return path
+	return path, tempDir, nil
 }
 
 // garageConfig returns the static garage.toml the harness writes into the
@@ -142,16 +172,16 @@ metrics_token = "test-metrics-token"
 
 // waitForGarageBucket polls the Garage S3 endpoint until the default bucket
 // reports as existing or the configured ready timeout elapses.
-func waitForGarageBucket(ctx context.Context, t testing.TB, config s3.Config) {
-	t.Helper()
-
+func waitForGarageBucket(ctx context.Context, config s3.Config) error {
 	client, err := minio.New(config.Endpoint, &minio.Options{
 		Creds:        credentials.NewStaticV4(config.AccessKeyID, config.SecretAccessKey, ""),
 		Secure:       config.UseTLS,
 		Region:       config.Region,
 		BucketLookup: minio.BucketLookupPath,
 	})
-	require.NoError(t, err)
+	if err != nil {
+		return fmt.Errorf("create garage readiness client: %w", err)
+	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, garageReadyTimeout)
 	defer cancel()
@@ -163,7 +193,7 @@ func waitForGarageBucket(ctx context.Context, t testing.TB, config s3.Config) {
 	for {
 		exists, err := client.BucketExists(waitCtx, config.Bucket)
 		if err == nil && exists {
-			return
+			return nil
 		}
 		if err != nil {
 			lastErr = err
@@ -172,9 +202,9 @@ func waitForGarageBucket(ctx context.Context, t testing.TB, config s3.Config) {
 		select {
 		case <-waitCtx.Done():
 			if lastErr != nil {
-				require.NoError(t, fmt.Errorf("wait for garage bucket: %w", lastErr))
+				return fmt.Errorf("wait for garage bucket: %w", lastErr)
 			}
-			require.NoError(t, fmt.Errorf("wait for garage bucket %q: %w", config.Bucket, waitCtx.Err()))
+			return fmt.Errorf("wait for garage bucket %q: %w", config.Bucket, waitCtx.Err())
 		case <-ticker.C:
 		}
 	}
@@ -185,8 +215,17 @@ func waitForGarageBucket(ctx context.Context, t testing.TB, config s3.Config) {
 func openObjectStore(t testing.TB, config s3.Config) objectstore.Store {
 	t.Helper()
 
-	store, err := s3.New(config)
+	store, err := newObjectStore(config)
 	require.NoError(t, err)
 
 	return store
+}
+
+func newObjectStore(config s3.Config) (objectstore.Store, error) {
+	store, err := s3.New(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return store, nil
 }

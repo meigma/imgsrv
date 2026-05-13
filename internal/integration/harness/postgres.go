@@ -4,8 +4,12 @@ package harness
 
 import (
 	"context"
+	"fmt"
+	"net/url"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -33,6 +37,16 @@ const (
 func startPostgres(ctx context.Context, t testing.TB) string {
 	t.Helper()
 
+	databaseURL, container, err := startPostgresContainer(ctx)
+	if container != nil {
+		testcontainers.CleanupContainer(t, container)
+	}
+	require.NoError(t, err)
+
+	return databaseURL
+}
+
+func startPostgresContainer(ctx context.Context) (string, testcontainers.Container, error) {
 	container, err := tcpostgres.Run(
 		ctx,
 		postgresImage,
@@ -41,13 +55,16 @@ func startPostgres(ctx context.Context, t testing.TB) string {
 		tcpostgres.WithPassword(postgresPassword),
 		tcpostgres.BasicWaitStrategies(),
 	)
-	testcontainers.CleanupContainer(t, container)
-	require.NoError(t, err)
+	if err != nil {
+		return "", container, fmt.Errorf("start postgres container: %w", err)
+	}
 
 	databaseURL, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
+	if err != nil {
+		return "", container, fmt.Errorf("read postgres connection string: %w", err)
+	}
 
-	return databaseURL
+	return databaseURL, container, nil
 }
 
 // openStore opens the migrated Postgres store against postgresURL and
@@ -62,4 +79,38 @@ func openStore(ctx context.Context, t testing.TB, postgresURL string) *postgres.
 	})
 
 	return store
+}
+
+func openIsolatedStore(ctx context.Context, t testing.TB, basePostgresURL string, schema string) *postgres.Store {
+	t.Helper()
+
+	require.NoError(t, createPostgresSchema(ctx, basePostgresURL, schema))
+	return openStore(ctx, t, postgresURLWithSearchPath(t, basePostgresURL, schema))
+}
+
+func createPostgresSchema(ctx context.Context, postgresURL string, schema string) error {
+	pool, err := pgxpool.New(ctx, postgresURL)
+	if err != nil {
+		return fmt.Errorf("open postgres schema bootstrap pool: %w", err)
+	}
+	defer pool.Close()
+
+	_, err = pool.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize())
+	if err != nil {
+		return fmt.Errorf("create postgres schema %q: %w", schema, err)
+	}
+
+	return nil
+}
+
+func postgresURLWithSearchPath(t testing.TB, postgresURL string, schema string) string {
+	t.Helper()
+
+	parsed, err := url.Parse(postgresURL)
+	require.NoError(t, err)
+	query := parsed.Query()
+	query.Set("search_path", schema)
+	parsed.RawQuery = query.Encode()
+
+	return parsed.String()
 }
