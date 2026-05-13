@@ -29,8 +29,7 @@ const config: Config = {
         docs: {
           path: 'docs',
           routeBasePath: '/',
-          sidebarPath: false,
-          breadcrumbs: false,
+          sidebarPath: './sidebars.ts',
           editUrl: 'https://github.com/meigma/imgsrv/edit/master/docs/',
         },
         blog: false,
@@ -48,6 +47,12 @@ const config: Config = {
     navbar: {
       title: 'imgsrv',
       items: [
+        {
+          type: 'docSidebar',
+          sidebarId: 'docs',
+          position: 'left',
+          label: 'Documentation',
+        },
         {
           href: 'https://github.com/meigma/imgsrv',
           label: 'GitHub',
