@@ -8,8 +8,8 @@ const config: Config = {
   future: {
     v4: true,
   },
-  url: 'https://meigma.github.io',
-  baseUrl: '/imgsrv/',
+  url: 'https://imgsrv.meigma.dev',
+  baseUrl: '/',
   organizationName: 'meigma',
   projectName: 'imgsrv',
   onBrokenLinks: 'throw',
