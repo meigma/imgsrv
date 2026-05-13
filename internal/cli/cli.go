@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -14,10 +15,22 @@ import (
 // Runner starts imgsrv from resolved process configuration.
 type Runner func(context.Context, app.Config) error
 
+// BuildInfo describes linker-injected build metadata printed by --version.
+type BuildInfo struct {
+	// Version is the release version.
+	Version string
+	// Commit is the source commit used to build the binary.
+	Commit string
+	// Date is the build timestamp.
+	Date string
+}
+
 // rootCommand is the Kong-tagged structure that defines the imgsrv flag and
 // environment variable surface. Each field maps to one resolved app.Config
 // value passed to the Runner.
 type rootCommand struct {
+	// Version prints release build metadata and exits without starting the server.
+	Version kong.VersionFlag `name:"version" help:"Print version information and quit."`
 	// Listen is the HTTP listen address for the public API server.
 	Listen string `name:"listen" env:"IMGSRV_LISTEN" default:":8080" help:"HTTP listen address."`
 	// NodeName is the human-readable node identifier used as a prefix for
@@ -77,9 +90,22 @@ type rootCommand struct {
 
 // ExecuteContext parses command-line configuration and starts imgsrv.
 func ExecuteContext(ctx context.Context, args []string, run Runner, stdout io.Writer, stderr io.Writer) error {
+	return ExecuteContextWithBuild(ctx, args, run, BuildInfo{}, stdout, stderr)
+}
+
+// ExecuteContextWithBuild parses command-line configuration and starts imgsrv with release metadata.
+func ExecuteContextWithBuild(
+	ctx context.Context,
+	args []string,
+	run Runner,
+	build BuildInfo,
+	stdout io.Writer,
+	stderr io.Writer,
+) error {
 	if run == nil {
 		run = func(context.Context, app.Config) error { return nil }
 	}
+	build = build.withDefaults()
 
 	var command rootCommand
 	exitCode := 0
@@ -88,6 +114,7 @@ func ExecuteContext(ctx context.Context, args []string, run Runner, stdout io.Wr
 		kong.Name("imgsrv"),
 		kong.Description("Image artifact service."),
 		kong.Writers(stdout, stderr),
+		kong.Vars{"version": build.String()},
 		kong.Exit(func(code int) {
 			exitCode = code
 			exited = true
@@ -132,6 +159,24 @@ func ExecuteContext(ctx context.Context, args []string, run Runner, stdout io.Wr
 		CASPromotionCircuitBreakerCooldown: command.CASPromotionBreakerCooldown,
 		ShutdownTimeout:                    command.ShutdownTimeout,
 	})
+}
+
+// String formats release metadata for the CLI version flag.
+func (build BuildInfo) String() string {
+	return fmt.Sprintf("imgsrv %s (%s) built %s", build.Version, build.Commit, build.Date)
+}
+
+func (build BuildInfo) withDefaults() BuildInfo {
+	if strings.TrimSpace(build.Version) == "" {
+		build.Version = "dev"
+	}
+	if strings.TrimSpace(build.Commit) == "" {
+		build.Commit = "none"
+	}
+	if strings.TrimSpace(build.Date) == "" {
+		build.Date = "unknown"
+	}
+	return build
 }
 
 // exitError reports a non-zero exit code requested by Kong (for example, after

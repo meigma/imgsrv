@@ -238,6 +238,7 @@ func TestExecuteContextPrintsHelpWithoutStartingServer(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, called, "help should not start the server")
 	assert.Contains(t, stdout.String(), "Usage: imgsrv")
+	assert.Contains(t, stdout.String(), "--version")
 	assert.Contains(t, stdout.String(), "--listen")
 	assert.Contains(t, stdout.String(), "--node-name")
 	assert.Contains(t, stdout.String(), "--log-format")
@@ -257,6 +258,35 @@ func TestExecuteContextPrintsHelpWithoutStartingServer(t *testing.T) {
 	assert.Contains(t, stdout.String(), "--cas-promotion-circuit-breaker-cooldown")
 	assert.NotContains(t, stdout.String(), "--cas-promotion-worker-id")
 	assert.NotContains(t, stdout.String(), "--log-level")
+	assert.Empty(t, stderr.String())
+}
+
+func TestExecuteContextPrintsVersionWithoutStartingServer(t *testing.T) {
+	unsetConfigEnv(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	called := false
+
+	err := ExecuteContextWithBuild(
+		context.Background(),
+		[]string{"--version"},
+		func(context.Context, app.Config) error {
+			called = true
+			return nil
+		},
+		BuildInfo{
+			Version: "1.2.3",
+			Commit:  "abc123",
+			Date:    "2026-05-12T19:00:00Z",
+		},
+		&stdout,
+		&stderr,
+	)
+
+	require.NoError(t, err)
+	assert.False(t, called, "version should not start the server")
+	assert.Equal(t, "imgsrv 1.2.3 (abc123) built 2026-05-12T19:00:00Z\n", stdout.String())
 	assert.Empty(t, stderr.String())
 }
 

@@ -1,20 +1,28 @@
-.git
-.wt
-.journal
+.git/
+.wt/
+.journal/
+.agents/
+.claude/
 
-.DS_Store
-*.coverprofile
-coverage.out
-
-.env
-.env.*
-*.key
-*.pem
+.github/
+.moon/cache/
+.moon/docker/
 
 bin/
 dist/
+build/
+cover.out
+coverage.out
+coverage.html
+*.prof
+*.test
 
-docs/.docusaurus/
-docs/build/
-docs/node_modules/
+docs/
 node_modules/
+
+.env
+.env.*
+.DS_Store
+.idea/
+.vscode/
+*.swp
