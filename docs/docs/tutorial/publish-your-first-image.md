@@ -108,7 +108,7 @@ PRINCIPAL_ID=$(curl -sf -X POST "$IMGSRV/v1/auth/principals" \
 
 ROLE_ID=$(curl -sf "$IMGSRV/v1/auth/roles" \
   -H "Authorization: Bearer $BOOTSTRAP_TOKEN" \
-  | jq -r '.roles[] | select(.name == "content-writer") | .id')
+  | jq -r '.roles[] | select(.id == "content-writer") | .id')
 
 curl -sf -X PUT \
   "$IMGSRV/v1/auth/principals/$PRINCIPAL_ID/roles/$ROLE_ID" \
