@@ -28,7 +28,7 @@ exposes ports `8080` (API) and `9464` (metrics), and stops on `SIGTERM`.
 docker run --rm \
   -p 8080:8080 \
   -p 127.0.0.1:9464:9464 \
-  -e IMGSRV_POSTGRES_URL='postgres://imgsrv:secret@db.internal:5432/imgsrv?sslmode=require' \
+  -e IMGSRV_POSTGRES_URL='postgres://<db-user>:<db-password>@<db-host>:5432/imgsrv?sslmode=require' \
   -e IMGSRV_S3_ENDPOINT='objects.internal:3900' \
   -e IMGSRV_S3_BUCKET='imgsrv' \
   -e IMGSRV_S3_ACCESS_KEY_ID='imgsrv' \
@@ -48,7 +48,7 @@ Build or download the binary and run it directly:
 
 ```bash
 imgsrv \
-  --postgres-url 'postgres://imgsrv:secret@db.internal:5432/imgsrv?sslmode=require' \
+  --postgres-url 'postgres://<db-user>:<db-password>@<db-host>:5432/imgsrv?sslmode=require' \
   --s3-endpoint 'objects.internal:3900' \
   --s3-bucket imgsrv \
   --s3-access-key-id imgsrv \
