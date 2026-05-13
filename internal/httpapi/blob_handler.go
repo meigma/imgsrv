@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -96,7 +97,18 @@ func (a *api) getBlob(w http.ResponseWriter, r *http.Request) {
 
 	writeBlobSuccess(w, blob, etag, modifiedAt, status, contentLength, rangeRequest, ok)
 	if _, err := io.Copy(w, reader.Body); err != nil {
-		a.logger.Warn("stream blob response failed", "digest", digest, "error", err)
+		a.logger.LogAttrs(
+			r.Context(),
+			streamErrorLevel(r.Context(), err),
+			"stream blob response failed",
+			slog.String("operation", "blob.stream"),
+			slog.String("request_id", RequestIDFromContext(r.Context())),
+			slog.String("digest", digest.String()),
+			slog.Int("status", status),
+			slog.Int64("range_start", rangeRequest.start),
+			slog.Int64("range_end", rangeRequest.end),
+			slog.Any("error", err),
+		)
 	}
 }
 
@@ -200,6 +212,14 @@ func writeBlobReadError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		writeBlobProblem(w, r, http.StatusInternalServerError, err.Error())
 	}
+}
+
+func streamErrorLevel(ctx context.Context, err error) slog.Level {
+	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+		return slog.LevelDebug
+	}
+
+	return slog.LevelWarn
 }
 
 // blobETag returns the strong ETag used for verified CAS blob responses.

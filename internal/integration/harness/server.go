@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"testing"
@@ -94,17 +95,19 @@ func startServer(
 	require.NoError(t, authz.EnsureBootstrapAdmin(ctx, authz.BootstrapConfig{
 		Store:  authStore,
 		Output: options.bootstrapOutput,
+		Logger: options.logger.With("component", "authz"),
 	}))
 	authService := newAuthService(ctx, t, options, store)
 	authManagement := authz.NewManagementService(authz.ManagementConfig{
 		Store:      authStore,
 		HTTPClient: options.oidcHTTPClient,
+		Logger:     options.logger.With("component", "auth-management"),
 	})
 
 	catalogService := catalog.NewService(catalog.ServiceConfig{
 		Store: store.Catalog(),
 	})
-	blobService := newCASService(store, objects)
+	blobService := newCASService(store, objects, options.logger.With("component", "cas"))
 	server, err := app.NewServer(app.Config{
 		Listen:          listener.Addr().String(),
 		ShutdownTimeout: serverShutdownTimeout,
@@ -116,6 +119,7 @@ func startServer(
 			Store:        store.Uploads(),
 			Objects:      objects,
 			TrustedBlobs: trustedBlobLookup(store),
+			Logger:       options.logger.With("component", "uploads"),
 		}),
 		Catalog: catalogService,
 		Publish: publish.NewService(publish.ServiceConfig{
@@ -125,6 +129,7 @@ func startServer(
 		SimpleStreams: incusmaterialization.NewService(incusmaterialization.Config{
 			Catalog: catalogService,
 			Store:   store.IncusProjection(),
+			Logger:  options.logger.With("component", "incus-materialization"),
 		}),
 		BackgroundJobs: backgroundJobs(options, store, objects, catalogService, blobService),
 	})
@@ -163,7 +168,8 @@ func newAuthService(
 	authMiddleware, err := authz.NewMiddleware(ctx, authz.Config{
 		Store:         store.Authkit(),
 		HTTPClient:    options.oidcHTTPClient,
-		ErrorRenderer: httpapi.WriteAuthError,
+		ErrorRenderer: httpapi.NewAuthErrorRenderer(options.logger.With("component", "httpapi")),
+		Logger:        options.logger.With("component", "authz"),
 	})
 	require.NoError(t, err)
 
@@ -225,7 +231,9 @@ func backgroundJobs(
 			Incus: incusmaterialization.NewIndexer(incusmaterialization.IndexerConfig{
 				Catalog: catalogService,
 				Blobs:   blobService,
+				Logger:  options.logger.With("component", "incus-indexer"),
 			}),
+			Logger: options.logger.With("component", publishWorkerName),
 		}),
 		WorkerID: jobs.Identity{
 			NodeName: casPromotionWorkerNodeName,
@@ -240,12 +248,13 @@ func backgroundJobs(
 		return []app.BackgroundJob{publishJob}
 	}
 
-	casService := newCASService(store, objects)
+	casService := newCASService(store, objects, options.logger.With("component", "cas"))
 
 	return []app.BackgroundJob{jobs.New(jobs.Config{
 		Handler: promote.New(promote.Config{
 			Uploads: store.Uploads(),
 			CAS:     casService,
+			Logger:  options.logger.With("component", casPromotionWorkerName),
 		}),
 		WorkerID: jobs.Identity{
 			NodeName: casPromotionWorkerNodeName,
@@ -269,9 +278,10 @@ func trustedBlobLookup(store *postgres.Store) uploads.TrustedBlobLookup {
 }
 
 // newCASService constructs the CAS service used by HTTP reads and promotion jobs.
-func newCASService(store *postgres.Store, objects objectstore.Store) *cas.Service {
+func newCASService(store *postgres.Store, objects objectstore.Store, logger *slog.Logger) *cas.Service {
 	return cas.NewService(cas.ServiceConfig{
 		Store:   store.CAS(),
 		Objects: objects,
+		Logger:  logger,
 	})
 }

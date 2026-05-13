@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/meigma/imgsrv/internal/authz"
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
+	safelog "github.com/meigma/imgsrv/internal/logging"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/publish"
 	"github.com/meigma/imgsrv/internal/telemetry"
@@ -270,7 +270,7 @@ type api struct {
 func New(deps Dependencies) http.Handler {
 	logger := deps.Logger
 	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+		logger = safelog.Nop()
 	}
 
 	readiness := deps.Readiness
@@ -304,7 +304,7 @@ func New(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 	api.registerRoutes(mux)
 
-	return deps.Telemetry.WrapHTTPHandler(Chain(mux, logRequests(logger)))
+	return deps.Telemetry.WrapHTTPHandler(Chain(mux, requestIDs(), logRequests(logger)))
 }
 
 // registerRoutes attaches API route handlers to mux.
@@ -467,7 +467,18 @@ func (a *api) healthz(w http.ResponseWriter, _ *http.Request) {
 // readyz handles GET /readyz and delegates to the configured ReadinessChecker.
 func (a *api) readyz(w http.ResponseWriter, r *http.Request) {
 	if err := a.readiness.CheckReady(r.Context()); err != nil {
-		a.logger.Warn("readiness check failed", "error", err)
+		a.logger.WarnContext(
+			r.Context(),
+			"readiness check failed",
+			"operation",
+			"readiness",
+			"endpoint",
+			"/readyz",
+			"request_id",
+			RequestIDFromContext(r.Context()),
+			"error",
+			err,
+		)
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}

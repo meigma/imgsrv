@@ -17,9 +17,29 @@ func (a *api) simpleStreamsIndex(w http.ResponseWriter, r *http.Request) {
 
 	body, err := service.Index(r.Context())
 	if err != nil {
+		a.logger.ErrorContext(
+			r.Context(),
+			"simple streams index render failed",
+			"operation",
+			"simplestreams.index",
+			"request_id",
+			RequestIDFromContext(r.Context()),
+			"error",
+			err,
+		)
 		writeProblem(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	a.logger.DebugContext(
+		r.Context(),
+		"simple streams index rendered",
+		"operation",
+		"simplestreams.index",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"bytes",
+		len(body),
+	)
 
 	writeSimpleStreamsJSON(w, body)
 }
@@ -33,9 +53,29 @@ func (a *api) simpleStreamsProductFile(w http.ResponseWriter, r *http.Request) {
 
 	body, err := service.ProductFile(r.Context())
 	if err != nil {
+		a.logger.ErrorContext(
+			r.Context(),
+			"simple streams product render failed",
+			"operation",
+			"simplestreams.product_file",
+			"request_id",
+			RequestIDFromContext(r.Context()),
+			"error",
+			err,
+		)
 		writeProblem(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	a.logger.DebugContext(
+		r.Context(),
+		"simple streams product rendered",
+		"operation",
+		"simplestreams.product_file",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"bytes",
+		len(body),
+	)
 
 	writeSimpleStreamsJSON(w, body)
 }

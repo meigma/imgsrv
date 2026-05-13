@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -195,6 +196,19 @@ func TestNewLoggerValidatesFormatAndVerbosity(t *testing.T) {
 	}
 }
 
+func TestNewLoggerRedactsSensitiveAttributes(t *testing.T) {
+	logs := new(bytes.Buffer)
+	logger, err := NewLogger(logs, "json", "debug")
+	require.NoError(t, err)
+
+	logger.Info("token issued", "token_id", "tok_123", "api_token", "secret-token")
+
+	got := logs.String()
+	assert.Contains(t, got, `"token_id":"tok_123"`)
+	assert.Contains(t, got, `"api_token":"[REDACTED]"`)
+	assert.NotContains(t, got, "secret-token")
+}
+
 func TestNewServerRejectsInvalidMetricsPath(t *testing.T) {
 	server, err := NewServer(Config{
 		MetricsListen: "127.0.0.1:9464",
@@ -236,7 +250,7 @@ func TestNewUploadServiceRequiresPostgresWhenS3Configured(t *testing.T) {
 		S3Bucket:          "imgsrv",
 		S3AccessKeyID:     "access",
 		S3SecretAccessKey: "secret",
-	}, nil)
+	}, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "postgres url")

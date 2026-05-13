@@ -20,6 +20,7 @@ import (
 	"github.com/meigma/imgsrv/internal/jobs"
 	"github.com/meigma/imgsrv/internal/jobs/promote"
 	"github.com/meigma/imgsrv/internal/jobs/publishflow"
+	safelog "github.com/meigma/imgsrv/internal/logging"
 	incusmaterialization "github.com/meigma/imgsrv/internal/materialization/incus"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/objectstore/s3"
@@ -97,16 +98,21 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	logger.LogAttrs(ctx, slog.LevelInfo, "imgsrv starting", cfg.logAttrs()...)
 
 	var store *postgres.Store
 	if cfg.PostgresURL != "" {
-		store, err = postgres.Open(ctx, postgres.Config{URL: cfg.PostgresURL})
+		store, err = postgres.Open(ctx, postgres.Config{
+			URL:    cfg.PostgresURL,
+			Logger: logger.With("component", "postgres"),
+		})
 		if err != nil {
 			return err
 		}
+		logger.InfoContext(ctx, "postgres store ready")
 	}
 
-	uploadDependency, err := newUploadService(cfg, store)
+	uploadDependency, err := newUploadService(cfg, store, logger)
 	if err != nil {
 		if store != nil {
 			return joinError(err, store.Close())
@@ -121,7 +127,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
-	authDependency, err := newAuthService(ctx, store, os.Stdout)
+	authDependency, err := newAuthService(ctx, store, os.Stdout, logger)
 	if err != nil {
 		if store != nil {
 			return joinError(err, store.Close())
@@ -147,7 +153,7 @@ func Run(ctx context.Context, cfg Config) error {
 		Catalog:        catalogService,
 		Publish:        publishService,
 		Blobs:          uploadDependency.blobs,
-		SimpleStreams:  newSimpleStreamsService(catalogService, store),
+		SimpleStreams:  newSimpleStreamsService(catalogService, store, logger),
 		BackgroundJobs: backgroundJobs,
 	})
 	if err != nil {
@@ -171,7 +177,7 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 	cfg = cfg.withDefaults()
 	logger := deps.Logger
 	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+		logger = safelog.Nop()
 	}
 
 	var telemetryProviders *telemetry.Telemetry
@@ -232,10 +238,15 @@ func newAuthService(
 	ctx context.Context,
 	store *postgres.Store,
 	bootstrapWriter io.Writer,
+	logger *slog.Logger,
 ) (authDependency, error) {
 	if store == nil {
 		return authDependency{}, nil
 	}
+	if logger == nil {
+		logger = safelog.Nop()
+	}
+	logger = logger.With("component", "authz")
 
 	authStore := store.Authkit()
 	if err := authz.EnsureBuiltinRoles(ctx, authStore); err != nil {
@@ -244,12 +255,14 @@ func newAuthService(
 	if err := authz.EnsureBootstrapAdmin(ctx, authz.BootstrapConfig{
 		Store:  authStore,
 		Output: bootstrapWriter,
+		Logger: logger,
 	}); err != nil {
 		return authDependency{}, err
 	}
 	service, err := authz.NewMiddleware(ctx, authz.Config{
 		Store:         authStore,
-		ErrorRenderer: httpapi.WriteAuthError,
+		Logger:        logger,
+		ErrorRenderer: httpapi.NewAuthErrorRenderer(logger.With("component", "httpapi")),
 	})
 	if err != nil {
 		return authDependency{}, err
@@ -258,7 +271,8 @@ func newAuthService(
 	return authDependency{
 		service: service,
 		management: authz.NewManagementService(authz.ManagementConfig{
-			Store: authStore,
+			Store:  authStore,
+			Logger: logger.With("component", "auth-management"),
 		}),
 	}, nil
 }
@@ -289,14 +303,19 @@ func newPublishService(store *postgres.Store) httpapi.PublishService {
 func newSimpleStreamsService(
 	catalogService httpapi.CatalogService,
 	store *postgres.Store,
+	logger *slog.Logger,
 ) httpapi.SimpleStreamsService {
 	if catalogService == nil || store == nil {
 		return nil
+	}
+	if logger == nil {
+		logger = safelog.Nop()
 	}
 
 	return incusmaterialization.NewService(incusmaterialization.Config{
 		Catalog: catalogService,
 		Store:   store.IncusProjection(),
+		Logger:  logger.With("component", "incus-materialization"),
 	})
 }
 
@@ -309,12 +328,15 @@ type uploadServiceDependency struct {
 
 // newUploadService builds the upload service and its S3 object store from cfg, returning a zero
 // value when no S3 configuration is present.
-func newUploadService(cfg Config, store *postgres.Store) (uploadServiceDependency, error) {
+func newUploadService(cfg Config, store *postgres.Store, logger *slog.Logger) (uploadServiceDependency, error) {
 	if !cfg.hasS3Config() {
 		return uploadServiceDependency{}, nil
 	}
 	if store == nil {
 		return uploadServiceDependency{}, errors.New("postgres url is required when s3 upload storage is configured")
+	}
+	if logger == nil {
+		logger = safelog.Nop()
 	}
 
 	objects, err := s3.New(s3.Config{
@@ -326,6 +348,7 @@ func newUploadService(cfg Config, store *postgres.Store) (uploadServiceDependenc
 		Region:          cfg.S3Region,
 		UseTLS:          cfg.S3UseTLS,
 		PathStyle:       cfg.S3PathStyle,
+		Logger:          logger.With("component", "objectstore-s3"),
 	})
 	if err != nil {
 		return uploadServiceDependency{}, fmt.Errorf("open s3 object store: %w", err)
@@ -336,8 +359,9 @@ func newUploadService(cfg Config, store *postgres.Store) (uploadServiceDependenc
 			Store:        store.Uploads(),
 			Objects:      objects,
 			TrustedBlobs: trustedBlobLookup(store),
+			Logger:       logger.With("component", "uploads"),
 		}),
-		blobs:   newCASService(store, objects),
+		blobs:   newCASService(store, objects, logger),
 		objects: objects,
 	}, nil
 }
@@ -358,14 +382,18 @@ func trustedBlobLookup(store *postgres.Store) uploads.TrustedBlobLookup {
 }
 
 // newCASService builds the CAS blob service when both durable state and object storage are configured.
-func newCASService(store *postgres.Store, objects objectstore.Store) *cas.Service {
+func newCASService(store *postgres.Store, objects objectstore.Store, logger *slog.Logger) *cas.Service {
 	if store == nil || objects == nil {
 		return nil
+	}
+	if logger == nil {
+		logger = safelog.Nop()
 	}
 
 	return cas.NewService(cas.ServiceConfig{
 		Store:   store.CAS(),
 		Objects: objects,
+		Logger:  logger.With("component", "cas"),
 	})
 }
 
@@ -407,11 +435,18 @@ func (s *Server) Serve(ctx context.Context, apiListener net.Listener, metricsLis
 			if errors.Is(err, http.ErrServerClosed) {
 				err = nil
 			}
+			if err != nil {
+				s.logger.Error("http server exited", "name", spec.name, "error", err)
+			} else {
+				s.logger.Info("http server stopped", "name", spec.name)
+			}
 			errCh <- componentResult{name: spec.name + " http server", err: err}
 		}(spec)
 	}
 	for _, spec := range s.backgroundJobs {
 		go func(spec backgroundJobSpec) {
+			s.logger.Info("background job started", "name", spec.name)
+			defer s.logger.Info("background job stopped", "name", spec.name)
 			errCh <- componentResult{name: spec.name, err: spec.job.Run(runCtx)}
 		}(spec)
 	}
@@ -419,9 +454,15 @@ func (s *Server) Serve(ctx context.Context, apiListener net.Listener, metricsLis
 	select {
 	case <-ctx.Done():
 		cancel()
+		s.logger.InfoContext(ctx, "shutdown requested", "reason", ctx.Err())
 		return s.shutdownComponents(servers, errCh, componentCount, nil)
 	case result := <-errCh:
 		cancel()
+		if result.err != nil {
+			s.logger.ErrorContext(ctx, "component exited with error", "name", result.name, "error", result.err)
+		} else {
+			s.logger.InfoContext(ctx, "component exited", "name", result.name)
+		}
 		shutdownErr := s.shutdownComponents(servers, errCh, componentCount, &result)
 		if result.err != nil {
 			return joinError(formatComponentError(result), shutdownErr)
@@ -470,15 +511,20 @@ func (s *Server) shutdownComponents(
 
 	var joined error
 	for _, spec := range servers {
+		s.logger.Info("stopping http server", "name", spec.name)
 		if err := spec.server.Shutdown(shutdownCtx); err != nil {
 			joined = joinError(joined, fmt.Errorf("shutdown %s server: %w", spec.name, err))
 		}
 	}
-	if err := s.telemetry.Shutdown(shutdownCtx); err != nil {
-		joined = joinError(joined, err)
+	if s.telemetry != nil {
+		if err := s.telemetry.Shutdown(shutdownCtx); err != nil {
+			joined = joinError(joined, err)
+		}
 	}
-	if err := s.store.Close(); err != nil {
-		joined = joinError(joined, fmt.Errorf("close postgres store: %w", err))
+	if s.store != nil {
+		if err := s.store.Close(); err != nil {
+			joined = joinError(joined, fmt.Errorf("close postgres store: %w", err))
+		}
 	}
 
 	pending := componentCount
@@ -497,6 +543,12 @@ func (s *Server) shutdownComponents(
 		case <-shutdownCtx.Done():
 			return joinError(joined, shutdownCtx.Err())
 		}
+	}
+
+	if joined != nil {
+		s.logger.Error("shutdown completed with errors", "error", joined)
+	} else {
+		s.logger.Info("shutdown complete")
 	}
 
 	return joined
@@ -545,15 +597,16 @@ func newCASPromotionJobs(
 		return nil, errors.New("s3 upload storage is required when cas promotion worker is enabled")
 	}
 	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+		logger = safelog.Nop()
 	}
 
-	casService := newCASService(store, objects)
+	casService := newCASService(store, objects, logger)
 
 	return []BackgroundJob{jobs.New(jobs.Config{
 		Handler: promote.New(promote.Config{
 			Uploads: store.Uploads(),
 			CAS:     casService,
+			Logger:  logger.With("component", "cas-promotion"),
 		}),
 		WorkerID:               jobs.Identity{NodeName: cfg.NodeName, RunID: cfg.RunID}.WorkerID("cas-promotion"),
 		Interval:               cfg.CASPromotionPollInterval,
@@ -584,7 +637,7 @@ func newPublishJobs(
 		return nil, errors.New("blob service is required when publish worker is enabled")
 	}
 	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+		logger = safelog.Nop()
 	}
 
 	return []BackgroundJob{jobs.New(jobs.Config{
@@ -593,7 +646,9 @@ func newPublishJobs(
 			Incus: incusmaterialization.NewIndexer(incusmaterialization.IndexerConfig{
 				Catalog: catalogService,
 				Blobs:   blobs,
+				Logger:  logger.With("component", "incus-indexer"),
 			}),
+			Logger: logger.With("component", "publish"),
 		}),
 		WorkerID:               jobs.Identity{NodeName: cfg.NodeName, RunID: cfg.RunID}.WorkerID("publish"),
 		Interval:               defaultCASPollInterval,

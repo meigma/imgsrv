@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -203,4 +205,72 @@ func (c Config) hasS3Config() bool {
 		c.S3SecretAccessKey != "" ||
 		c.S3SessionToken != "" ||
 		c.S3Region != ""
+}
+
+// logAttrs returns a sanitized runtime configuration snapshot for process startup logs.
+func (c Config) logAttrs() []slog.Attr {
+	c = c.withDefaults()
+	attrs := []slog.Attr{
+		slog.String("listen", c.Listen),
+		slog.String("node_name", c.NodeName),
+		slog.String("run_id", c.RunID),
+		slog.String("log_format", c.LogFormat),
+		slog.String("verbosity", c.Verbosity),
+		slog.Duration("upload_ttl", c.UploadTTL),
+		slog.Bool("cas_promotion_enabled", c.CASPromotionEnabled),
+		slog.Duration("cas_promotion_poll_interval", c.CASPromotionPollInterval),
+		slog.Duration("cas_promotion_error_backoff_initial", c.CASPromotionErrorBackoffInitial),
+		slog.Duration("cas_promotion_error_backoff_max", c.CASPromotionErrorBackoffMax),
+		slog.Int("cas_promotion_circuit_breaker_failures", c.CASPromotionCircuitBreakerFailures),
+		slog.Duration("cas_promotion_circuit_breaker_cooldown", c.CASPromotionCircuitBreakerCooldown),
+		slog.Duration("shutdown_timeout", c.ShutdownTimeout),
+	}
+	if c.MetricsListen != "" {
+		attrs = append(attrs,
+			slog.Bool("metrics_enabled", true),
+			slog.String("metrics_listen", c.MetricsListen),
+			slog.String("metrics_path", c.MetricsPath),
+		)
+	} else {
+		attrs = append(attrs, slog.Bool("metrics_enabled", false))
+	}
+	attrs = append(attrs, slog.Group("postgres", sanitizedPostgresAttrs(c.PostgresURL)...))
+	if c.hasS3Config() {
+		attrs = append(attrs, slog.Group(
+			"s3",
+			slog.Bool("configured", true),
+			slog.String("endpoint", c.S3Endpoint),
+			slog.String("bucket", c.S3Bucket),
+			slog.String("region", c.S3Region),
+			slog.Bool("use_tls", c.S3UseTLS),
+			slog.Bool("path_style", c.S3PathStyle),
+		))
+	} else {
+		attrs = append(attrs, slog.Group("s3", slog.Bool("configured", false)))
+	}
+
+	return attrs
+}
+
+func sanitizedPostgresAttrs(rawURL string) []any {
+	if strings.TrimSpace(rawURL) == "" {
+		return []any{slog.Bool("configured", false)}
+	}
+
+	attrs := []any{slog.Bool("configured", true)}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return append(attrs, slog.Bool("parse_error", true))
+	}
+	if parsed.Host != "" {
+		attrs = append(attrs, slog.String("host", parsed.Host))
+	}
+	if database := strings.TrimPrefix(parsed.EscapedPath(), "/"); database != "" {
+		attrs = append(attrs, slog.String("database", database))
+	}
+	if sslMode := parsed.Query().Get("sslmode"); sslMode != "" {
+		attrs = append(attrs, slog.String("sslmode", sslMode))
+	}
+
+	return attrs
 }

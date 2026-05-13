@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strconv"
 	"strings"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
+	safelog "github.com/meigma/imgsrv/internal/logging"
 	"github.com/meigma/imgsrv/internal/objectstore"
 )
 
@@ -61,6 +63,9 @@ type Config struct {
 
 	// PathStyle forces path-style bucket addressing when true.
 	PathStyle bool
+
+	// Logger receives sanitized S3 adapter logs. Nil selects a discarded logger.
+	Logger *slog.Logger
 }
 
 // Validate checks that config can construct an S3 object store.
@@ -86,12 +91,18 @@ type Store struct {
 	core *minio.Core
 	// bucket is the S3 bucket that backs every key handled by this store.
 	bucket string
+	// logger receives sanitized S3 adapter logs.
+	logger *slog.Logger
 }
 
 // New constructs an S3 object store from config.
 func New(config Config) (*Store, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
+	}
+	logger := config.Logger
+	if logger == nil {
+		logger = safelog.Nop()
 	}
 
 	bucketLookup := minio.BucketLookupAuto
@@ -113,9 +124,26 @@ func New(config Config) (*Store, error) {
 		return nil, mapError(err)
 	}
 
+	logger.Info(
+		"s3 object store configured",
+		"operation",
+		"s3.open",
+		"endpoint",
+		config.Endpoint,
+		"bucket",
+		config.Bucket,
+		"region",
+		config.Region,
+		"use_tls",
+		config.UseTLS,
+		"path_style",
+		config.PathStyle,
+	)
+
 	return &Store{
 		core:   core,
 		bucket: config.Bucket,
+		logger: logger,
 	}, nil
 }
 
@@ -311,6 +339,18 @@ func (store *Store) CopyObject(
 		return objectstore.ObjectInfo{}, mapError(err)
 	}
 	if requiresMultipartCopy(sourceInfo.Size) {
+		store.logger.DebugContext(
+			ctx,
+			"s3 multipart copy selected",
+			"operation",
+			"s3.copy_object",
+			"source_key",
+			params.SourceKey,
+			"destination_key",
+			params.DestinationKey,
+			"size_bytes",
+			sourceInfo.Size,
+		)
 		return store.copyObjectMultipart(ctx, params, sourceInfo)
 	}
 
@@ -370,6 +410,20 @@ func (store *Store) copyObjectMultipart(
 	if err != nil {
 		return objectstore.ObjectInfo{}, mapError(err)
 	}
+	store.logger.DebugContext(
+		ctx,
+		"s3 multipart copy started",
+		"operation",
+		"s3.copy_object_multipart",
+		"source_key",
+		params.SourceKey,
+		"destination_key",
+		params.DestinationKey,
+		"size_bytes",
+		sourceInfo.Size,
+		"part_count",
+		len(parts),
+	)
 
 	completed := false
 	defer func() {
@@ -416,6 +470,21 @@ func (store *Store) copyObjectMultipart(
 	}
 
 	completed = true
+	store.logger.DebugContext(
+		ctx,
+		"s3 multipart copy completed",
+		"operation",
+		"s3.copy_object_multipart",
+		"source_key",
+		params.SourceKey,
+		"destination_key",
+		params.DestinationKey,
+		"size_bytes",
+		sourceInfo.Size,
+		"part_count",
+		len(parts),
+	)
+
 	return uploadObjectInfo(uploadInfo, params.DestinationKey, sourceInfo.Size), nil
 }
 

@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
+	"net/url"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -16,6 +19,7 @@ import (
 
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
+	safelog "github.com/meigma/imgsrv/internal/logging"
 	"github.com/meigma/imgsrv/internal/materialization/incus"
 	"github.com/meigma/imgsrv/internal/publish"
 	postgrescatalog "github.com/meigma/imgsrv/internal/store/postgres/catalog"
@@ -44,6 +48,9 @@ var embeddedMigrations embed.FS
 type Config struct {
 	// URL is the PostgreSQL connection URL.
 	URL string
+
+	// Logger receives sanitized Postgres adapter logs. Nil selects a discarded logger.
+	Logger *slog.Logger
 }
 
 // Store owns the Postgres database connection.
@@ -62,6 +69,8 @@ type Store struct {
 	incus incus.ProjectionStore
 	// uploads is the upload-session adapter backed by the shared pool.
 	uploads uploads.Store
+	// logger receives sanitized Postgres adapter logs.
+	logger *slog.Logger
 }
 
 // Open opens Postgres and applies embedded schema migrations.
@@ -69,6 +78,11 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 	if config.URL == "" {
 		return nil, errors.New("postgres url is required")
 	}
+	logger := config.Logger
+	if logger == nil {
+		logger = safelog.Nop()
+	}
+	logger.LogAttrs(ctx, slog.LevelInfo, "opening postgres store", postgresLogAttrs("postgres.open", config.URL)...)
 
 	pool, openErr := pgxpool.New(ctx, config.URL)
 	if openErr != nil {
@@ -78,6 +92,7 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 	if pingErr := pool.Ping(ctx); pingErr != nil {
 		return nil, closePoolAfterError(pool, fmt.Errorf("ping postgres database: %w", pingErr))
 	}
+	logger.LogAttrs(ctx, slog.LevelDebug, "postgres ping succeeded", postgresLogAttrs("postgres.ping", config.URL)...)
 
 	migrationDB := stdlib.OpenDBFromPool(pool)
 	if migrateErr := ApplyMigrations(ctx, migrationDB); migrateErr != nil {
@@ -87,6 +102,11 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 			fmt.Errorf("apply database migrations: %w", migrateErr),
 		)
 	}
+	logger.LogAttrs(
+		ctx,
+		slog.LevelInfo,
+		"imgsrv postgres migrations applied",
+		postgresLogAttrs("postgres.migrate_imgsrv", config.URL)...)
 
 	if closeErr := migrationDB.Close(); closeErr != nil {
 		return nil, closePoolAfterError(pool, fmt.Errorf("close migration database: %w", closeErr))
@@ -95,6 +115,11 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 	if migrateErr := authkitpostgres.Migrate(ctx, pool); migrateErr != nil {
 		return nil, closePoolAfterError(pool, fmt.Errorf("apply authkit database migrations: %w", migrateErr))
 	}
+	logger.LogAttrs(
+		ctx,
+		slog.LevelInfo,
+		"authkit postgres migrations applied",
+		postgresLogAttrs("postgres.migrate_authkit", config.URL)...)
 	authkitStore, authkitErr := authkitpostgres.NewStore(pool)
 	if authkitErr != nil {
 		return nil, closePoolAfterError(pool, fmt.Errorf("create authkit store: %w", authkitErr))
@@ -111,6 +136,7 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 		publish: publishStore,
 		incus:   publishStore,
 		uploads: uploadStore,
+		logger:  logger,
 	}, nil
 }
 
@@ -141,6 +167,9 @@ func (store *Store) Close() error {
 	}
 
 	store.pool.Close()
+	if store.logger != nil {
+		store.logger.Debug("postgres store closed", "operation", "postgres.close")
+	}
 	store.pool = nil
 	store.authkit = nil
 	store.cas = nil
@@ -150,6 +179,25 @@ func (store *Store) Close() error {
 	store.uploads = nil
 
 	return nil
+}
+
+func postgresLogAttrs(operation string, rawURL string) []slog.Attr {
+	attrs := []slog.Attr{slog.String("operation", operation)}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return append(attrs, slog.Bool("url_parse_error", true))
+	}
+	if parsed.Host != "" {
+		attrs = append(attrs, slog.String("host", parsed.Host))
+	}
+	if database := strings.TrimPrefix(parsed.EscapedPath(), "/"); database != "" {
+		attrs = append(attrs, slog.String("database", database))
+	}
+	if sslMode := parsed.Query().Get("sslmode"); sslMode != "" {
+		attrs = append(attrs, slog.String("sslmode", sslMode))
+	}
+
+	return attrs
 }
 
 // Authkit returns the authkit Postgres adapter.

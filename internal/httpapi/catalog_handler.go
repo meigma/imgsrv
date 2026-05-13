@@ -270,6 +270,18 @@ func (a *api) createImage(w http.ResponseWriter, r *http.Request) {
 		writeCatalogError(w, err)
 		return
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"image created",
+		"operation",
+		"catalog.create_image",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"image_id",
+		image.ID.String(),
+		"image_name",
+		image.Name,
+	)
 
 	writeJSON(w, http.StatusCreated, newImageResponse(image))
 }
@@ -327,6 +339,24 @@ func (a *api) createDraftVersion(w http.ResponseWriter, r *http.Request) {
 		writeCatalogError(w, err)
 		return
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"draft version created",
+		"operation",
+		"catalog.create_draft_version",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"version_id",
+		version.ID.String(),
+		"image_id",
+		version.ImageID.String(),
+		"image_name",
+		r.PathValue("name"),
+		"version",
+		version.Version,
+		"state",
+		string(version.State),
+	)
 
 	writeJSON(w, http.StatusCreated, newVersionResponse(version))
 }
@@ -462,6 +492,32 @@ func (a *api) addArtifact(w http.ResponseWriter, r *http.Request) {
 		writeCatalogError(w, err)
 		return
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"artifact added",
+		"operation",
+		"catalog.add_artifact",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"artifact_id",
+		artifact.ID.String(),
+		"version_id",
+		artifact.VersionID.String(),
+		"image_name",
+		r.PathValue("name"),
+		"version",
+		r.PathValue("version"),
+		"digest",
+		artifact.PrimaryBlobDigest.String(),
+		"size_bytes",
+		artifact.PrimaryBlobSizeBytes,
+		"format",
+		string(artifact.Format),
+		"operating_system",
+		artifact.OperatingSystem,
+		"architecture",
+		artifact.Architecture,
+	)
 
 	writeJSON(w, http.StatusCreated, newArtifactResponse(artifact))
 }
@@ -486,6 +542,20 @@ func (a *api) deleteArtifact(w http.ResponseWriter, r *http.Request) {
 		writeCatalogError(w, err)
 		return
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"artifact deleted",
+		"operation",
+		"catalog.delete_artifact",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"image_name",
+		r.PathValue("name"),
+		"version",
+		r.PathValue("version"),
+		"artifact_id",
+		artifactID.String(),
+	)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -525,6 +595,26 @@ func (a *api) addAttachment(w http.ResponseWriter, r *http.Request) {
 		writeCatalogError(w, err)
 		return
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"attachment added",
+		"operation",
+		"catalog.add_attachment",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"attachment_id",
+		attachment.ID.String(),
+		"artifact_id",
+		attachment.ArtifactID.String(),
+		"image_name",
+		r.PathValue("name"),
+		"version",
+		r.PathValue("version"),
+		"digest",
+		attachment.BlobDigest.String(),
+		"size_bytes",
+		attachment.BlobSizeBytes,
+	)
 
 	writeJSON(w, http.StatusCreated, newAttachmentResponse(attachment))
 }
@@ -554,6 +644,22 @@ func (a *api) deleteAttachment(w http.ResponseWriter, r *http.Request) {
 		writeCatalogError(w, err)
 		return
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"attachment deleted",
+		"operation",
+		"catalog.delete_attachment",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"image_name",
+		r.PathValue("name"),
+		"version",
+		r.PathValue("version"),
+		"artifact_id",
+		artifactID.String(),
+		"attachment_id",
+		attachmentID.String(),
+	)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -573,6 +679,24 @@ func (a *api) publishVersion(w http.ResponseWriter, r *http.Request) {
 		writePublishError(w, err)
 		return
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"publish job queued",
+		"operation",
+		"catalog.publish_version",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"job_id",
+		job.ID.String(),
+		"version_id",
+		job.VersionID.String(),
+		"image_name",
+		job.ImageName,
+		"version",
+		job.Version,
+		"state",
+		string(job.State),
+	)
 
 	writeJSON(w, http.StatusAccepted, newPublishJobResponse(job))
 }
@@ -599,6 +723,24 @@ func (a *api) putAlias(w http.ResponseWriter, r *http.Request) {
 		writeCatalogError(w, err)
 		return
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"alias updated",
+		"operation",
+		"catalog.put_alias",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"alias_id",
+		alias.ID.String(),
+		"image_name",
+		r.PathValue("name"),
+		"alias",
+		alias.Alias,
+		"version",
+		alias.Version,
+		"version_id",
+		alias.VersionID.String(),
+	)
 
 	writeJSON(w, http.StatusOK, newAliasResponse(alias))
 }
@@ -655,6 +797,18 @@ func (a *api) deleteAlias(w http.ResponseWriter, r *http.Request) {
 		writeCatalogError(w, err)
 		return
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"alias deleted",
+		"operation",
+		"catalog.delete_alias",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"image_name",
+		r.PathValue("name"),
+		"alias",
+		r.PathValue("alias"),
+	)
 
 	w.WriteHeader(http.StatusNoContent)
 }

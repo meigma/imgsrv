@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/meigma/imgsrv/internal/jobs"
+	safelog "github.com/meigma/imgsrv/internal/logging"
 	"github.com/meigma/imgsrv/internal/materialization/incus"
 	"github.com/meigma/imgsrv/internal/publish"
 )
@@ -48,6 +50,9 @@ type Config struct {
 
 	// StaleStepTimeout controls when running steps can be reclaimed. Zero selects a conservative default.
 	StaleStepTimeout time.Duration
+
+	// Logger receives publish worker logs. Nil selects a discarded logger.
+	Logger *slog.Logger
 }
 
 // Job executes at most one publish step per RunOnce call.
@@ -55,6 +60,7 @@ type Job struct {
 	store            StepStore
 	incus            IncusIndexer
 	staleStepTimeout time.Duration
+	logger           *slog.Logger
 }
 
 // New constructs a publish worker job from config.
@@ -63,11 +69,16 @@ func New(config Config) *Job {
 	if staleStepTimeout <= 0 {
 		staleStepTimeout = defaultStaleStepTimeout
 	}
+	logger := config.Logger
+	if logger == nil {
+		logger = safelog.Nop()
+	}
 
 	return &Job{
 		store:            config.Store,
 		incus:            config.Incus,
 		staleStepTimeout: staleStepTimeout,
+		logger:           logger,
 	}
 }
 
@@ -89,10 +100,22 @@ func (job *Job) RunOnce(ctx context.Context, workerID string) (jobs.Result, erro
 
 		return jobs.Result{}, err
 	}
+	attrs := stepAttrs(step)
+	job.logger.LogAttrs(
+		ctx,
+		slog.LevelInfo,
+		"publish step claimed",
+		append(attrs, slog.String("operation", "publish.claim_step"))...)
 
-	if err := job.runStep(ctx, store, incusIndexer, step, workerID); err != nil {
+	stepResult, err := job.runStep(ctx, store, incusIndexer, step, workerID)
+	if err != nil {
 		if errors.Is(err, publish.ErrLeaseLost) {
-			return jobs.Result{Worked: true}, nil
+			job.logger.LogAttrs(
+				ctx,
+				slog.LevelDebug,
+				"publish step lease lost",
+				append(attrs, slog.String("operation", "publish.lease_lost"))...)
+			return jobs.Result{Worked: true, Attrs: attrs}, nil
 		}
 		if _, failErr := store.FailStep(ctx, publish.FailStepParams{
 			ID:             step.ID,
@@ -101,13 +124,38 @@ func (job *Job) RunOnce(ctx context.Context, workerID string) (jobs.Result, erro
 			FailureMessage: err.Error(),
 		}); failErr != nil {
 			if errors.Is(failErr, publish.ErrLeaseLost) {
-				return jobs.Result{Worked: true}, nil
+				job.logger.LogAttrs(
+					ctx,
+					slog.LevelDebug,
+					"publish step failure lease lost",
+					append(attrs, slog.String("operation", "publish.fail_lease_lost"))...)
+				return jobs.Result{Worked: true, Attrs: attrs}, nil
 			}
-			return jobs.Result{}, errors.Join(err, failErr)
+			return jobs.Result{Worked: true, Attrs: attrs}, errors.Join(err, failErr)
 		}
-	}
+		job.logger.LogAttrs(
+			ctx,
+			slog.LevelWarn,
+			"publish step failed",
+			append(attrs, slog.String("operation", "publish.fail_step"), slog.Any("error", err))...,
+		)
 
-	return jobs.Result{Worked: true}, nil
+		return jobs.Result{Worked: true, Attrs: attrs}, nil
+	}
+	if stepResult.projectionRows >= 0 {
+		attrs = append(attrs, slog.Int("projection_rows", stepResult.projectionRows))
+	}
+	job.logger.LogAttrs(
+		ctx,
+		slog.LevelInfo,
+		"publish step succeeded",
+		append(attrs, slog.String("operation", "publish.succeed_step"))...)
+
+	return jobs.Result{Worked: true, Attrs: attrs}, nil
+}
+
+type runStepResult struct {
+	projectionRows int
 }
 
 func (job *Job) runStep(
@@ -116,7 +164,7 @@ func (job *Job) runStep(
 	incusIndexer IncusIndexer,
 	step publish.Step,
 	workerID string,
-) error {
+) (runStepResult, error) {
 	switch step.Name {
 	case publish.StepValidateCatalog:
 		_, err := store.SucceedValidateCatalogStep(ctx, publish.SucceedStepParams{
@@ -124,7 +172,7 @@ func (job *Job) runStep(
 			WorkerID:     workerID,
 			AttemptCount: step.AttemptCount,
 		})
-		return err
+		return runStepResult{projectionRows: -1}, err
 	case publish.StepIncusIndex:
 		rows, err := incusIndexer.IndexVersion(ctx, incus.IndexVersionParams{
 			VersionID: step.VersionID,
@@ -132,7 +180,7 @@ func (job *Job) runStep(
 			Version:   step.Version,
 		})
 		if err != nil {
-			return err
+			return runStepResult{}, err
 		}
 		_, err = store.SucceedIncusIndexStep(ctx, publish.SucceedIncusIndexStepParams{
 			ID:           step.ID,
@@ -141,16 +189,29 @@ func (job *Job) runStep(
 			VersionID:    step.VersionID,
 			Rows:         rows,
 		})
-		return err
+		return runStepResult{projectionRows: len(rows)}, err
 	case publish.StepFinalizePublish:
 		_, err := store.FinalizePublishStep(ctx, publish.SucceedStepParams{
 			ID:           step.ID,
 			WorkerID:     workerID,
 			AttemptCount: step.AttemptCount,
 		})
-		return err
+		return runStepResult{projectionRows: -1}, err
 	default:
-		return fmt.Errorf("%w: unknown publish step %q", publish.ErrFailedPrecondition, step.Name)
+		return runStepResult{}, fmt.Errorf("%w: unknown publish step %q", publish.ErrFailedPrecondition, step.Name)
+	}
+}
+
+func stepAttrs(step publish.Step) []slog.Attr {
+	return []slog.Attr{
+		slog.String("publish_job_id", step.JobID.String()),
+		slog.String("publish_step_id", step.ID.String()),
+		slog.String("version_id", step.VersionID.String()),
+		slog.String("image_name", step.ImageName),
+		slog.String("version", step.Version),
+		slog.String("step", step.Name),
+		slog.Int("attempt_count", step.AttemptCount),
+		slog.String("state", string(step.State)),
 	}
 }
 

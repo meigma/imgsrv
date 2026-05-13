@@ -5,6 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+
+	safelog "github.com/meigma/imgsrv/internal/logging"
 )
 
 // NewLogger constructs a slog logger from runtime logging configuration.
@@ -18,7 +20,7 @@ func NewLogger(w io.Writer, format string, verbosity string) (*slog.Logger, erro
 		return nil, err
 	}
 
-	opts := &slog.HandlerOptions{Level: slogLevel}
+	opts := safelog.RedactingHandlerOptions(slogLevel)
 	switch strings.ToLower(format) {
 	case "text":
 		return slog.New(slog.NewTextHandler(w, opts)), nil

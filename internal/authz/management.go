@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -16,6 +17,8 @@ import (
 	authkitmanagement "github.com/meigma/authkit/management"
 	authkitoidc "github.com/meigma/authkit/oidc"
 	"github.com/meigma/authkit/provisioning"
+
+	safelog "github.com/meigma/imgsrv/internal/logging"
 )
 
 const (
@@ -44,6 +47,7 @@ type ManagementStore interface {
 type ManagementService struct {
 	store      ManagementStore
 	httpClient *http.Client
+	logger     *slog.Logger
 }
 
 // ManagementConfig configures a ManagementService.
@@ -53,6 +57,9 @@ type ManagementConfig struct {
 
 	// HTTPClient fetches OIDC discovery documents and JWKS keys. Nil uses a bounded default client.
 	HTTPClient *http.Client
+
+	// Logger receives sanitized auth-management logs. Nil selects a discarded logger.
+	Logger *slog.Logger
 }
 
 // OIDCProvisioningRule is the operator-facing view of an authkit provisioning rule and provider trust.
@@ -210,9 +217,15 @@ type IssuedAPIToken struct {
 
 // NewManagementService constructs an auth-management service.
 func NewManagementService(config ManagementConfig) *ManagementService {
+	logger := config.Logger
+	if logger == nil {
+		logger = safelog.Nop()
+	}
+
 	return &ManagementService{
 		store:      config.Store,
 		httpClient: config.HTTPClient,
+		logger:     logger,
 	}
 }
 
@@ -238,7 +251,24 @@ func (s *ManagementService) CreatePrincipal(
 		return Principal{}, err
 	}
 
-	return s.principalWithRoles(ctx, principal)
+	result, err := s.principalWithRoles(ctx, principal)
+	if err != nil {
+		return Principal{}, err
+	}
+	s.logger.InfoContext(
+		ctx,
+		"principal created",
+		"operation",
+		"auth.create_principal",
+		"principal_id",
+		result.ID,
+		"principal_kind",
+		string(result.Kind),
+		"role_count",
+		len(result.RoleIDs),
+	)
+
+	return result, nil
 }
 
 // ListPrincipals returns principals with their assigned role IDs.
@@ -288,10 +318,24 @@ func (s *ManagementService) AssignPrincipalRole(ctx context.Context, principalID
 		return err
 	}
 
-	return s.store.AssignPrincipalRole(ctx, authkit.AssignPrincipalRoleRequest{
+	if err := s.store.AssignPrincipalRole(ctx, authkit.AssignPrincipalRoleRequest{
 		PrincipalID: principalID,
 		RoleID:      roleID,
-	})
+	}); err != nil {
+		return err
+	}
+	s.logger.InfoContext(
+		ctx,
+		"principal role assigned",
+		"operation",
+		"auth.assign_role",
+		"principal_id",
+		principalID,
+		"role_id",
+		roleID,
+	)
+
+	return nil
 }
 
 // UnassignPrincipalRole removes a built-in role from a principal.
@@ -303,10 +347,24 @@ func (s *ManagementService) UnassignPrincipalRole(ctx context.Context, principal
 		return err
 	}
 
-	return s.store.UnassignPrincipalRole(ctx, authkit.UnassignPrincipalRoleRequest{
+	if err := s.store.UnassignPrincipalRole(ctx, authkit.UnassignPrincipalRoleRequest{
 		PrincipalID: principalID,
 		RoleID:      roleID,
-	})
+	}); err != nil {
+		return err
+	}
+	s.logger.InfoContext(
+		ctx,
+		"principal role unassigned",
+		"operation",
+		"auth.unassign_role",
+		"principal_id",
+		principalID,
+		"role_id",
+		roleID,
+	)
+
+	return nil
 }
 
 // IssueAPIToken issues and links an API token for a principal.
@@ -330,7 +388,7 @@ func (s *ManagementService) IssueAPIToken(ctx context.Context, req IssueAPIToken
 		return IssuedAPIToken{}, err
 	}
 
-	return IssuedAPIToken{
+	result := IssuedAPIToken{
 		APITokenMetadata: APITokenMetadata{
 			ID:          issued.ID,
 			PrincipalID: issued.Identity.PrincipalID,
@@ -338,7 +396,21 @@ func (s *ManagementService) IssueAPIToken(ctx context.Context, req IssueAPIToken
 			ExpiresAt:   issued.ExpiresAt,
 		},
 		Plaintext: issued.Plaintext,
-	}, nil
+	}
+	s.logger.InfoContext(
+		ctx,
+		"api token issued",
+		"operation",
+		"auth.issue_api_token",
+		"token_id",
+		result.ID,
+		"principal_id",
+		result.PrincipalID,
+		"expires_at",
+		result.ExpiresAt,
+	)
+
+	return result, nil
 }
 
 // ListPrincipalAPITokens returns token metadata for a principal.
@@ -375,7 +447,12 @@ func (s *ManagementService) RevokeAPIToken(ctx context.Context, tokenID string) 
 		return err
 	}
 
-	return service.RevokeAPIToken(ctx, tokenID)
+	if err := service.RevokeAPIToken(ctx, tokenID); err != nil {
+		return err
+	}
+	s.logger.InfoContext(ctx, "api token revoked", "operation", "auth.revoke_api_token", "token_id", tokenID)
+
+	return nil
 }
 
 // CreateOIDCProvisioningRule creates a trusted provider and provisioning rule.
@@ -414,7 +491,23 @@ func (s *ManagementService) CreateOIDCProvisioningRule(
 		return OIDCProvisioningRule{}, err
 	}
 
-	return newOIDCProvisioningRule(rule, provider), nil
+	result := newOIDCProvisioningRule(rule, provider)
+	s.logger.InfoContext(
+		ctx,
+		"oidc provisioning rule created",
+		"operation",
+		"auth.create_oidc_provisioning_rule",
+		"rule_id",
+		result.ID,
+		"issuer_url",
+		result.IssuerURL,
+		"enabled",
+		result.Enabled,
+		"forwarded_claim_count",
+		len(result.ForwardedClaims),
+	)
+
+	return result, nil
 }
 
 func (s *ManagementService) principalWithRoles(
@@ -526,7 +619,23 @@ func (s *ManagementService) UpdateOIDCProvisioningRule(
 		return OIDCProvisioningRule{}, err
 	}
 
-	return newOIDCProvisioningRule(rule, provider), nil
+	result := newOIDCProvisioningRule(rule, provider)
+	s.logger.InfoContext(
+		ctx,
+		"oidc provisioning rule updated",
+		"operation",
+		"auth.update_oidc_provisioning_rule",
+		"rule_id",
+		result.ID,
+		"issuer_url",
+		result.IssuerURL,
+		"enabled",
+		result.Enabled,
+		"forwarded_claim_count",
+		len(result.ForwardedClaims),
+	)
+
+	return result, nil
 }
 
 // DeleteOIDCProvisioningRule deletes one OIDC provisioning rule.
@@ -535,7 +644,19 @@ func (s *ManagementService) DeleteOIDCProvisioningRule(ctx context.Context, id s
 		return errManagementStoreRequired()
 	}
 
-	return s.store.DeleteProvisioningRule(ctx, id)
+	if err := s.store.DeleteProvisioningRule(ctx, id); err != nil {
+		return err
+	}
+	s.logger.InfoContext(
+		ctx,
+		"oidc provisioning rule deleted",
+		"operation",
+		"auth.delete_oidc_provisioning_rule",
+		"rule_id",
+		id,
+	)
+
+	return nil
 }
 
 // PreviewOIDCProvisioningRuleReconciliation previews rule-granted role cleanup.
@@ -595,6 +716,21 @@ func (s *ManagementService) oidcProvisioningRuleReconciliation(
 		}
 		result.Principals = append(result.Principals, principal)
 	}
+
+	s.logger.InfoContext(
+		ctx,
+		"oidc provisioning rule reconciliation evaluated",
+		"operation",
+		"auth.reconcile_oidc_provisioning_rule",
+		"rule_id",
+		result.RuleID,
+		"applied",
+		result.Applied,
+		"principal_count",
+		len(result.Principals),
+		"role_count",
+		len(result.UnassignRoleIDs),
+	)
 
 	return result, nil
 }
@@ -659,7 +795,24 @@ func (s *ManagementService) trustProvider(
 		return authkitoidc.Provider{}, err
 	}
 
-	return s.store.TrustProvider(ctx, provider)
+	trusted, err := s.store.TrustProvider(ctx, provider)
+	if err != nil {
+		return authkitoidc.Provider{}, err
+	}
+	s.logger.DebugContext(
+		ctx,
+		"oidc provider trust updated",
+		"operation",
+		"auth.trust_oidc_provider",
+		"issuer_url",
+		trusted.Issuer,
+		"audience_count",
+		len(trusted.Audiences),
+		"forwarded_claim_count",
+		len(trusted.ForwardedClaims),
+	)
+
+	return trusted, nil
 }
 
 func (s *ManagementService) ruleWithProvider(

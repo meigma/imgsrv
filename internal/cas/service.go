@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	safelog "github.com/meigma/imgsrv/internal/logging"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
@@ -61,6 +63,9 @@ type ServiceConfig struct {
 
 	// Objects reads staged bytes and writes digest-addressed CAS objects.
 	Objects objectstore.Store
+
+	// Logger receives CAS lifecycle logs. Nil selects a discarded logger.
+	Logger *slog.Logger
 }
 
 // Service commits staged objects into content-addressed storage.
@@ -70,6 +75,9 @@ type Service struct {
 
 	// objects reads staged bytes and writes digest-addressed CAS objects.
 	objects objectstore.Store
+
+	// logger receives CAS lifecycle logs.
+	logger *slog.Logger
 }
 
 type verifiedObject struct {
@@ -112,9 +120,15 @@ func (params GetBlobParams) Validate() error {
 
 // NewService constructs a CAS service from config.
 func NewService(config ServiceConfig) *Service {
+	logger := config.Logger
+	if logger == nil {
+		logger = safelog.Nop()
+	}
+
 	return &Service{
 		store:   config.Store,
 		objects: config.Objects,
+		logger:  logger,
 	}
 }
 
@@ -202,60 +216,14 @@ func (service *Service) CommitStagedUpload(
 	if validationErr := validateCommitStagedUploadParams(params); validationErr != nil {
 		return CommitStagedUploadResult{}, validationErr
 	}
-
-	reader, err := objects.OpenObject(ctx, objectstore.OpenObjectParams{Key: params.StagingKey})
-	if err != nil {
-		if errors.Is(err, objectstore.ErrNotFound) {
-			return failCommit(ctx, store, objects, params.JobID, params.StagingKey, "staged object is missing", err)
-		}
-
-		return CommitStagedUploadResult{}, err
-	}
-
-	verified, err := verifyObjectReader(reader)
+	service.logCommitStart(ctx, params)
+	verified, err := service.verifyStagedUpload(ctx, store, objects, params)
 	if err != nil {
 		return CommitStagedUploadResult{}, err
 	}
-	if verified.sizeBytes != params.ExpectedSizeBytes {
-		return failCommit(
-			ctx,
-			store,
-			objects,
-			params.JobID,
-			params.StagingKey,
-			fmt.Sprintf("staged object is %d bytes, expected %d bytes", verified.sizeBytes, params.ExpectedSizeBytes),
-			nil,
-		)
-	}
-	if verified.digest != params.ExpectedDigest {
-		return failCommit(
-			ctx,
-			store,
-			objects,
-			params.JobID,
-			params.StagingKey,
-			fmt.Sprintf("staged object digest is %s, expected %s", verified.digest, params.ExpectedDigest),
-			nil,
-		)
-	}
-
-	storageKey := StorageKey(params.ExpectedDigest)
-	committed, err := ensureCASObject(ctx, store, objects, ensureCASObjectParams{
-		Digest:             params.ExpectedDigest,
-		SizeBytes:          params.ExpectedSizeBytes,
-		StagingKey:         params.StagingKey,
-		StorageKey:         storageKey,
-		VerifiedSourceETag: verified.info.ETag,
-	})
+	storageKey, err := service.ensureCommittedCASObject(ctx, store, objects, params, verified)
 	if err != nil {
-		if errors.Is(err, ErrFailedPrecondition) {
-			return failCommit(ctx, store, objects, params.JobID, params.StagingKey, failureMessage(err), nil)
-		}
-
 		return CommitStagedUploadResult{}, err
-	}
-	if matchErr := requireCASObjectInfo(committed, storageKey, params.ExpectedSizeBytes); matchErr != nil {
-		return failCommit(ctx, store, objects, params.JobID, params.StagingKey, failureMessage(matchErr), nil)
 	}
 
 	job, err := store.SucceedIngestJob(ctx, uploads.SucceedIngestJobParams{
@@ -268,7 +236,8 @@ func (service *Service) CommitStagedUpload(
 	if err != nil {
 		return CommitStagedUploadResult{}, err
 	}
-	cleanupStagingObject(context.WithoutCancel(ctx), objects, params.StagingKey)
+	cleanupStagingObject(context.WithoutCancel(ctx), objects, service.logger, params.StagingKey)
+	service.logCommitSuccess(ctx, params, storageKey)
 
 	return CommitStagedUploadResult{
 		Job:        job,
@@ -276,6 +245,150 @@ func (service *Service) CommitStagedUpload(
 		SizeBytes:  params.ExpectedSizeBytes,
 		StorageKey: storageKey,
 	}, nil
+}
+
+func (service *Service) verifyStagedUpload(
+	ctx context.Context,
+	store Store,
+	objects objectstore.Store,
+	params CommitStagedUploadParams,
+) (verifiedObject, error) {
+	reader, err := objects.OpenObject(ctx, objectstore.OpenObjectParams{Key: params.StagingKey})
+	if err != nil {
+		if errors.Is(err, objectstore.ErrNotFound) {
+			failErr := failCommit(
+				ctx,
+				store,
+				objects,
+				service.logger,
+				params.JobID,
+				params.StagingKey,
+				"staged object is missing",
+				err,
+			)
+			return verifiedObject{}, failErr
+		}
+
+		return verifiedObject{}, err
+	}
+
+	verified, err := verifyObjectReader(reader)
+	if err != nil {
+		return verifiedObject{}, err
+	}
+	if verified.sizeBytes != params.ExpectedSizeBytes {
+		failErr := failCommit(
+			ctx,
+			store,
+			objects,
+			service.logger,
+			params.JobID,
+			params.StagingKey,
+			fmt.Sprintf("staged object is %d bytes, expected %d bytes", verified.sizeBytes, params.ExpectedSizeBytes),
+			nil,
+		)
+		return verifiedObject{}, failErr
+	}
+	if verified.digest != params.ExpectedDigest {
+		failErr := failCommit(
+			ctx,
+			store,
+			objects,
+			service.logger,
+			params.JobID,
+			params.StagingKey,
+			fmt.Sprintf("staged object digest is %s, expected %s", verified.digest, params.ExpectedDigest),
+			nil,
+		)
+		return verifiedObject{}, failErr
+	}
+
+	return verified, nil
+}
+
+func (service *Service) ensureCommittedCASObject(
+	ctx context.Context,
+	store Store,
+	objects objectstore.Store,
+	params CommitStagedUploadParams,
+	verified verifiedObject,
+) (string, error) {
+	storageKey := StorageKey(params.ExpectedDigest)
+	committed, err := ensureCASObject(ctx, store, objects, ensureCASObjectParams{
+		Digest:             params.ExpectedDigest,
+		SizeBytes:          params.ExpectedSizeBytes,
+		StagingKey:         params.StagingKey,
+		StorageKey:         storageKey,
+		VerifiedSourceETag: verified.info.ETag,
+	})
+	if err != nil {
+		if errors.Is(err, ErrFailedPrecondition) {
+			failErr := failCommit(
+				ctx,
+				store,
+				objects,
+				service.logger,
+				params.JobID,
+				params.StagingKey,
+				failureMessage(err),
+				nil,
+			)
+			return "", failErr
+		}
+
+		return "", err
+	}
+	if matchErr := requireCASObjectInfo(committed, storageKey, params.ExpectedSizeBytes); matchErr != nil {
+		failErr := failCommit(
+			ctx,
+			store,
+			objects,
+			service.logger,
+			params.JobID,
+			params.StagingKey,
+			failureMessage(matchErr),
+			nil,
+		)
+		return "", failErr
+	}
+
+	return storageKey, nil
+}
+
+func (service *Service) logCommitStart(ctx context.Context, params CommitStagedUploadParams) {
+	service.logger.DebugContext(
+		ctx,
+		"cas ingest verification started",
+		"operation",
+		"cas.commit_staged_upload",
+		"ingest_job_id",
+		params.JobID.String(),
+		"upload_id",
+		params.UploadID.String(),
+		"expected_digest",
+		params.ExpectedDigest.String(),
+		"expected_size_bytes",
+		params.ExpectedSizeBytes,
+	)
+}
+
+func (service *Service) logCommitSuccess(ctx context.Context, params CommitStagedUploadParams, storageKey string) {
+	service.logger.InfoContext(
+		ctx,
+		"cas ingest succeeded",
+		"operation",
+		"cas.commit_staged_upload",
+		"ingest_job_id",
+		params.JobID.String(),
+		"upload_id",
+		params.UploadID.String(),
+		"digest",
+		params.ExpectedDigest.String(),
+		"size_bytes",
+		params.ExpectedSizeBytes,
+		"storage_key",
+		storageKey,
+	)
 }
 
 // OpenBlob opens a verified CAS blob for proxied download.
@@ -594,11 +707,12 @@ func failCommit(
 	ctx context.Context,
 	store Store,
 	objects objectstore.Store,
+	logger *slog.Logger,
 	jobID uuid.UUID,
 	stagingKey string,
 	message string,
 	cause error,
-) (CommitStagedUploadResult, error) {
+) error {
 	failureErr := fmt.Errorf("%w: %s", ErrFailedPrecondition, message)
 	if cause != nil {
 		failureErr = errors.Join(failureErr, cause)
@@ -609,11 +723,26 @@ func failCommit(
 		FailureMessage: message,
 	})
 	if err != nil {
-		return CommitStagedUploadResult{}, errors.Join(failureErr, fmt.Errorf("record failed CAS ingest: %w", err))
+		return errors.Join(failureErr, fmt.Errorf("record failed CAS ingest: %w", err))
 	}
-	cleanupStagingObject(context.WithoutCancel(ctx), objects, stagingKey)
+	if logger == nil {
+		logger = safelog.Nop()
+	}
+	logger.WarnContext(
+		ctx,
+		"cas ingest failed",
+		"operation",
+		"cas.commit_staged_upload",
+		"ingest_job_id",
+		jobID.String(),
+		"staging_key",
+		stagingKey,
+		"failure_reason",
+		message,
+	)
+	cleanupStagingObject(context.WithoutCancel(ctx), objects, logger, stagingKey)
 
-	return CommitStagedUploadResult{}, failureErr
+	return failureErr
 }
 
 // failureMessage strips the ErrFailedPrecondition prefix from err so the
@@ -637,15 +766,28 @@ func closeReaderAfterError(reader io.ReadCloser, err error) error {
 
 // cleanupStagingObject best-effort deletes one staged upload object after the ingest outcome
 // became terminal. Missing objects are ignored and cleanup failures are intentionally swallowed.
-func cleanupStagingObject(ctx context.Context, objects objectstore.Store, stagingKey string) {
+func cleanupStagingObject(ctx context.Context, objects objectstore.Store, logger *slog.Logger, stagingKey string) {
 	if objects == nil || strings.TrimSpace(stagingKey) == "" {
 		return
+	}
+	if logger == nil {
+		logger = safelog.Nop()
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stagingCleanupTimeout)
 	defer cancel()
 
 	if err := objects.DeleteObject(cleanupCtx, objectstore.DeleteObjectParams{Key: stagingKey}); err != nil &&
 		!errors.Is(err, objectstore.ErrNotFound) {
+		logger.WarnContext(
+			ctx,
+			"staging object cleanup failed",
+			"operation",
+			"cas.cleanup_staging_object",
+			"staging_key",
+			stagingKey,
+			"error",
+			err,
+		)
 		return
 	}
 }

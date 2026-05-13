@@ -126,6 +126,24 @@ func (a *api) beginUpload(w http.ResponseWriter, r *http.Request) {
 	if !result.Created {
 		status = http.StatusOK
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"upload session started",
+		"operation",
+		"upload.begin",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"upload_id",
+		result.Session.ID.String(),
+		"expected_digest",
+		result.Session.ExpectedDigest.String(),
+		"expected_size_bytes",
+		result.Session.ExpectedSizeBytes,
+		"state",
+		string(result.Session.State),
+		"created",
+		result.Created,
+	)
 
 	writeJSON(w, status, newUploadSessionResponse(result.Session))
 }
@@ -155,6 +173,20 @@ func (a *api) putUploadPart(w http.ResponseWriter, r *http.Request) {
 		writeUploadError(w, err)
 		return
 	}
+	a.logger.DebugContext(
+		r.Context(),
+		"upload part stored",
+		"operation",
+		"upload.put_part",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"upload_id",
+		part.UploadID.String(),
+		"part_number",
+		part.PartNumber,
+		"size_bytes",
+		part.SizeBytes,
+	)
 
 	writeJSON(w, http.StatusOK, uploadPartResponse{
 		UploadID:   part.UploadID.String(),
@@ -218,6 +250,24 @@ func (a *api) completeUpload(w http.ResponseWriter, r *http.Request) {
 		writeUploadError(w, err)
 		return
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"upload completed",
+		"operation",
+		"upload.complete",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"upload_id",
+		session.ID.String(),
+		"expected_digest",
+		session.ExpectedDigest.String(),
+		"expected_size_bytes",
+		session.ExpectedSizeBytes,
+		"state",
+		string(session.State),
+		"part_count",
+		len(parts),
+	)
 
 	writeJSON(w, http.StatusOK, newUploadSessionResponse(session))
 }
@@ -238,6 +288,18 @@ func (a *api) abortUpload(w http.ResponseWriter, r *http.Request) {
 		writeUploadError(w, err)
 		return
 	}
+	a.logger.InfoContext(
+		r.Context(),
+		"upload aborted",
+		"operation",
+		"upload.abort",
+		"request_id",
+		RequestIDFromContext(r.Context()),
+		"upload_id",
+		session.ID.String(),
+		"state",
+		string(session.State),
+	)
 
 	writeJSON(w, http.StatusOK, newUploadSessionResponse(session))
 }

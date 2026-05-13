@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
+	safelog "github.com/meigma/imgsrv/internal/logging"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/uploads"
 )
@@ -36,19 +38,29 @@ type IndexerConfig struct {
 
 	// Blobs opens trusted CAS blob bytes.
 	Blobs BlobReader
+
+	// Logger receives Incus indexing logs. Nil selects a discarded logger.
+	Logger *slog.Logger
 }
 
 // Indexer computes Incus projection rows for frozen versions.
 type Indexer struct {
 	catalog ManifestCatalog
 	blobs   BlobReader
+	logger  *slog.Logger
 }
 
 // NewIndexer constructs an Incus publish-time indexer.
 func NewIndexer(config IndexerConfig) *Indexer {
+	logger := config.Logger
+	if logger == nil {
+		logger = safelog.Nop()
+	}
+
 	return &Indexer{
 		catalog: config.Catalog,
 		blobs:   config.Blobs,
+		logger:  logger,
 	}
 }
 
@@ -67,6 +79,18 @@ func (indexer *Indexer) IndexVersion(ctx context.Context, params IndexVersionPar
 	if params.VersionID == uuid.Nil {
 		return nil, fmt.Errorf("%w: version id is required", catalog.ErrInvalid)
 	}
+	indexer.logger.InfoContext(
+		ctx,
+		"incus version indexing started",
+		"operation",
+		"incus.index_version",
+		"version_id",
+		params.VersionID.String(),
+		"image_name",
+		params.ImageName,
+		"version",
+		params.Version,
+	)
 
 	manifest, err := catalogReader.GetVersionManifest(ctx, catalog.GetVersionManifestParams{
 		ImageName: params.ImageName,
@@ -85,13 +109,17 @@ func (indexer *Indexer) IndexVersion(ctx context.Context, params IndexVersionPar
 		combinedSHA256: map[combinedKey]string{},
 	}
 	rows := []ProjectionRow{}
+	skippedFormat := 0
+	skippedMetadata := 0
 	for _, manifestArtifact := range manifest.Artifacts {
 		artifact := manifestArtifact.Artifact
 		if artifact.Format != catalog.ArtifactFormatQCOW2 {
+			skippedFormat++
 			continue
 		}
 		metadataAttachment, ok := findMetadataAttachment(manifestArtifact.Attachments)
 		if !ok {
+			skippedMetadata++
 			continue
 		}
 
@@ -101,6 +129,26 @@ func (indexer *Indexer) IndexVersion(ctx context.Context, params IndexVersionPar
 		}
 		rows = append(rows, row)
 	}
+	indexer.logger.InfoContext(
+		ctx,
+		"incus version indexing completed",
+		"operation",
+		"incus.index_version",
+		"version_id",
+		params.VersionID.String(),
+		"image_name",
+		params.ImageName,
+		"version",
+		params.Version,
+		"artifact_count",
+		len(manifest.Artifacts),
+		"projection_rows",
+		len(rows),
+		"skipped_format_count",
+		skippedFormat,
+		"skipped_missing_metadata_count",
+		skippedMetadata,
+	)
 
 	return rows, nil
 }
