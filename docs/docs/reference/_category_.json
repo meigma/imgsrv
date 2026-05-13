@@ -1,5 +1,9 @@
 {
   "label": "Reference",
   "position": 5,
-  "collapsed": false
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "description": "Lookup tables for flags, metrics, state machines, and the role-to-endpoint matrix."
+  }
 }

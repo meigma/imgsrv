@@ -1,5 +1,9 @@
 {
   "label": "For publishers",
   "position": 4,
-  "collapsed": false
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "description": "Documentation for the people whose CI or release tooling pushes images."
+  }
 }

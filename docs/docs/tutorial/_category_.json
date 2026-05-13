@@ -1,5 +1,9 @@
 {
   "label": "Tutorial",
   "position": 2,
-  "collapsed": false
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "description": "End-to-end guided walkthrough."
+  }
 }
