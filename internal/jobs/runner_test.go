@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -246,7 +245,7 @@ func scrapeJobMetrics(t *testing.T, providers *telemetry.Telemetry) string {
 	providers.MetricsHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
-	require.True(t, strings.Contains(body, "imgsrv_background_job"), "expected job metrics, got:\n%s", body)
+	require.Contains(t, body, "imgsrv_background_job", "expected job metrics, got:\n%s", body)
 
 	return body
 }

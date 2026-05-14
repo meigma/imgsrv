@@ -117,7 +117,13 @@ func TestStoreMetricsSnapshotsDurableState(t *testing.T) {
 	assert.Equal(t, int64(1), snapshot.IncusProjectionRows)
 }
 
-func insertUploadMetricFixture(t *testing.T, store *Store, sessionState string, jobState string, referenceTime time.Time) {
+func insertUploadMetricFixture(
+	t *testing.T,
+	store *Store,
+	sessionState string,
+	jobState string,
+	referenceTime time.Time,
+) {
 	t.Helper()
 
 	uploadID := uuid.New()

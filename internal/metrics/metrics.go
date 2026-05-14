@@ -255,7 +255,12 @@ func (recorder *Recorder) RecordObjectstoreOperation(
 }
 
 // RecordObjectstoreBytes records known object-store transfer bytes.
-func (recorder *Recorder) RecordObjectstoreBytes(ctx context.Context, operation string, direction string, sizeBytes int64) {
+func (recorder *Recorder) RecordObjectstoreBytes(
+	ctx context.Context,
+	operation string,
+	direction string,
+	sizeBytes int64,
+) {
 	if !recorder.Enabled() || sizeBytes <= 0 {
 		return
 	}
@@ -378,6 +383,13 @@ func (recorder *Recorder) initInstruments() error {
 }
 
 func (recorder *Recorder) initPostgresInstruments() error {
+	return errors.Join(
+		recorder.initPostgresPoolInstruments(),
+		recorder.initStoreStateInstruments(),
+	)
+}
+
+func (recorder *Recorder) initPostgresPoolInstruments() error {
 	var err error
 	var errs []error
 
@@ -411,6 +423,13 @@ func (recorder *Recorder) initPostgresInstruments() error {
 		metric.WithUnit("s"),
 	)
 	errs = append(errs, err)
+
+	return errors.Join(errs...)
+}
+
+func (recorder *Recorder) initStoreStateInstruments() error {
+	var err error
+	var errs []error
 
 	recorder.uploadSessions, err = recorder.meter.Int64ObservableGauge(
 		"imgsrv.upload.sessions",

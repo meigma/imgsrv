@@ -40,19 +40,6 @@ func newObservability(cfg Config) (observability, error) {
 	}, nil
 }
 
-func recorderFromTelemetry(providers *telemetry.Telemetry) (*appmetrics.Recorder, error) {
-	if providers == nil {
-		return appmetrics.Noop(), nil
-	}
-
-	recorder, err := appmetrics.New(providers.Meter(applicationMeterName))
-	if err != nil {
-		return nil, err
-	}
-
-	return recorder, nil
-}
-
 func closeTelemetryAfterError(providers *telemetry.Telemetry, cause error) error {
 	if providers == nil {
 		return cause

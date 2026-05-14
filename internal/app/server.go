@@ -105,62 +105,50 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	logger.LogAttrs(ctx, slog.LevelInfo, "imgsrv starting", cfg.logAttrs()...)
 
-	observability, err := newObservability(cfg)
+	obs, err := newObservability(cfg)
 	if err != nil {
 		return err
 	}
 
 	var store *postgres.Store
 	if cfg.PostgresURL != "" {
-		store, err = postgres.Open(ctx, postgres.Config{
-			URL:    cfg.PostgresURL,
-			Logger: logger.With("component", "postgres"),
-		})
+		store, err = openPostgresStore(ctx, cfg, logger, obs.metrics)
 		if err != nil {
-			return closeTelemetryAfterError(observability.telemetry, err)
-		}
-		logger.InfoContext(ctx, "postgres store ready")
-		if err := observability.metrics.RegisterPostgres(store); err != nil {
-			return closeTelemetryAfterError(observability.telemetry, joinError(err, store.Close()))
+			return closeTelemetryAfterError(obs.telemetry, err)
 		}
 	}
 
-	uploadDependency, err := newUploadService(cfg, store, logger, observability.metrics)
+	uploadDependency, err := newUploadService(cfg, store, logger, obs.metrics)
 	if err != nil {
-		if store != nil {
-			return closeTelemetryAfterError(observability.telemetry, joinError(err, store.Close()))
-		}
-		return closeTelemetryAfterError(observability.telemetry, err)
+		return closeRunDependencies(obs, store, err)
 	}
-	backgroundJobs, err := newCASPromotionJobs(cfg, store, uploadDependency.objects, logger, observability.metrics)
+	backgroundJobs, err := newCASPromotionJobs(cfg, store, uploadDependency.objects, logger, obs.metrics)
 	if err != nil {
-		if store != nil {
-			return closeTelemetryAfterError(observability.telemetry, joinError(err, store.Close()))
-		}
-		return closeTelemetryAfterError(observability.telemetry, err)
+		return closeRunDependencies(obs, store, err)
 	}
 
 	authDependency, err := newAuthService(ctx, store, os.Stdout, logger)
 	if err != nil {
-		if store != nil {
-			return closeTelemetryAfterError(observability.telemetry, joinError(err, store.Close()))
-		}
-		return closeTelemetryAfterError(observability.telemetry, err)
+		return closeRunDependencies(obs, store, err)
 	}
 
 	catalogService := newCatalogService(store)
 	publishService := newPublishService(store)
-	publishJobs, err := newPublishJobs(cfg, store, catalogService, uploadDependency.blobs, logger, observability.metrics)
+	publishJobs, err := newPublishJobs(
+		cfg,
+		store,
+		catalogService,
+		uploadDependency.blobs,
+		logger,
+		obs.metrics,
+	)
 	if err != nil {
-		if store != nil {
-			return closeTelemetryAfterError(observability.telemetry, joinError(err, store.Close()))
-		}
-		return closeTelemetryAfterError(observability.telemetry, err)
+		return closeRunDependencies(obs, store, err)
 	}
 	backgroundJobs = append(backgroundJobs, publishJobs...)
 	server, err := NewServer(cfg, Dependencies{
 		Logger:         logger,
-		Telemetry:      observability.telemetry,
+		Telemetry:      obs.telemetry,
 		Auth:           authDependency.service,
 		AuthManagement: authDependency.management,
 		Uploads:        uploadDependency.service,
@@ -171,10 +159,7 @@ func Run(ctx context.Context, cfg Config) error {
 		BackgroundJobs: backgroundJobs,
 	})
 	if err != nil {
-		if store != nil {
-			return closeTelemetryAfterError(observability.telemetry, joinError(err, store.Close()))
-		}
-		return closeTelemetryAfterError(observability.telemetry, err)
+		return closeRunDependencies(obs, store, err)
 	}
 	server.store = store
 
@@ -184,6 +169,40 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 
 	return runErr
+}
+
+func openPostgresStore(
+	ctx context.Context,
+	cfg Config,
+	logger *slog.Logger,
+	recorder *appmetrics.Recorder,
+) (*postgres.Store, error) {
+	store, err := postgres.Open(ctx, postgres.Config{
+		URL:    cfg.PostgresURL,
+		Logger: logger.With("component", "postgres"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.InfoContext(ctx, "postgres store ready")
+
+	if recorder == nil {
+		recorder = appmetrics.Noop()
+	}
+	registerErr := recorder.RegisterPostgres(store)
+	if registerErr != nil {
+		return nil, joinError(registerErr, store.Close())
+	}
+
+	return store, nil
+}
+
+func closeRunDependencies(obs observability, store *postgres.Store, cause error) error {
+	if store != nil {
+		cause = joinError(cause, store.Close())
+	}
+
+	return closeTelemetryAfterError(obs.telemetry, cause)
 }
 
 // NewServer constructs an HTTP server from runtime configuration and adapters.

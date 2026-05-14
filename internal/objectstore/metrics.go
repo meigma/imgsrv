@@ -55,7 +55,12 @@ func (store meteredStore) PutPart(ctx context.Context, params PutPartParams) (Pa
 	part, err := store.next.PutPart(ctx, params)
 	store.record(ctx, objectstoreOperationPutPart, start, err)
 	if err == nil {
-		store.recorder.RecordObjectstoreBytes(ctx, objectstoreOperationPutPart, objectstoreDirectionWrite, part.SizeBytes)
+		store.recorder.RecordObjectstoreBytes(
+			ctx,
+			objectstoreOperationPutPart,
+			objectstoreDirectionWrite,
+			part.SizeBytes,
+		)
 	}
 
 	return part, err

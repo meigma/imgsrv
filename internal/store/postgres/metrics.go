@@ -68,12 +68,12 @@ func (store *Store) StoreMetrics(ctx context.Context) (metrics.StoreSnapshot, er
 	if err != nil {
 		return metrics.StoreSnapshot{}, err
 	}
-	if err := store.pool.QueryRow(
+	if scanErr := store.pool.QueryRow(
 		ctx,
 		`SELECT COUNT(*), COALESCE(SUM(size_bytes), 0)
 		FROM cas_blobs`,
-	).Scan(&snapshot.CASBlobs, &snapshot.CASBlobBytes); err != nil {
-		return metrics.StoreSnapshot{}, fmt.Errorf("collect cas blob metrics: %w", err)
+	).Scan(&snapshot.CASBlobs, &snapshot.CASBlobBytes); scanErr != nil {
+		return metrics.StoreSnapshot{}, fmt.Errorf("collect cas blob metrics: %w", scanErr)
 	}
 	if snapshot.PublishJobs, err = collectStateCounts(ctx, store.pool, "publish_jobs"); err != nil {
 		return metrics.StoreSnapshot{}, err
@@ -104,20 +104,20 @@ func (store *Store) StoreMetrics(ctx context.Context) (metrics.StoreSnapshot, er
 	); err != nil {
 		return metrics.StoreSnapshot{}, err
 	}
-	if err := store.pool.QueryRow(
+	if scanErr := store.pool.QueryRow(
 		ctx,
 		`SELECT COUNT(*)
 		FROM image_versions
 		WHERE state = 'publishing'`,
-	).Scan(&snapshot.PublishingVersions); err != nil {
-		return metrics.StoreSnapshot{}, fmt.Errorf("collect publishing version metrics: %w", err)
+	).Scan(&snapshot.PublishingVersions); scanErr != nil {
+		return metrics.StoreSnapshot{}, fmt.Errorf("collect publishing version metrics: %w", scanErr)
 	}
-	if err := store.pool.QueryRow(
+	if scanErr := store.pool.QueryRow(
 		ctx,
 		`SELECT COUNT(*)
 		FROM incus_projection_items`,
-	).Scan(&snapshot.IncusProjectionRows); err != nil {
-		return metrics.StoreSnapshot{}, fmt.Errorf("collect incus projection metrics: %w", err)
+	).Scan(&snapshot.IncusProjectionRows); scanErr != nil {
+		return metrics.StoreSnapshot{}, fmt.Errorf("collect incus projection metrics: %w", scanErr)
 	}
 
 	return snapshot, nil

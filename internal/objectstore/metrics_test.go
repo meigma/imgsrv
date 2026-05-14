@@ -118,7 +118,10 @@ type fakeStore struct {
 	deleteObject            func(context.Context, DeleteObjectParams) error
 }
 
-func (store *fakeStore) CreateMultipartUpload(ctx context.Context, params CreateMultipartUploadParams) (MultipartUpload, error) {
+func (store *fakeStore) CreateMultipartUpload(
+	ctx context.Context,
+	params CreateMultipartUploadParams,
+) (MultipartUpload, error) {
 	return store.createMultipartUpload(ctx, params)
 }
 
@@ -126,7 +129,10 @@ func (store *fakeStore) PutPart(ctx context.Context, params PutPartParams) (Part
 	return store.putPart(ctx, params)
 }
 
-func (store *fakeStore) CompleteMultipartUpload(ctx context.Context, params CompleteMultipartUploadParams) (ObjectInfo, error) {
+func (store *fakeStore) CompleteMultipartUpload(
+	ctx context.Context,
+	params CompleteMultipartUploadParams,
+) (ObjectInfo, error) {
 	return store.completeMultipartUpload(ctx, params)
 }
 
