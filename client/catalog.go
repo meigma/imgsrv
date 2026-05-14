@@ -124,6 +124,9 @@ type PutAliasRequest struct {
 
 // AddArtifactRequest adds a primary artifact to a draft version.
 type AddArtifactRequest struct {
+	// Variant is the artifact variant token. Empty selects the default variant.
+	Variant string `json:"variant,omitempty"`
+
 	// OperatingSystem is the artifact operating-system token.
 	OperatingSystem string `json:"operating_system"`
 
@@ -297,6 +300,9 @@ type Artifact struct {
 
 	// VersionID identifies the parent image version.
 	VersionID string `json:"version_id"`
+
+	// Variant is the artifact variant token.
+	Variant string `json:"variant"`
 
 	// OperatingSystem is the artifact operating-system token.
 	OperatingSystem string `json:"operating_system"`

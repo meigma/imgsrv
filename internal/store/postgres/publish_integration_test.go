@@ -134,6 +134,7 @@ func TestPublishWorkflowQueuesStepsAndFinalizesVersion(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, artifact.ID, rows[0].ArtifactID)
 	assert.Equal(t, attachment.ID, rows[0].MetadataAttachmentID)
+	assert.Equal(t, catalogdomain.DefaultArtifactVariant, rows[0].Variant)
 }
 
 func TestPublishStepLeasePreventsStaleWorkerCompletion(t *testing.T) {

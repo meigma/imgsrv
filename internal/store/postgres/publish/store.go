@@ -367,6 +367,7 @@ func (store *Store) ListProjectionRows(ctx context.Context) ([]incus.ProjectionR
 			image_versions.published_at,
 			release_artifacts.operating_system,
 			release_artifacts.architecture,
+			release_artifacts.variant,
 			incus_projection_items.metadata_path,
 			incus_projection_items.disk_path,
 			incus_projection_items.metadata_sha256,
@@ -382,7 +383,11 @@ func (store *Store) ListProjectionRows(ctx context.Context) ([]incus.ProjectionR
 		INNER JOIN release_artifacts
 			ON release_artifacts.id = incus_projection_items.artifact_id
 		WHERE image_versions.state = 'published'
-		ORDER BY images.name, image_versions.version, release_artifacts.architecture, release_artifacts.id`,
+		ORDER BY images.name,
+			image_versions.version,
+			release_artifacts.variant,
+			release_artifacts.architecture,
+			release_artifacts.id`,
 	)
 	if err != nil {
 		return nil, mapPublishError(err)
@@ -1029,6 +1034,7 @@ func scanProjectionRow(row pgx.Row) (incus.ProjectionRow, error) {
 		&publishedAt,
 		&projection.OperatingSystem,
 		&projection.Architecture,
+		&projection.Variant,
 		&projection.MetadataPath,
 		&projection.DiskPath,
 		&projection.MetadataSHA256,

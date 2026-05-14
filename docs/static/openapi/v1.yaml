@@ -2032,6 +2032,10 @@ components:
         - primary_blob_size_bytes
         - primary_media_type
       properties:
+        variant:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+          default: default
         operating_system:
           type: string
           pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
@@ -2247,6 +2251,7 @@ components:
       required:
         - id
         - version_id
+        - variant
         - operating_system
         - architecture
         - format
@@ -2261,6 +2266,9 @@ components:
         version_id:
           type: string
           format: uuid
+        variant:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
         operating_system:
           type: string
           pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'

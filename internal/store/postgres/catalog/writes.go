@@ -71,6 +71,7 @@ func (store *Store) CreateDraftVersion(
 
 // AddArtifact adds a primary artifact declaration to a draft version.
 func (store *Store) AddArtifact(ctx context.Context, params domain.AddArtifactParams) (domain.Artifact, error) {
+	params.Variant = domain.NormalizeArtifactVariant(params.Variant)
 	if err := validateAddArtifactParams(params); err != nil {
 		return domain.Artifact{}, err
 	}
@@ -85,6 +86,7 @@ func (store *Store) AddArtifact(ctx context.Context, params domain.AddArtifactPa
 		`INSERT INTO release_artifacts (
 			id,
 			version_id,
+			variant,
 			operating_system,
 			architecture,
 			format,
@@ -92,13 +94,14 @@ func (store *Store) AddArtifact(ctx context.Context, params domain.AddArtifactPa
 			primary_blob_size_bytes,
 			primary_media_type
 		)
-		SELECT $1, image_versions.id, $4, $5, $6, $7, $8, $9
+		SELECT $1, image_versions.id, $4, $5, $6, $7, $8, $9, $10
 		FROM image_versions
 		INNER JOIN images ON images.id = image_versions.image_id
 		WHERE images.name = $2
 			AND image_versions.version = $3
 		RETURNING id,
 			version_id,
+			variant,
 			operating_system,
 			architecture,
 			format,
@@ -110,6 +113,7 @@ func (store *Store) AddArtifact(ctx context.Context, params domain.AddArtifactPa
 		uuid.New(),
 		params.ImageName,
 		params.Version,
+		params.Variant,
 		params.OperatingSystem,
 		params.Architecture,
 		params.Format,

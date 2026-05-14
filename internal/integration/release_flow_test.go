@@ -66,6 +66,7 @@ func TestReleaseFlowPublishesDraft(t *testing.T) {
 		rawGZArtifactRequest(primaryBlob),
 	)
 	require.NoError(t, err)
+	assert.Equal(t, "default", artifact.Variant)
 	assert.Equal(t, "linux", artifact.OperatingSystem)
 	assert.Equal(t, "x86_64", artifact.Architecture)
 	assert.Equal(t, imgsrv.ArtifactFormatRawGZ, artifact.Format)
@@ -110,11 +111,13 @@ func TestReleaseFlowPublishesDraft(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, artifacts, 1)
 	assert.Equal(t, artifact.ID, artifacts[0].ID)
+	assert.Equal(t, "default", artifacts[0].Variant)
 	assert.Equal(t, imgsrv.ArtifactFormatRawGZ, artifacts[0].Format)
 
 	gotArtifact, err := catalog.GetArtifact(ctx, image.Name, version.Version, artifact.ID.String())
 	require.NoError(t, err)
 	assert.Equal(t, artifact.ID, gotArtifact.ID)
+	assert.Equal(t, "default", gotArtifact.Variant)
 	assert.Equal(t, imgsrv.ArtifactFormatRawGZ, gotArtifact.Format)
 
 	artifactDownload, err := catalog.OpenArtifactDownload(
@@ -256,11 +259,13 @@ func TestReleaseFlowServesIncusSimpleStreams(t *testing.T) {
 		imgsrv.CreateDraftVersionRequest{Version: "20260511_0524"},
 	)
 	require.NoError(t, err)
+	secureBootArtifact := artifactRequest(diskBlob)
+	secureBootArtifact.Variant = "secureboot"
 	artifact, err := catalog.AddArtifact(
 		ctx,
 		image.Name,
 		draft.Version,
-		artifactRequest(diskBlob),
+		secureBootArtifact,
 	)
 	require.NoError(t, err)
 	_, err = catalog.AddAttachment(
@@ -287,7 +292,7 @@ func TestReleaseFlowServesIncusSimpleStreams(t *testing.T) {
 	require.NotNil(t, entry)
 	assert.Equal(t, simplestreams.ProductsFormat, entry.Format)
 	assert.Equal(t, incusschema.DataTypeImageDownloads, entry.DataType)
-	expectedProductName := "incus-flow:20260511_0524:amd64:default"
+	expectedProductName := "incus-flow:20260511_0524:amd64:secureboot"
 	assert.Equal(t, []string{expectedProductName}, entry.Products)
 
 	productFile, err := entry.ProductFile(ctx)
@@ -298,7 +303,7 @@ func TestReleaseFlowServesIncusSimpleStreams(t *testing.T) {
 	assert.Equal(t, "amd64", product.Metadata["arch"])
 	assert.Equal(t, "linux", product.Metadata["os"])
 	assert.Equal(t, "20260511_0524", product.Metadata["release"])
-	assert.Equal(t, "default", product.Metadata["variant"])
+	assert.Equal(t, "secureboot", product.Metadata["variant"])
 	assert.Equal(t, "incus-flow/20260511_0524,incus-flow/latest", product.Metadata["aliases"])
 	require.Len(t, product.Versions, 1)
 	var productVersion *simplestreams.Version
@@ -1058,6 +1063,7 @@ func assertManifest(
 	assert.Equal(t, state, manifest.Version.State)
 	require.Len(t, manifest.Artifacts, 1)
 	artifact := manifest.Artifacts[0].Artifact
+	assert.Equal(t, "default", artifact.Variant)
 	assert.Equal(t, imgsrv.ArtifactFormatRawGZ, artifact.Format)
 	assert.Equal(t, "application/gzip", artifact.PrimaryMediaType)
 	assert.Equal(t, primaryBlob.Digest, artifact.PrimaryBlobDigest)

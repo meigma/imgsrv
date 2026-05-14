@@ -133,6 +133,10 @@ const (
 
 	// ArtifactFormatQCOW2 is a qcow2 disk image artifact.
 	ArtifactFormatQCOW2 ArtifactFormat = "qcow2"
+
+	// DefaultArtifactVariant is the implicit release artifact variant for callers
+	// that do not need variant-specific artifacts.
+	DefaultArtifactVariant = "default"
 )
 
 // Image is an operator-defined image namespace.
@@ -187,6 +191,9 @@ type Artifact struct {
 
 	// VersionID identifies the parent image version.
 	VersionID uuid.UUID
+
+	// Variant is the artifact variant token.
+	Variant string
 
 	// OperatingSystem is the artifact operating-system token.
 	OperatingSystem string
@@ -365,6 +372,9 @@ type AddArtifactParams struct {
 	// Version identifies the draft image version.
 	Version string
 
+	// Variant is the artifact variant token. Empty selects DefaultArtifactVariant.
+	Variant string
+
 	// OperatingSystem is the artifact operating-system token.
 	OperatingSystem string
 
@@ -515,6 +525,15 @@ func ValidateArtifactFormat(format ArtifactFormat) error {
 	default:
 		return fmt.Errorf("%w: unsupported artifact format %q", ErrInvalid, format)
 	}
+}
+
+// NormalizeArtifactVariant returns the default variant when variant is empty.
+func NormalizeArtifactVariant(variant string) string {
+	if variant == "" {
+		return DefaultArtifactVariant
+	}
+
+	return variant
 }
 
 // ValidateToken validates an operating-system, architecture, or attachment token.

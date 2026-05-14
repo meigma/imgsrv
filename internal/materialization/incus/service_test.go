@@ -97,6 +97,7 @@ func TestBuildProductFileProjectsPersistedRowWithLiveAliases(t *testing.T) {
 				PublishedAt:              &publishedAt,
 				OperatingSystem:          "linux",
 				Architecture:             "x86_64",
+				Variant:                  "secureboot",
 				MetadataPath:             "v1/images/debian/versions/bookworm/artifacts/" + artifactID.String() + "/attachments/" + attachmentID.String() + "/download",
 				DiskPath:                 "v1/images/debian/versions/bookworm/artifacts/" + artifactID.String() + "/download",
 				MetadataSHA256:           digestHex(testCatalogDigest([]byte("metadata"))),
@@ -112,14 +113,14 @@ func TestBuildProductFileProjectsPersistedRowWithLiveAliases(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NoError(t, incusschema.ValidateRuntimeProductFile(productFile))
-	product := productFile.Products["debian:bookworm:amd64:default"]
+	product := productFile.Products["debian:bookworm:amd64:secureboot"]
 	require.NotNil(t, product)
 	assertMetadataValue(t, product, "aliases", "debian/bookworm,debian/latest")
 	assertMetadataValue(t, product, "arch", "amd64")
 	assertMetadataValue(t, product, "os", "linux")
 	assertMetadataValue(t, product, "release", "bookworm")
 	assertMetadataValue(t, product, "release_title", "Debian 12")
-	assertMetadataValue(t, product, "variant", defaultVariant)
+	assertMetadataValue(t, product, "variant", "secureboot")
 
 	streamVersion := product.Versions["20260511_05:24"]
 	require.NotNil(t, streamVersion)
@@ -195,6 +196,7 @@ func TestIndexerProjectsEligibleQCOW2Artifact(t *testing.T) {
 	assert.Equal(t, "bookworm", row.Version)
 	assert.Equal(t, "linux", row.OperatingSystem)
 	assert.Equal(t, "x86_64", row.Architecture)
+	assert.Equal(t, "secureboot", row.Variant)
 	assert.Equal(t, digestHex(metadataDigest), row.MetadataSHA256)
 	assert.Equal(t, digestHex(diskDigest), row.DiskSHA256)
 	assert.Equal(t, testCombinedSHA256(metadataPayload, diskPayload), row.CombinedDiskKVMImgSHA256)
@@ -325,6 +327,7 @@ func manifestForArtifact(
 				VersionID:            version.ID,
 				OperatingSystem:      "linux",
 				Architecture:         architecture,
+				Variant:              "secureboot",
 				Format:               format,
 				PrimaryBlobDigest:    diskDigest,
 				PrimaryBlobSizeBytes: int64(len("disk")),

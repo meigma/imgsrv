@@ -25,6 +25,7 @@ const (
 	testImageID      = "22222222-3333-4444-5555-666666666666"
 	testPublishJobID = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
 	testUploadID     = "11111111-2222-3333-4444-555555555555"
+	testVariant      = "secureboot"
 	testVersionID    = "55555555-6666-7777-8888-999999999999"
 )
 
@@ -532,6 +533,7 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	assert.Equal(t, version.ID, versions[0].ID)
 
 	artifact, err := catalog.AddArtifact(ctx, image.Name, version.Version, AddArtifactRequest{
+		Variant:              testVariant,
 		OperatingSystem:      "linux",
 		Architecture:         "x86_64",
 		Format:               ArtifactFormatRawGZ,
@@ -541,6 +543,7 @@ func TestClientCatalogFlowBuildsRequests(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, ArtifactID(testArtifactID), artifact.ID)
+	assert.Equal(t, testVariant, artifact.Variant)
 
 	attachment, err := catalog.AddAttachment(
 		ctx,
@@ -788,6 +791,7 @@ func registerCatalogArtifactHandlers(t *testing.T, mux *http.ServeMux) {
 				}
 				assert.Equal(t, "linux", got.OperatingSystem)
 				assert.Equal(t, "x86_64", got.Architecture)
+				assert.Equal(t, testVariant, got.Variant)
 				assert.Equal(t, ArtifactFormatRawGZ, got.Format)
 				assert.Equal(t, testDigest, got.PrimaryBlobDigest)
 				assert.Equal(t, int64(12), got.PrimaryBlobSizeBytes)
@@ -1212,6 +1216,7 @@ func artifactFixture() Artifact {
 	return Artifact{
 		ID:                   ArtifactID(testArtifactID),
 		VersionID:            testVersionID,
+		Variant:              testVariant,
 		OperatingSystem:      "linux",
 		Architecture:         "x86_64",
 		Format:               ArtifactFormatRawGZ,

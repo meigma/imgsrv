@@ -102,6 +102,9 @@ func TestArtifactValidation(t *testing.T) {
 	err = ValidateToken("architecture", "x86 64")
 	require.ErrorIs(t, err, ErrInvalid)
 
+	assert.Equal(t, DefaultArtifactVariant, NormalizeArtifactVariant(""))
+	assert.Equal(t, "secureboot", NormalizeArtifactVariant("secureboot"))
+
 	require.NoError(t, ValidateNonNegativeSize("size", 0))
 
 	err = ValidateNonNegativeSize("size", -1)

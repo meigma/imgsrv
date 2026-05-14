@@ -214,6 +214,7 @@ func (state *indexState) rowForArtifact(
 		PublishedAt:              manifest.Version.PublishedAt,
 		OperatingSystem:          artifact.OperatingSystem,
 		Architecture:             artifact.Architecture,
+		Variant:                  catalog.NormalizeArtifactVariant(artifact.Variant),
 		MetadataPath:             metadataPath.String(),
 		DiskPath:                 diskPath.String(),
 		MetadataSHA256:           metadataSHA256,

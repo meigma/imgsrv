@@ -89,6 +89,9 @@ func validateAddArtifactParams(params domain.AddArtifactParams) error {
 	}); err != nil {
 		return err
 	}
+	if err := domain.ValidateToken("variant", params.Variant); err != nil {
+		return err
+	}
 	if err := domain.ValidateToken("operating system", params.OperatingSystem); err != nil {
 		return err
 	}
