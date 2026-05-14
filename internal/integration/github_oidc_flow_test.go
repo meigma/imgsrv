@@ -26,7 +26,7 @@ const (
 
 func TestGitHubActionsOIDCWriteFlow(t *testing.T) {
 	issuer := testoidc.Start(t, time.Now().UTC())
-	env := harness.Start(t, harness.WithAPIToken(), harness.WithOIDCHTTPClient(issuer.HTTPClient()))
+	env := startEnv(t, harness.WithAPIToken(), harness.WithOIDCHTTPClient(issuer.HTTPClient()))
 	ctx := t.Context()
 	adminClient := newBearerClient(t, env, env.APIToken())
 	_, err := adminClient.Auth().CreateOIDCProvisioningRule(ctx, imgsrv.SaveOIDCProvisioningRuleRequest{

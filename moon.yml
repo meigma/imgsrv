@@ -84,6 +84,7 @@ tasks:
       - '@group(go)'
     options:
       cache: false
+      runInCI: false
 
   check:
     deps:
@@ -91,7 +92,6 @@ tasks:
       - 'root:lint'
       - 'root:build'
       - 'root:test'
-      - 'root:test-integration'
     inputs:
       - '@group(go)'
       - '@group(lintConfig)'

@@ -77,4 +77,4 @@ jobs:
         run: moon ci --summary minimal
 
       - name: Run Integration Tests
-        run: moon run root:test-integration --summary minimal
+        run: proto run go -- test -count=1 -tags=integration ./internal/integration/... ./test/...

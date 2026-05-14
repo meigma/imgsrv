@@ -284,12 +284,6 @@ func newClient(t *testing.T, env *harness.Env) *imgsrv.Client {
 	return client
 }
 
-func startIntegrationEnv(t testing.TB) *harness.Env {
-	t.Helper()
-
-	return harness.Start(t, harness.WithAPIToken())
-}
-
 func readObject(ctx context.Context, t *testing.T, env *harness.Env, key string) stagedObject {
 	t.Helper()
 
