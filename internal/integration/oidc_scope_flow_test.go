@@ -1,9 +1,8 @@
 //go:build integration
 
-package imgsrvtest_test
+package integration
 
 import (
-	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -12,21 +11,22 @@ import (
 	"github.com/stretchr/testify/require"
 
 	imgsrv "github.com/meigma/imgsrv/client"
+	"github.com/meigma/imgsrv/internal/integration/harness"
 	"github.com/meigma/imgsrv/internal/integration/testoidc"
-	imgsrvtest "github.com/meigma/imgsrv/test"
 )
 
-func TestOIDCBearerTokenCanUseWriteFlow(t *testing.T) {
+func TestOIDCScopeBearerTokenCanUseWriteFlow(t *testing.T) {
 	issuer := testoidc.Start(t, time.Now().UTC())
 	token := issuer.SignToken(t, nil)
-	env := imgsrvtest.Start(
+	env := startEnv(
 		t,
-		imgsrvtest.WithAPIToken(),
-		imgsrvtest.WithOIDCHTTPClient(issuer.HTTPClient()),
+		harness.WithAPIToken(),
+		harness.WithOIDCHTTPClient(issuer.HTTPClient()),
 	)
 
-	ctx := context.Background()
-	_, err := env.Client(t).Auth().CreateOIDCProvisioningRule(ctx, imgsrv.SaveOIDCProvisioningRuleRequest{
+	ctx := t.Context()
+	adminClient := newBearerClient(t, env, env.APIToken())
+	_, err := adminClient.Auth().CreateOIDCProvisioningRule(ctx, imgsrv.SaveOIDCProvisioningRuleRequest{
 		ID:              "scope-publisher",
 		DisplayName:     "Scope publisher",
 		IssuerURL:       issuer.URL(),
@@ -36,18 +36,13 @@ func TestOIDCBearerTokenCanUseWriteFlow(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	oidcClient, err := imgsrv.New(imgsrv.Options{
-		BaseURL:     env.BaseURL(),
-		HTTPClient:  env.HTTPClient(),
-		BearerToken: token,
-	})
-	require.NoError(t, err)
+	oidcClient := newBearerClient(t, env, token)
 	image, err := oidcClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
-		Name: "oidc-public-flow",
+		Name: "oidc-scope-flow",
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, "oidc-public-flow", image.Name)
+	assert.Equal(t, "oidc-scope-flow", image.Name)
 
 	anonymousClient, err := imgsrv.New(imgsrv.Options{
 		BaseURL:    env.BaseURL(),
@@ -56,30 +51,17 @@ func TestOIDCBearerTokenCanUseWriteFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = anonymousClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
-		Name: "oidc-public-flow-anonymous",
+		Name: "oidc-scope-flow-anonymous",
 	})
 	assertProblemStatus(t, err, http.StatusUnauthorized)
 
 	unscopedToken := issuer.SignToken(t, func(claims map[string]any) {
 		claims["scope"] = "openid profile"
 	})
-	unscopedClient, err := imgsrv.New(imgsrv.Options{
-		BaseURL:     env.BaseURL(),
-		HTTPClient:  env.HTTPClient(),
-		BearerToken: unscopedToken,
-	})
-	require.NoError(t, err)
+	unscopedClient := newBearerClient(t, env, unscopedToken)
 
 	_, err = unscopedClient.Catalog().CreateImage(ctx, imgsrv.CreateImageRequest{
-		Name: "oidc-public-flow-unscoped",
+		Name: "oidc-scope-flow-unscoped",
 	})
 	assertProblemStatus(t, err, http.StatusForbidden)
-}
-
-func assertProblemStatus(t testing.TB, err error, status int) {
-	t.Helper()
-
-	var problem *imgsrv.ProblemError
-	require.ErrorAs(t, err, &problem)
-	assert.Equal(t, status, problem.HTTPStatus)
 }
