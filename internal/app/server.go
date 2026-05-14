@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/meigma/authkit/httpauth"
@@ -22,6 +23,7 @@ import (
 	"github.com/meigma/imgsrv/internal/jobs/publishflow"
 	safelog "github.com/meigma/imgsrv/internal/logging"
 	incusmaterialization "github.com/meigma/imgsrv/internal/materialization/incus"
+	appmetrics "github.com/meigma/imgsrv/internal/metrics"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/objectstore/s3"
 	"github.com/meigma/imgsrv/internal/publish"
@@ -37,6 +39,9 @@ const defaultReadHeaderTimeout = 5 * time.Second
 type Dependencies struct {
 	// Logger receives process and adapter logs. Nil selects a discarded logger.
 	Logger *slog.Logger
+
+	// Telemetry is an optional prebuilt telemetry provider for HTTP metrics.
+	Telemetry *telemetry.Telemetry
 
 	// Readiness reports whether the service can accept operational traffic.
 	Readiness httpapi.ReadinessChecker
@@ -100,53 +105,50 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	logger.LogAttrs(ctx, slog.LevelInfo, "imgsrv starting", cfg.logAttrs()...)
 
-	var store *postgres.Store
-	if cfg.PostgresURL != "" {
-		store, err = postgres.Open(ctx, postgres.Config{
-			URL:    cfg.PostgresURL,
-			Logger: logger.With("component", "postgres"),
-		})
-		if err != nil {
-			return err
-		}
-		logger.InfoContext(ctx, "postgres store ready")
+	obs, err := newObservability(cfg)
+	if err != nil {
+		return err
 	}
 
-	uploadDependency, err := newUploadService(cfg, store, logger)
-	if err != nil {
-		if store != nil {
-			return joinError(err, store.Close())
+	var store *postgres.Store
+	if cfg.PostgresURL != "" {
+		store, err = openPostgresStore(ctx, cfg, logger, obs.metrics)
+		if err != nil {
+			return closeTelemetryAfterError(obs.telemetry, err)
 		}
-		return err
 	}
-	backgroundJobs, err := newCASPromotionJobs(cfg, store, uploadDependency.objects, logger)
+
+	uploadDependency, err := newUploadService(cfg, store, logger, obs.metrics)
 	if err != nil {
-		if store != nil {
-			return joinError(err, store.Close())
-		}
-		return err
+		return closeRunDependencies(obs, store, err)
+	}
+	backgroundJobs, err := newCASPromotionJobs(cfg, store, uploadDependency.objects, logger, obs.metrics)
+	if err != nil {
+		return closeRunDependencies(obs, store, err)
 	}
 
 	authDependency, err := newAuthService(ctx, store, os.Stdout, logger)
 	if err != nil {
-		if store != nil {
-			return joinError(err, store.Close())
-		}
-		return err
+		return closeRunDependencies(obs, store, err)
 	}
 
 	catalogService := newCatalogService(store)
 	publishService := newPublishService(store)
-	publishJobs, err := newPublishJobs(cfg, store, catalogService, uploadDependency.blobs, logger)
+	publishJobs, err := newPublishJobs(
+		cfg,
+		store,
+		catalogService,
+		uploadDependency.blobs,
+		logger,
+		obs.metrics,
+	)
 	if err != nil {
-		if store != nil {
-			return joinError(err, store.Close())
-		}
-		return err
+		return closeRunDependencies(obs, store, err)
 	}
 	backgroundJobs = append(backgroundJobs, publishJobs...)
 	server, err := NewServer(cfg, Dependencies{
 		Logger:         logger,
+		Telemetry:      obs.telemetry,
 		Auth:           authDependency.service,
 		AuthManagement: authDependency.management,
 		Uploads:        uploadDependency.service,
@@ -157,10 +159,7 @@ func Run(ctx context.Context, cfg Config) error {
 		BackgroundJobs: backgroundJobs,
 	})
 	if err != nil {
-		if store != nil {
-			return joinError(err, store.Close())
-		}
-		return err
+		return closeRunDependencies(obs, store, err)
 	}
 	server.store = store
 
@@ -172,6 +171,40 @@ func Run(ctx context.Context, cfg Config) error {
 	return runErr
 }
 
+func openPostgresStore(
+	ctx context.Context,
+	cfg Config,
+	logger *slog.Logger,
+	recorder *appmetrics.Recorder,
+) (*postgres.Store, error) {
+	store, err := postgres.Open(ctx, postgres.Config{
+		URL:    cfg.PostgresURL,
+		Logger: logger.With("component", "postgres"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	logger.InfoContext(ctx, "postgres store ready")
+
+	if recorder == nil {
+		recorder = appmetrics.Noop()
+	}
+	registerErr := recorder.RegisterPostgres(store)
+	if registerErr != nil {
+		return nil, joinError(registerErr, store.Close())
+	}
+
+	return store, nil
+}
+
+func closeRunDependencies(obs observability, store *postgres.Store, cause error) error {
+	if store != nil {
+		cause = joinError(cause, store.Close())
+	}
+
+	return closeTelemetryAfterError(obs.telemetry, cause)
+}
+
 // NewServer constructs an HTTP server from runtime configuration and adapters.
 func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 	cfg = cfg.withDefaults()
@@ -180,16 +213,13 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 		logger = safelog.Nop()
 	}
 
-	var telemetryProviders *telemetry.Telemetry
-	if cfg.MetricsListen != "" {
-		var err error
-		telemetryProviders, err = telemetry.New(telemetry.Config{
-			ServiceName: "imgsrv",
-			MetricsPath: cfg.MetricsPath,
-		})
+	telemetryProviders := deps.Telemetry
+	if telemetryProviders == nil {
+		observability, err := newObservability(cfg)
 		if err != nil {
 			return nil, err
 		}
+		telemetryProviders = observability.telemetry
 	}
 
 	handler := httpapi.New(httpapi.Dependencies{
@@ -217,7 +247,7 @@ func NewServer(cfg Config, deps Dependencies) (*Server, error) {
 		shutdownTimeout: cfg.ShutdownTimeout,
 	}
 	server.backgroundJobs = backgroundJobSpecs(deps.BackgroundJobs)
-	if telemetryProviders != nil {
+	if telemetryProviders != nil && cfg.MetricsListen != "" {
 		server.metricsServer = &http.Server{
 			Addr:              cfg.MetricsListen,
 			Handler:           telemetryProviders.MetricsHandler,
@@ -328,7 +358,12 @@ type uploadServiceDependency struct {
 
 // newUploadService builds the upload service and its S3 object store from cfg, returning a zero
 // value when no S3 configuration is present.
-func newUploadService(cfg Config, store *postgres.Store, logger *slog.Logger) (uploadServiceDependency, error) {
+func newUploadService(
+	cfg Config,
+	store *postgres.Store,
+	logger *slog.Logger,
+	metrics *appmetrics.Recorder,
+) (uploadServiceDependency, error) {
 	if !cfg.hasS3Config() {
 		return uploadServiceDependency{}, nil
 	}
@@ -353,16 +388,17 @@ func newUploadService(cfg Config, store *postgres.Store, logger *slog.Logger) (u
 	if err != nil {
 		return uploadServiceDependency{}, fmt.Errorf("open s3 object store: %w", err)
 	}
+	instrumentedObjects := objectstore.InstrumentStore(objects, metrics)
 
 	return uploadServiceDependency{
 		service: uploads.NewService(uploads.ServiceConfig{
 			Store:        store.Uploads(),
-			Objects:      objects,
+			Objects:      instrumentedObjects,
 			TrustedBlobs: trustedBlobLookup(store),
 			Logger:       logger.With("component", "uploads"),
 		}),
-		blobs:   newCASService(store, objects, logger),
-		objects: objects,
+		blobs:   newCASService(store, instrumentedObjects, logger),
+		objects: instrumentedObjects,
 	}, nil
 }
 
@@ -585,6 +621,7 @@ func newCASPromotionJobs(
 	store *postgres.Store,
 	objects objectstore.Store,
 	logger *slog.Logger,
+	metrics *appmetrics.Recorder,
 ) ([]BackgroundJob, error) {
 	cfg = cfg.withDefaults()
 	if !cfg.CASPromotionEnabled {
@@ -608,6 +645,7 @@ func newCASPromotionJobs(
 			CAS:     casService,
 			Logger:  logger.With("component", "cas-promotion"),
 		}),
+		Name:                   "cas-promotion",
 		WorkerID:               jobs.Identity{NodeName: cfg.NodeName, RunID: cfg.RunID}.WorkerID("cas-promotion"),
 		Interval:               cfg.CASPromotionPollInterval,
 		ErrorBackoffInitial:    cfg.CASPromotionErrorBackoffInitial,
@@ -615,6 +653,7 @@ func newCASPromotionJobs(
 		CircuitBreakerFailures: cfg.CASPromotionCircuitBreakerFailures,
 		CircuitBreakerCooldown: cfg.CASPromotionCircuitBreakerCooldown,
 		Logger:                 logger.With("component", "cas-promotion"),
+		Metrics:                metrics,
 	})}, nil
 }
 
@@ -625,6 +664,7 @@ func newPublishJobs(
 	catalogService httpapi.CatalogService,
 	blobs httpapi.BlobService,
 	logger *slog.Logger,
+	metrics *appmetrics.Recorder,
 ) ([]BackgroundJob, error) {
 	cfg = cfg.withDefaults()
 	if store == nil {
@@ -650,6 +690,7 @@ func newPublishJobs(
 			}),
 			Logger: logger.With("component", "publish"),
 		}),
+		Name:                   "publish",
 		WorkerID:               jobs.Identity{NodeName: cfg.NodeName, RunID: cfg.RunID}.WorkerID("publish"),
 		Interval:               defaultCASPollInterval,
 		ErrorBackoffInitial:    defaultCASErrorBackoff,
@@ -657,6 +698,7 @@ func newPublishJobs(
 		CircuitBreakerFailures: defaultCASBreakerLimit,
 		CircuitBreakerCooldown: defaultCASBreakerPause,
 		Logger:                 logger.With("component", "publish"),
+		Metrics:                metrics,
 	})}, nil
 }
 
@@ -668,10 +710,14 @@ func backgroundJobSpecs(jobs []BackgroundJob) []backgroundJobSpec {
 			continue
 		}
 
-		specs = append(specs, backgroundJobSpec{
+		spec := backgroundJobSpec{
 			name: fmt.Sprintf("background-%d", index+1),
 			job:  job,
-		})
+		}
+		if named, ok := job.(interface{ Name() string }); ok && strings.TrimSpace(named.Name()) != "" {
+			spec.name = named.Name()
+		}
+		specs = append(specs, spec)
 	}
 
 	return specs

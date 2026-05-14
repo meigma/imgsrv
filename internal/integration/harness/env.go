@@ -17,9 +17,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/meigma/imgsrv/internal/authz"
+	appmetrics "github.com/meigma/imgsrv/internal/metrics"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/objectstore/s3"
 	"github.com/meigma/imgsrv/internal/store/postgres"
+	"github.com/meigma/imgsrv/internal/telemetry"
 )
 
 const (
@@ -71,10 +73,20 @@ func WithBootstrapOutput(output io.Writer) Option {
 	}
 }
 
+// WithMetrics starts the in-process metrics listener for the integration environment.
+func WithMetrics() Option {
+	return func(options *options) {
+		options.metrics = true
+	}
+}
+
 // Env owns a running imgsrv integration-test environment.
 type Env struct {
 	// baseURL is the root URL for the in-process imgsrv HTTP server.
 	baseURL string
+
+	// metricsURL is the root URL for the in-process metrics server.
+	metricsURL string
 
 	// httpClient is the HTTP client integration tests use to call the server.
 	httpClient *http.Client
@@ -90,6 +102,12 @@ type Env struct {
 
 	// apiToken is the plaintext generated authkit API token seeded for this environment.
 	apiToken string
+
+	// metrics is the optional recorder used by the in-process server.
+	metrics *appmetrics.Recorder
+
+	// telemetry is the optional telemetry provider backing the metrics listener.
+	telemetry *telemetry.Telemetry
 }
 
 // Start creates a full imgsrv integration-test environment.
@@ -119,21 +137,31 @@ func StartWithDependencies(t testing.TB, deps *Dependencies, opts ...Option) *En
 	apiToken := seedAPIToken(ctx, t, store, startupOptions.apiToken)
 	baseObjectStore := openObjectStore(t, deps.s3Config)
 	objectStore := newPrefixedObjectStore(baseObjectStore, isolation.objectPrefix)
-	baseURL := startServer(ctx, t, startupOptions, store, objectStore)
+	observability := startObservability(t, startupOptions, store)
+	objectStore = objectstore.InstrumentStore(objectStore, observability.metrics)
+	endpoints := startServer(ctx, t, startupOptions, store, objectStore, observability)
 
 	return &Env{
-		baseURL:     baseURL,
+		baseURL:     endpoints.baseURL,
+		metricsURL:  endpoints.metricsURL,
 		httpClient:  newHTTPClient(),
 		store:       store,
 		objectStore: objectStore,
 		s3Config:    deps.s3Config,
 		apiToken:    apiToken,
+		metrics:     observability.metrics,
+		telemetry:   observability.telemetry,
 	}
 }
 
 // BaseURL returns the root URL for the in-process imgsrv HTTP server.
 func (env *Env) BaseURL() string {
 	return env.baseURL
+}
+
+// MetricsURL returns the root URL for the metrics listener.
+func (env *Env) MetricsURL() string {
+	return env.metricsURL
 }
 
 // URL returns an absolute server URL for path.
@@ -175,7 +203,35 @@ type options struct {
 	bootstrapOutput io.Writer
 	casPromotion    bool
 	apiToken        bool
+	metrics         bool
 	oidcHTTPClient  *http.Client
+}
+
+type observability struct {
+	telemetry *telemetry.Telemetry
+	metrics   *appmetrics.Recorder
+}
+
+func startObservability(t testing.TB, options options, store *postgres.Store) observability {
+	t.Helper()
+	if !options.metrics {
+		return observability{metrics: appmetrics.Noop()}
+	}
+
+	providers, err := telemetry.New(telemetry.Config{
+		ServiceName: "imgsrv",
+		MetricsPath: "/metrics",
+	})
+	require.NoError(t, err)
+
+	recorder, err := appmetrics.New(providers.Meter("github.com/meigma/imgsrv/internal/metrics"))
+	require.NoError(t, err)
+	require.NoError(t, recorder.RegisterPostgres(store))
+
+	return observability{
+		telemetry: providers,
+		metrics:   recorder,
+	}
 }
 
 // newOptions applies opts to a zero options value and returns the resolved

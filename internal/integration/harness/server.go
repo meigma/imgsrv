@@ -24,6 +24,7 @@ import (
 	"github.com/meigma/imgsrv/internal/jobs/promote"
 	"github.com/meigma/imgsrv/internal/jobs/publishflow"
 	incusmaterialization "github.com/meigma/imgsrv/internal/materialization/incus"
+	appmetrics "github.com/meigma/imgsrv/internal/metrics"
 	"github.com/meigma/imgsrv/internal/objectstore"
 	"github.com/meigma/imgsrv/internal/publish"
 	"github.com/meigma/imgsrv/internal/store/postgres"
@@ -85,11 +86,17 @@ func startServer(
 	options options,
 	store *postgres.Store,
 	objects objectstore.Store,
-) string {
+	observability observability,
+) serverEndpoints {
 	t.Helper()
 
 	listener, err := new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+	var metricsListener net.Listener
+	if options.metrics {
+		metricsListener, err = new(net.ListenConfig).Listen(ctx, "tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+	}
 	authStore := store.Authkit()
 	require.NoError(t, authz.EnsureBuiltinRoles(ctx, authStore))
 	require.NoError(t, authz.EnsureBootstrapAdmin(ctx, authz.BootstrapConfig{
@@ -108,11 +115,17 @@ func startServer(
 		Store: store.Catalog(),
 	})
 	blobService := newCASService(store, objects, options.logger.With("component", "cas"))
-	server, err := app.NewServer(app.Config{
+	config := app.Config{
 		Listen:          listener.Addr().String(),
 		ShutdownTimeout: serverShutdownTimeout,
-	}, app.Dependencies{
+	}
+	if options.metrics {
+		config.MetricsListen = metricsListener.Addr().String()
+		config.MetricsPath = "/metrics"
+	}
+	server, err := app.NewServer(config, app.Dependencies{
 		Logger:         options.logger,
+		Telemetry:      observability.telemetry,
 		Auth:           authService,
 		AuthManagement: authManagement,
 		Uploads: uploads.NewService(uploads.ServiceConfig{
@@ -131,13 +144,17 @@ func startServer(
 			Store:   store.IncusProjection(),
 			Logger:  options.logger.With("component", "incus-materialization"),
 		}),
-		BackgroundJobs: backgroundJobs(options, store, objects, catalogService, blobService),
+		BackgroundJobs: backgroundJobs(options, store, objects, catalogService, blobService, observability.metrics),
 	})
 	require.NoError(t, err)
 
 	serverCtx, cancel := context.WithCancel(ctx)
 	errCh := make(chan error, 1)
 	go func() {
+		if options.metrics {
+			errCh <- server.Serve(serverCtx, listener, metricsListener)
+			return
+		}
 		errCh <- server.Serve(serverCtx, listener)
 	}()
 	t.Cleanup(func() {
@@ -153,7 +170,23 @@ func startServer(
 	baseURL := "http://" + listener.Addr().String()
 	waitForServer(ctx, t, baseURL, errCh)
 
-	return baseURL
+	return serverEndpoints{
+		baseURL:    baseURL,
+		metricsURL: metricsBaseURL(metricsListener),
+	}
+}
+
+type serverEndpoints struct {
+	baseURL    string
+	metricsURL string
+}
+
+func metricsBaseURL(listener net.Listener) string {
+	if listener == nil {
+		return ""
+	}
+
+	return "http://" + listener.Addr().String()
 }
 
 // newAuthService constructs the chained auth service used by integration servers.
@@ -224,6 +257,7 @@ func backgroundJobs(
 	objects objectstore.Store,
 	catalogService httpapi.CatalogService,
 	blobService httpapi.BlobService,
+	metrics *appmetrics.Recorder,
 ) []app.BackgroundJob {
 	publishJob := jobs.New(jobs.Config{
 		Handler: publishflow.New(publishflow.Config{
@@ -235,6 +269,7 @@ func backgroundJobs(
 			}),
 			Logger: options.logger.With("component", publishWorkerName),
 		}),
+		Name: publishWorkerName,
 		WorkerID: jobs.Identity{
 			NodeName: casPromotionWorkerNodeName,
 			RunID:    casPromotionWorkerRunID,
@@ -243,6 +278,7 @@ func backgroundJobs(
 		ErrorBackoffInitial: publishPollInterval,
 		ErrorBackoffMax:     publishErrorBackoffMax,
 		Logger:              options.logger.With("component", publishWorkerName),
+		Metrics:             metrics,
 	})
 	if !options.casPromotion {
 		return []app.BackgroundJob{publishJob}
@@ -256,6 +292,7 @@ func backgroundJobs(
 			CAS:     casService,
 			Logger:  options.logger.With("component", casPromotionWorkerName),
 		}),
+		Name: casPromotionWorkerName,
 		WorkerID: jobs.Identity{
 			NodeName: casPromotionWorkerNodeName,
 			RunID:    casPromotionWorkerRunID,
@@ -264,6 +301,7 @@ func backgroundJobs(
 		ErrorBackoffInitial: casPromotionPollInterval,
 		ErrorBackoffMax:     casPromotionErrorBackoffMax,
 		Logger:              options.logger.With("component", casPromotionWorkerName),
+		Metrics:             metrics,
 	}), publishJob}
 }
 
