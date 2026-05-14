@@ -250,7 +250,7 @@ func TestNewUploadServiceRequiresPostgresWhenS3Configured(t *testing.T) {
 		S3Bucket:          "imgsrv",
 		S3AccessKeyID:     "access",
 		S3SecretAccessKey: "secret",
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "postgres url")
@@ -267,7 +267,7 @@ func TestNewCASPromotionJobsRequiresDependenciesWhenEnabled(t *testing.T) {
 		CASPromotionErrorBackoffMax:        time.Minute,
 		CASPromotionCircuitBreakerFailures: 10,
 		CASPromotionCircuitBreakerCooldown: time.Minute,
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "postgres url")

@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/meigma/imgsrv/internal/metrics"
 )
 
 const (
@@ -39,6 +41,9 @@ type Config struct {
 	// Handler executes one background job attempt.
 	Handler Handler
 
+	// Name is the bounded metric and lifecycle label for this job.
+	Name string
+
 	// WorkerID identifies this runner in durable job state.
 	WorkerID string
 
@@ -59,12 +64,17 @@ type Config struct {
 
 	// Logger receives background job logs. Nil selects a discarded logger.
 	Logger *slog.Logger
+
+	// Metrics records optional background job metrics. Nil disables metrics.
+	Metrics *metrics.Recorder
 }
 
 // Runner repeatedly executes a background job handler.
 type Runner struct {
 	// handler executes one background job attempt per iteration.
 	handler Handler
+	// name is the bounded metric and lifecycle label for this job.
+	name string
 	// workerID identifies this runner in durable job state.
 	workerID string
 	// interval is the idle polling delay between attempts that found no work.
@@ -75,6 +85,8 @@ type Runner struct {
 	circuitBreaker circuitBreaker
 	// logger receives background job logs.
 	logger *slog.Logger
+	// metrics records optional background job metrics.
+	metrics *metrics.Recorder
 }
 
 // New constructs a Runner from config.
@@ -93,15 +105,34 @@ func New(config Config) *Runner {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+	metricsRecorder := config.Metrics
+	if metricsRecorder == nil {
+		metricsRecorder = metrics.Noop()
+	}
+	name := strings.TrimSpace(config.Name)
+	if name == "" {
+		name = "background"
+	}
 
 	return &Runner{
 		handler:        config.Handler,
+		name:           name,
 		workerID:       config.WorkerID,
 		interval:       interval,
 		backoff:        backoff,
 		circuitBreaker: breaker,
 		logger:         logger,
+		metrics:        metricsRecorder,
 	}
+}
+
+// Name returns the bounded lifecycle and metric label for the runner.
+func (runner *Runner) Name() string {
+	if runner == nil || runner.name == "" {
+		return "background"
+	}
+
+	return runner.name
 }
 
 // RunOnce executes exactly one background job attempt.
@@ -111,7 +142,14 @@ func (runner *Runner) RunOnce(ctx context.Context) (Result, error) {
 		return Result{}, err
 	}
 
-	return handler.RunOnce(ctx, workerID)
+	result, runErr := handler.RunOnce(ctx, workerID)
+	failureCount := 0
+	if runErr != nil {
+		failureCount = 1
+	}
+	runner.recordAttempt(ctx, result, runErr, failureCount)
+
+	return result, runErr
 }
 
 // Run executes the background job loop until ctx is canceled.
@@ -135,6 +173,7 @@ func (runner *Runner) Run(ctx context.Context) error {
 		}
 		if err != nil {
 			failures++
+			runner.recordAttempt(ctx, result, err, failures)
 			delay := errorDelay
 			errorDelay = nextBackoff(errorDelay, runner.backoff.max)
 			if runner.circuitBreaker.open(failures) {
@@ -151,7 +190,9 @@ func (runner *Runner) Run(ctx context.Context) error {
 					"background job circuit breaker open",
 					breakerAttrs...,
 				)
+				runner.metrics.RecordBackgroundJobCircuitOpen(ctx, runner.Name())
 				failures = 0
+				runner.metrics.RecordBackgroundJobConsecutiveFailures(ctx, runner.Name(), 0)
 			}
 			errorAttrs := appendLogAttrs(
 				attrs,
@@ -170,6 +211,7 @@ func (runner *Runner) Run(ctx context.Context) error {
 			continue
 		}
 		failures = 0
+		runner.recordAttempt(ctx, result, nil, failures)
 		errorDelay = runner.backoff.initial
 		if result.Worked {
 			runner.logger.LogAttrs(ctx, slog.LevelDebug, "background job completed work", attrs...)
@@ -180,6 +222,21 @@ func (runner *Runner) Run(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+func (runner *Runner) recordAttempt(ctx context.Context, result Result, err error, failures int) {
+	if err != nil {
+		runner.metrics.RecordBackgroundJobAttempt(ctx, runner.Name(), "error")
+		runner.metrics.RecordBackgroundJobError(ctx, runner.Name())
+		runner.metrics.RecordBackgroundJobConsecutiveFailures(ctx, runner.Name(), int64(failures))
+		return
+	}
+	if result.Worked {
+		runner.metrics.RecordBackgroundJobAttempt(ctx, runner.Name(), "worked")
+	} else {
+		runner.metrics.RecordBackgroundJobAttempt(ctx, runner.Name(), "idle")
+	}
+	runner.metrics.RecordBackgroundJobConsecutiveFailures(ctx, runner.Name(), 0)
 }
 
 func (result Result) logAttrs(workerID string) []slog.Attr {
