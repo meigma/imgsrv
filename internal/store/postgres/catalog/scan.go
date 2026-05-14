@@ -104,6 +104,7 @@ func scanArtifact(row rowScanner) (domain.Artifact, error) {
 	err := row.Scan(
 		&artifact.ID,
 		&artifact.VersionID,
+		&artifact.Variant,
 		&artifact.OperatingSystem,
 		&artifact.Architecture,
 		&artifact.Format,

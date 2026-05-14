@@ -27,7 +27,6 @@ const (
 	metadataFileType = "incus.tar.xz"
 	diskItemName     = "disk-kvm.img"
 	diskFileType     = "disk-kvm.img"
-	defaultVariant   = "default"
 )
 
 // ProjectionRow is one persisted Incus projection item for an eligible artifact.
@@ -61,6 +60,9 @@ type ProjectionRow struct {
 
 	// Architecture is the artifact architecture token.
 	Architecture string
+
+	// Variant is the artifact variant token.
+	Variant string
 
 	// MetadataPath is the API download path for the metadata item.
 	MetadataPath string
@@ -198,7 +200,7 @@ func (service *Service) BuildProductFile(ctx context.Context) (*simplestreams.Pr
 	productFile.DataType = incusschema.DataTypeImageDownloads
 	aliases := map[string][]catalog.Alias{}
 	for _, row := range rows {
-		productName := productName(row.ImageName, row.Version, row.Architecture)
+		productName := productName(row.ImageName, row.Version, row.Architecture, row.Variant)
 		if _, exists := productFile.Products[productName]; exists {
 			return nil, fmt.Errorf("incus materialization: duplicate product %q", productName)
 		}
@@ -236,7 +238,7 @@ func projectedProductNames(rows []ProjectionRow) ([]string, error) {
 	names := []string{}
 	seen := map[string]struct{}{}
 	for _, row := range rows {
-		name := productName(row.ImageName, row.Version, row.Architecture)
+		name := productName(row.ImageName, row.Version, row.Architecture, row.Variant)
 		if _, exists := seen[name]; exists {
 			return nil, fmt.Errorf("incus materialization: duplicate product %q", name)
 		}
@@ -253,13 +255,14 @@ func projectRow(
 	row ProjectionRow,
 	aliases []catalog.Alias,
 ) error {
-	product := productFile.SetProduct(productName(row.ImageName, row.Version, row.Architecture), nil)
+	variant := catalog.NormalizeArtifactVariant(row.Variant)
+	product := productFile.SetProduct(productName(row.ImageName, row.Version, row.Architecture, variant), nil)
 	product.SetMetadata("aliases", productAliases(row.ImageName, row.Version, aliases))
 	product.SetMetadata("arch", incusArchitecture(row.Architecture))
 	product.SetMetadata("os", row.OperatingSystem)
 	product.SetMetadata("release", row.Version)
 	product.SetMetadata("release_title", releaseTitle(row.ImageName, row.ImageDisplayName, row.Version))
-	product.SetMetadata("variant", defaultVariant)
+	product.SetMetadata("variant", variant)
 	product.SetMetadata("requirements", map[string]any{})
 
 	version := product.SetVersion(incusSerial(row), nil)
@@ -298,12 +301,12 @@ func setItems(version *simplestreams.Version, row ProjectionRow) error {
 	return nil
 }
 
-func productName(imageName string, version string, architecture string) string {
+func productName(imageName string, version string, architecture string, variant string) string {
 	return strings.Join([]string{
 		imageName,
 		version,
 		incusArchitecture(architecture),
-		defaultVariant,
+		catalog.NormalizeArtifactVariant(variant),
 	}, ":")
 }
 

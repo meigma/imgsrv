@@ -356,6 +356,66 @@ func TestCatalogAddsRawGZArtifact(t *testing.T) {
 	assert.Equal(t, primaryDigest, manifest.Artifacts[0].Artifact.PrimaryBlobDigest)
 }
 
+func TestCatalogArtifactsUseVariantInIdentity(t *testing.T) {
+	ctx := t.Context()
+	store := startCatalogIntegrationStore(t)
+	catalogStore := store.Catalog()
+
+	createImage(t, ctx, catalogStore, "variant-artifacts")
+	createVersion(t, ctx, catalogStore, "variant-artifacts", "v1.0.0")
+	primaryDigest := catalogDigest("a")
+	insertTrustedBlob(t, store, primaryDigest, 4096)
+
+	defaultArtifact, err := catalogStore.AddArtifact(ctx, domain.AddArtifactParams{
+		ImageName:            "variant-artifacts",
+		Version:              "v1.0.0",
+		OperatingSystem:      "linux",
+		Architecture:         "amd64",
+		Format:               domain.ArtifactFormatRaw,
+		PrimaryBlobDigest:    primaryDigest,
+		PrimaryBlobSizeBytes: 4096,
+		PrimaryMediaType:     "application/octet-stream",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, domain.DefaultArtifactVariant, defaultArtifact.Variant)
+
+	secureBootArtifact, err := catalogStore.AddArtifact(ctx, domain.AddArtifactParams{
+		ImageName:            "variant-artifacts",
+		Version:              "v1.0.0",
+		Variant:              "secureboot",
+		OperatingSystem:      defaultArtifact.OperatingSystem,
+		Architecture:         defaultArtifact.Architecture,
+		Format:               defaultArtifact.Format,
+		PrimaryBlobDigest:    primaryDigest,
+		PrimaryBlobSizeBytes: 4096,
+		PrimaryMediaType:     defaultArtifact.PrimaryMediaType,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "secureboot", secureBootArtifact.Variant)
+
+	_, err = catalogStore.AddArtifact(ctx, domain.AddArtifactParams{
+		ImageName:            "variant-artifacts",
+		Version:              "v1.0.0",
+		Variant:              "secureboot",
+		OperatingSystem:      defaultArtifact.OperatingSystem,
+		Architecture:         defaultArtifact.Architecture,
+		Format:               defaultArtifact.Format,
+		PrimaryBlobDigest:    primaryDigest,
+		PrimaryBlobSizeBytes: 4096,
+		PrimaryMediaType:     defaultArtifact.PrimaryMediaType,
+	})
+	assert.ErrorIs(t, err, domain.ErrConflict)
+
+	manifest, err := catalogStore.GetVersionManifest(ctx, domain.GetVersionManifestParams{
+		ImageName: "variant-artifacts",
+		Version:   "v1.0.0",
+	})
+	require.NoError(t, err)
+	require.Len(t, manifest.Artifacts, 2)
+	assert.Equal(t, []string{domain.DefaultArtifactVariant, "secureboot"}, artifactVariants(manifest.Artifacts))
+	assert.Equal(t, []uuid.UUID{defaultArtifact.ID, secureBootArtifact.ID}, manifestArtifactIDs(manifest.Artifacts))
+}
+
 func startCatalogIntegrationStore(t *testing.T) *Store {
 	t.Helper()
 
@@ -651,6 +711,24 @@ func artifactIDs(artifacts []domain.Artifact) []uuid.UUID {
 	}
 
 	return ids
+}
+
+func manifestArtifactIDs(artifacts []domain.ManifestArtifact) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		ids = append(ids, artifact.Artifact.ID)
+	}
+
+	return ids
+}
+
+func artifactVariants(artifacts []domain.ManifestArtifact) []string {
+	variants := make([]string, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		variants = append(variants, artifact.Artifact.Variant)
+	}
+
+	return variants
 }
 
 func catalogDigest(hexChar string) domain.Digest {

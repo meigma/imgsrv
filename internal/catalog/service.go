@@ -121,6 +121,8 @@ func (service *Service) AddArtifact(ctx context.Context, params AddArtifactParam
 		return Artifact{}, err
 	}
 
+	params.Variant = NormalizeArtifactVariant(params.Variant)
+
 	return store.AddArtifact(ctx, params)
 }
 

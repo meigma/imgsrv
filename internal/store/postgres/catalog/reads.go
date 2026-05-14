@@ -302,6 +302,7 @@ func (store *Store) GetPublishedArtifact(
 		ctx,
 		`SELECT release_artifacts.id,
 			release_artifacts.version_id,
+			release_artifacts.variant,
 			release_artifacts.operating_system,
 			release_artifacts.architecture,
 			release_artifacts.format,
@@ -600,7 +601,7 @@ func resolveManifestArtifacts(
 }
 
 // listArtifacts returns the release artifacts for versionID ordered by
-// operating system, architecture, format, and id.
+// variant, operating system, architecture, format, and id.
 func listArtifacts(
 	ctx context.Context,
 	db queryer,
@@ -610,6 +611,7 @@ func listArtifacts(
 		ctx,
 		`SELECT id,
 			version_id,
+			variant,
 			operating_system,
 			architecture,
 			format,
@@ -620,7 +622,7 @@ func listArtifacts(
 			updated_at
 		FROM release_artifacts
 		WHERE version_id = $1
-		ORDER BY operating_system, architecture, format, id`,
+		ORDER BY variant, operating_system, architecture, format, id`,
 		versionID,
 	)
 	if err != nil {

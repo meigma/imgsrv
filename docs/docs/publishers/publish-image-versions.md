@@ -128,8 +128,10 @@ curl -sf -X POST \
   }'
 ```
 
-A version may carry several artifacts — one per OS/architecture/format
-combination. Each is added independently.
+A version may carry several artifacts — one per variant/OS/architecture/format
+combination. Omit `variant` for the default variant, or set it when publishing
+another artifact with the same OS/architecture/format. Each artifact is added
+independently.
 
 ## 6. Attach attachments
 

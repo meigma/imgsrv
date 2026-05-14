@@ -419,11 +419,55 @@ func TestResolveManifestReturnsPublishedManifestForRef(t *testing.T) {
 func TestAddArtifactCreatesPrimaryArtifact(t *testing.T) {
 	tc := newCatalogHandlerTestContext(t)
 	wantArtifact := catalogArtifactFixture()
+	wantArtifact.Variant = "secureboot"
 
 	tc.catalog.EXPECT().
 		AddArtifact(mock.Anything, catalog.AddArtifactParams{
 			ImageName:            "debian",
 			Version:              "v1.0.0",
+			Variant:              "secureboot",
+			OperatingSystem:      "linux",
+			Architecture:         "x86_64",
+			Format:               catalog.ArtifactFormatRawGZ,
+			PrimaryBlobDigest:    catalogDigestFixture(),
+			PrimaryBlobSizeBytes: 1024,
+			PrimaryMediaType:     "application/gzip",
+		}).
+		Return(wantArtifact, nil)
+
+	req := newHTTPAPIRequest(http.MethodPost, "/v1/images/debian/versions/v1.0.0/artifacts", strings.NewReader(`{
+		"variant": "secureboot",
+		"operating_system": "linux",
+		"architecture": "x86_64",
+		"format": "raw.gz",
+		"primary_blob_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"primary_blob_size_bytes": 1024,
+		"primary_media_type": "application/gzip"
+	}`))
+	rec := httptest.NewRecorder()
+
+	tc.handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var got artifactResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, catalogArtifactIDFixture().String(), got.ID)
+	assert.Equal(t, "secureboot", got.Variant)
+	assert.Equal(t, "linux", got.OperatingSystem)
+	assert.Equal(t, "x86_64", got.Architecture)
+	assert.Equal(t, catalog.ArtifactFormatRawGZ, got.Format)
+	assert.Equal(t, catalogDigestFixture().String(), got.PrimaryBlobDigest)
+}
+
+func TestAddArtifactDefaultsVariant(t *testing.T) {
+	tc := newCatalogHandlerTestContext(t)
+	wantArtifact := catalogArtifactFixture()
+
+	tc.catalog.EXPECT().
+		AddArtifact(mock.Anything, catalog.AddArtifactParams{
+			ImageName:            "debian",
+			Version:              "v1.0.0",
+			Variant:              catalog.DefaultArtifactVariant,
 			OperatingSystem:      "linux",
 			Architecture:         "x86_64",
 			Format:               catalog.ArtifactFormatRawGZ,
@@ -448,11 +492,7 @@ func TestAddArtifactCreatesPrimaryArtifact(t *testing.T) {
 	require.Equal(t, http.StatusCreated, rec.Code)
 	var got artifactResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	assert.Equal(t, catalogArtifactIDFixture().String(), got.ID)
-	assert.Equal(t, "linux", got.OperatingSystem)
-	assert.Equal(t, "x86_64", got.Architecture)
-	assert.Equal(t, catalog.ArtifactFormatRawGZ, got.Format)
-	assert.Equal(t, catalogDigestFixture().String(), got.PrimaryBlobDigest)
+	assert.Equal(t, catalog.DefaultArtifactVariant, got.Variant)
 }
 
 func TestDeleteArtifactDeletesDraftArtifact(t *testing.T) {
@@ -1104,6 +1144,7 @@ func catalogArtifactFixture() catalog.Artifact {
 	return catalog.Artifact{
 		ID:                   catalogArtifactIDFixture(),
 		VersionID:            catalogVersionIDFixture(),
+		Variant:              catalog.DefaultArtifactVariant,
 		OperatingSystem:      "linux",
 		Architecture:         "x86_64",
 		Format:               catalog.ArtifactFormatRawGZ,

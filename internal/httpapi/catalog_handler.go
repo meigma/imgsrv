@@ -40,6 +40,9 @@ type putAliasRequest struct {
 
 // addArtifactRequest is the JSON body for POST /v1/images/{name}/versions/{version}/artifacts.
 type addArtifactRequest struct {
+	// Variant is the artifact variant token. Empty selects the default variant.
+	Variant string `json:"variant,omitempty"`
+
 	// OperatingSystem is the artifact operating-system token.
 	OperatingSystem string `json:"operating_system"`
 
@@ -138,6 +141,9 @@ type artifactResponse struct {
 
 	// VersionID identifies the parent image version.
 	VersionID string `json:"version_id"`
+
+	// Variant is the artifact variant token.
+	Variant string `json:"variant"`
 
 	// OperatingSystem is the artifact operating-system token.
 	OperatingSystem string `json:"operating_system"`
@@ -481,6 +487,7 @@ func (a *api) addArtifact(w http.ResponseWriter, r *http.Request) {
 	artifact, err := service.AddArtifact(r.Context(), catalog.AddArtifactParams{
 		ImageName:            r.PathValue("name"),
 		Version:              r.PathValue("version"),
+		Variant:              catalog.NormalizeArtifactVariant(request.Variant),
 		OperatingSystem:      request.OperatingSystem,
 		Architecture:         request.Architecture,
 		Format:               catalog.ArtifactFormat(request.Format),
@@ -513,6 +520,8 @@ func (a *api) addArtifact(w http.ResponseWriter, r *http.Request) {
 		artifact.PrimaryBlobSizeBytes,
 		"format",
 		string(artifact.Format),
+		"variant",
+		artifact.Variant,
 		"operating_system",
 		artifact.OperatingSystem,
 		"architecture",
@@ -899,6 +908,7 @@ func newArtifactResponse(artifact catalog.Artifact) artifactResponse {
 	return artifactResponse{
 		ID:                   artifact.ID.String(),
 		VersionID:            artifact.VersionID.String(),
+		Variant:              artifact.Variant,
 		OperatingSystem:      artifact.OperatingSystem,
 		Architecture:         artifact.Architecture,
 		Format:               artifact.Format,
