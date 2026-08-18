@@ -7,9 +7,9 @@ require (
 	github.com/felixge/httpsnoop v1.0.4
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/google/uuid v1.6.0
+	github.com/imgoci/go-simplestreams v0.2.0
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/meigma/authkit v0.3.0
-	github.com/meigma/go-simplestreams v0.1.0
 	github.com/minio/minio-go/v7 v7.1.0
 	github.com/pressly/goose/v3 v3.27.1
 	github.com/prometheus/client_golang v1.23.2

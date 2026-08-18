@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	simplestreams "github.com/meigma/go-simplestreams"
-	incusschema "github.com/meigma/go-simplestreams/schema/incus"
+	simplestreams "github.com/imgoci/go-simplestreams"
+	incusschema "github.com/imgoci/go-simplestreams/schema/incus"
 
 	"github.com/meigma/imgsrv/internal/catalog"
 	safelog "github.com/meigma/imgsrv/internal/logging"

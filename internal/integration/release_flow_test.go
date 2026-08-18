@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	simplestreams "github.com/meigma/go-simplestreams"
-	"github.com/meigma/go-simplestreams/adapters/httpmirror"
-	incusschema "github.com/meigma/go-simplestreams/schema/incus"
+	simplestreams "github.com/imgoci/go-simplestreams"
+	"github.com/imgoci/go-simplestreams/adapters/httpmirror"
+	incusschema "github.com/imgoci/go-simplestreams/schema/incus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

@@ -83,6 +83,8 @@ github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUqJM=
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
+github.com/imgoci/go-simplestreams v0.2.0 h1:EyoiZDfqPL+Z95ORS4syE7rD+MWgC2UyWwsJ/9gaGlc=
+github.com/imgoci/go-simplestreams v0.2.0/go.mod h1:GiFaiJ69sNBOTKa5F0hyUIv+AaARUYhFQ/ElQC3UowE=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
 github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
 github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
@@ -130,8 +132,6 @@ github.com/mdelapenya/tlscert v0.2.0 h1:7H81W6Z/4weDvZBNOfQte5GpIMo0lGYEeWbkGp5L
 github.com/mdelapenya/tlscert v0.2.0/go.mod h1:O4njj3ELLnJjGdkN7M/vIVCpZ+Cf0L6muqOG4tLSl8o=
 github.com/meigma/authkit v0.3.0 h1:oyfzV+l6B1gDHfCx4zg97L0Km92GKVQ3hwKsjLrIHZU=
 github.com/meigma/authkit v0.3.0/go.mod h1:1BYKxIGBuofA5fnjUipx4VexecXykoclytwB7ODouFY=
-github.com/meigma/go-simplestreams v0.1.0 h1:yHKFUyRK4rPWO1Z5wDMAWymeRXAFFSiWQTsVUK73j90=
-github.com/meigma/go-simplestreams v0.1.0/go.mod h1:HruoU+2tMlDEkWoOgJ7uJ/JkbjymEjlSY7f7NMBwOMw=
 github.com/mfridman/interpolate v0.0.2 h1:pnuTK7MQIxxFz1Gr+rjSIx9u7qVjf5VOoM/u6BbAxPY=
 github.com/mfridman/interpolate v0.0.2/go.mod h1:p+7uk6oE07mpE/Ik1b8EckO0O4ZXiGAfshKBWLUM9Xg=
 github.com/minio/crc64nvme v1.1.1 h1:8dwx/Pz49suywbO+auHCBpCtlW1OfpcLN7wYgVR6wAI=
