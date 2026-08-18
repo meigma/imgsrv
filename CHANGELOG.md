@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.1](https://github.com/meigma/imgsrv/compare/v0.1.0...v0.1.1) (2026-08-18)
+
+
+### Features
+
+* **catalog:** add release artifact variants ([#63](https://github.com/meigma/imgsrv/issues/63)) ([2852804](https://github.com/meigma/imgsrv/commit/285280443f6b35b46f27a221533c68f6a31e3b70))
+* **logging:** add structured server logging ([b3b519b](https://github.com/meigma/imgsrv/commit/b3b519bc3163a8371c55f1baf4a4e979456da3a8))
+* **metrics:** add service health metrics ([#62](https://github.com/meigma/imgsrv/issues/62)) ([7dea234](https://github.com/meigma/imgsrv/commit/7dea234f7769c0a432df64c2117cc896e0c12e9b))
+
 ## 0.1.0 (2026-05-13)
 
 
