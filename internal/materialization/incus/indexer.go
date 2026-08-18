@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	simplestreams "github.com/meigma/go-simplestreams"
+	simplestreams "github.com/imgoci/go-simplestreams"
 
 	"github.com/meigma/imgsrv/internal/cas"
 	"github.com/meigma/imgsrv/internal/catalog"
